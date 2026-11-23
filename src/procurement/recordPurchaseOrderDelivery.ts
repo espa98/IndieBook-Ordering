@@ -9,6 +9,7 @@ import type {
   PurchaseOrderRepository,
 } from "./createPurchaseOrder";
 import type { PoExportRepository } from "./exportPurchaseOrderCsv";
+import { invalid, isNonEmptyString, parseUtcTimestamp } from "./validation";
 
 export type RecordPurchaseOrderDeliveryDeps = {
   purchaseOrders: PurchaseOrderRepository;
@@ -39,17 +40,6 @@ const METHODS: readonly string[] = [
   "API",
 ];
 
-/** RFC3339 UTC(Z). 날짜만, 오프셋 표기, 임의 문자열은 거부한다. */
-const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?Z$/;
-
-function invalid(field: string, rule: string): never {
-  throw new AppError("VALIDATION_ERROR", `${field} ${rule}`);
-}
-
-function nonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.trim() !== "";
-}
-
 /**
  * 발주를 실제로 전달했다는 사실을 기록하고 READY → SENT로 바꾼다 (ST-P06).
  * 공급처 접수 확인(ACKNOWLEDGED)은 별도 이벤트이며 여기서 설정하지 않는다 (PO-005).
@@ -58,7 +48,7 @@ export function recordPurchaseOrderDelivery(
   deps: RecordPurchaseOrderDeliveryDeps,
   request: RecordPurchaseOrderDeliveryRequest,
 ): PurchaseOrder {
-  if (!nonEmptyString(request.purchaseOrderId)) {
+  if (!isNonEmptyString(request.purchaseOrderId)) {
     invalid("purchaseOrderId", "must be a non-empty string");
   }
   if (!Number.isInteger(request.expectedVersion) || request.expectedVersion < 1) {
@@ -68,23 +58,13 @@ export function recordPurchaseOrderDelivery(
     invalid("method", `must be one of ${METHODS.join(", ")}`);
   }
   const now = (deps.now ?? (() => new Date()))();
-  const deliveredAtValue: unknown = request.deliveredAt;
-  const deliveredAtMs =
-    typeof deliveredAtValue === "string" && UTC_TIMESTAMP.test(deliveredAtValue)
-      ? Date.parse(deliveredAtValue)
-      : Number.NaN;
-  if (Number.isNaN(deliveredAtMs)) {
-    invalid("deliveredAt", "must be an RFC3339 UTC timestamp");
-  }
-  if (deliveredAtMs > now.getTime()) {
-    invalid("deliveredAt", "must not be in the future");
-  }
-  if (!nonEmptyString(request.deliveredBy)) {
+  const deliveredAtMs = parseUtcTimestamp("deliveredAt", request.deliveredAt, now);
+  if (!isNonEmptyString(request.deliveredBy)) {
     invalid("deliveredBy", "must be a non-empty string");
   }
   if (
     request.referenceNumber !== undefined &&
-    !nonEmptyString(request.referenceNumber)
+    !isNonEmptyString(request.referenceNumber)
   ) {
     invalid("referenceNumber", "must be a non-empty string when provided");
   }

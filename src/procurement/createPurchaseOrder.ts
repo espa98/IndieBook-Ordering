@@ -46,7 +46,7 @@ export type PurchaseOrder = {
   id: string;
   tenantId: string;
   supplierCode: string;
-  status: "DRAFT" | "READY" | "SENT" | "CANCELLED";
+  status: "DRAFT" | "READY" | "SENT" | "ACKNOWLEDGED" | "CANCELLED";
   version: number;
   lines: PoLine[];
   delivery?: PoDelivery;

@@ -11,6 +11,7 @@ import type {
 } from "../../src/procurement/allocateSourcing";
 import type { PurchaseOrder } from "../../src/procurement/createPurchaseOrder";
 import type { PoExportRecord } from "../../src/procurement/exportPurchaseOrderCsv";
+import type { PoReply } from "../../src/procurement/recordSupplierReply";
 
 /** 지정한 품목을 가진 확정 주문을 만든다 (표시번호는 고정). */
 export function confirmedOrder(tenantId: string, lines: NewOrderLine[]): Order {
@@ -24,6 +25,20 @@ export function createInMemorySupplierRepository(initial: Supplier[] = []) {
   return {
     get(tenantId: string, code: string): Supplier | undefined {
       return suppliers.get(`${tenantId}:${code}`);
+    },
+  };
+}
+
+export function createInMemoryReplyRepository(initial: PoReply[] = []) {
+  const all: PoReply[] = [...initial];
+  return {
+    list(tenantId: string, purchaseOrderId: string): PoReply[] {
+      return all.filter(
+        (r) => r.tenantId === tenantId && r.purchaseOrderId === purchaseOrderId,
+      );
+    },
+    save(reply: PoReply): void {
+      all.push(reply);
     },
   };
 }
