@@ -7,6 +7,7 @@ import type { Order } from "./createDraftOrder";
 
 export type OrderRepository = {
   get(tenantId: string, orderId: string): Order | undefined;
+  list(tenantId: string): Order[];
   save(order: Order): void;
 };
 

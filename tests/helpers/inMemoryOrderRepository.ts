@@ -8,6 +8,9 @@ export function createInMemoryOrderRepository(initial: Order[] = []) {
     get(tenantId: string, orderId: string): Order | undefined {
       return orders.get(`${tenantId}:${orderId}`);
     },
+    list(tenantId: string): Order[] {
+      return [...orders.values()].filter((o) => o.tenantId === tenantId);
+    },
     save(order: Order): void {
       orders.set(`${order.tenantId}:${order.id}`, order);
     },

@@ -9,12 +9,16 @@ export type Order = {
   tenantId: string;
   status: "DRAFT" | "CONFIRMED";
   version: number;
+  createdAt: string;
   lines: OrderLine[];
   totalKrw?: string;
   displayNumber?: number;
 };
 
-export function createDraftOrder(input: { tenantId: string }): Order {
+export function createDraftOrder(input: {
+  tenantId: string;
+  now?: () => Date;
+}): Order {
   if (input.tenantId.trim() === "") {
     throw new Error("tenantId is required");
   }
@@ -23,6 +27,7 @@ export function createDraftOrder(input: { tenantId: string }): Order {
     tenantId: input.tenantId,
     status: "DRAFT",
     version: 1,
+    createdAt: (input.now ?? (() => new Date()))().toISOString(),
     lines: [],
   };
 }

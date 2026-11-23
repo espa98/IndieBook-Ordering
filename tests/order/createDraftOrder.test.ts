@@ -13,6 +13,15 @@ describe("createDraftOrder (ST-O01: 없음 → DRAFT)", () => {
     expect(order.status).toBe("DRAFT");
   });
 
+  it("생성 시각을 ISO 문자열 createdAt으로 기록한다 (now 주입 가능)", () => {
+    const order = createDraftOrder({
+      tenantId: "tenant-a",
+      now: () => new Date("2026-01-02T03:04:05.000Z"),
+    });
+
+    expect(order.createdAt).toBe("2026-01-02T03:04:05.000Z");
+  });
+
   it("tenantId가 비어 있으면 거부한다", () => {
     expect(() => createDraftOrder({ tenantId: "" })).toThrow(/tenantId/);
     expect(() => createDraftOrder({ tenantId: "   " })).toThrow(/tenantId/);
