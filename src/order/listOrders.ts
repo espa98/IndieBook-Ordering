@@ -3,6 +3,7 @@ import type { Order } from "./createDraftOrder";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
+const ORDER_STATUSES: readonly Order["status"][] = ["DRAFT", "CONFIRMED"];
 
 export type OrderSummary = Pick<
   Order,
@@ -42,15 +43,27 @@ function decodeCursor(cursor: string): SortKey {
 
 export function listOrders(
   deps: { orders: OrderRepository },
-  request: { tenantId: string; limit?: number; cursor?: string },
+  request: {
+    tenantId: string;
+    limit?: number;
+    cursor?: string;
+    status?: Order["status"];
+  },
 ): { items: OrderSummary[]; nextCursor?: string } {
   const limit = request.limit ?? DEFAULT_LIMIT;
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
     throw new Error("VALIDATION_ERROR: limit must be an integer 1..100");
   }
-  const sorted = [...deps.orders.list(request.tenantId)].sort(
-    compareNewestFirst,
-  );
+  if (
+    request.status !== undefined &&
+    !ORDER_STATUSES.includes(request.status)
+  ) {
+    throw new Error("VALIDATION_ERROR: invalid status");
+  }
+  const sorted = deps.orders
+    .list(request.tenantId)
+    .filter((o) => request.status === undefined || o.status === request.status)
+    .sort(compareNewestFirst);
   const after =
     request.cursor === undefined ? undefined : decodeCursor(request.cursor);
   const remaining = after

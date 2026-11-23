@@ -133,6 +133,58 @@ describe("listOrders", () => {
     ).toThrow(/VALIDATION_ERROR/);
   });
 
+  it("status를 지정하면 해당 상태의 주문만 반환한다 (타 테넌트 제외)", () => {
+    const orders = createInMemoryOrderRepository([
+      orderAt("id-a", "2026-01-01T00:00:00.000Z"),
+      { ...orderAt("id-b", "2026-01-02T00:00:00.000Z"), status: "CONFIRMED" },
+      orderAt("id-c", "2026-01-03T00:00:00.000Z"),
+      { ...orderAt("id-d", "2026-01-04T00:00:00.000Z"), status: "CONFIRMED" },
+      {
+        ...draftWithLine("tenant-b"),
+        id: "id-x",
+        createdAt: "2026-01-05T00:00:00.000Z",
+        status: "CONFIRMED",
+      },
+    ]);
+
+    const confirmed = listOrders(
+      { orders },
+      { tenantId: "tenant-a", status: "CONFIRMED" },
+    );
+    const drafts = listOrders(
+      { orders },
+      { tenantId: "tenant-a", status: "DRAFT" },
+    );
+
+    expect(confirmed.items.map((i) => i.id)).toEqual(["id-d", "id-b"]);
+    expect(drafts.items.map((i) => i.id)).toEqual(["id-c", "id-a"]);
+  });
+
+  it.each(["SHIPPED", "draft", "", null])(
+    "정의되지 않은 status(%j)는 VALIDATION_ERROR로 거부한다",
+    (status) => {
+      const orders = createInMemoryOrderRepository([draftWithLine("tenant-a")]);
+
+      expect(() =>
+        listOrders(
+          { orders },
+          { tenantId: "tenant-a", status: status as unknown as "DRAFT" },
+        ),
+      ).toThrow(/VALIDATION_ERROR/);
+    },
+  );
+
+  it("유효한 status(DRAFT, CONFIRMED)는 허용한다", () => {
+    const orders = createInMemoryOrderRepository([draftWithLine("tenant-a")]);
+
+    expect(() =>
+      listOrders({ orders }, { tenantId: "tenant-a", status: "DRAFT" }),
+    ).not.toThrow();
+    expect(() =>
+      listOrders({ orders }, { tenantId: "tenant-a", status: "CONFIRMED" }),
+    ).not.toThrow();
+  });
+
   it.each([0, -1, 1.5, Number.NaN, 101, 500])(
     "limit이 1 이상 100 이하의 정수가 아니면(%s) VALIDATION_ERROR로 거부한다",
     (limit) => {
