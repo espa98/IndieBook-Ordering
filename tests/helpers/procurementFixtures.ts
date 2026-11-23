@@ -9,6 +9,8 @@ import type {
   Supplier,
   SourcingAllocation,
 } from "../../src/procurement/allocateSourcing";
+import type { PurchaseOrder } from "../../src/procurement/createPurchaseOrder";
+import type { PoExportRecord } from "../../src/procurement/exportPurchaseOrderCsv";
 
 /** 지정한 품목을 가진 확정 주문을 만든다 (표시번호는 고정). */
 export function confirmedOrder(tenantId: string, lines: NewOrderLine[]): Order {
@@ -22,6 +24,38 @@ export function createInMemorySupplierRepository(initial: Supplier[] = []) {
   return {
     get(tenantId: string, code: string): Supplier | undefined {
       return suppliers.get(`${tenantId}:${code}`);
+    },
+  };
+}
+
+export function createInMemoryExportRepository(initial: PoExportRecord[] = []) {
+  const all: PoExportRecord[] = [...initial];
+  return {
+    list(tenantId: string, purchaseOrderId: string): PoExportRecord[] {
+      return all.filter(
+        (r) => r.tenantId === tenantId && r.purchaseOrderId === purchaseOrderId,
+      );
+    },
+    save(record: PoExportRecord): void {
+      all.push(record);
+    },
+  };
+}
+
+export function createInMemoryPurchaseOrderRepository(
+  initial: PurchaseOrder[] = [],
+) {
+  const all = new Map<string, PurchaseOrder>();
+  for (const p of initial) all.set(`${p.tenantId}:${p.id}`, p);
+  return {
+    get(tenantId: string, id: string): PurchaseOrder | undefined {
+      return all.get(`${tenantId}:${id}`);
+    },
+    list(tenantId: string): PurchaseOrder[] {
+      return [...all.values()].filter((p) => p.tenantId === tenantId);
+    },
+    save(order: PurchaseOrder): void {
+      all.set(`${order.tenantId}:${order.id}`, order);
     },
   };
 }
