@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createDraftOrder } from "../../src/order/createDraftOrder";
+import { AppError } from "../../src/errors/AppError";
+import { thrown } from "../helpers/thrown";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -20,6 +22,15 @@ describe("createDraftOrder (ST-O01: 없음 → DRAFT)", () => {
     });
 
     expect(order.createdAt).toBe("2026-01-02T03:04:05.000Z");
+  });
+
+  it("빈 tenantId는 AppError(VALIDATION_ERROR, HTTP 400)이고 메시지에 tenantId가 드러난다", () => {
+    const error = thrown(() => createDraftOrder({ tenantId: "" }));
+
+    expect(error).toBeInstanceOf(AppError);
+    expect((error as AppError).code).toBe("VALIDATION_ERROR");
+    expect((error as AppError).httpStatus).toBe(400);
+    expect((error as AppError).message).toMatch(/^VALIDATION_ERROR: .*tenantId/);
   });
 
   it("tenantId가 비어 있으면 거부한다", () => {

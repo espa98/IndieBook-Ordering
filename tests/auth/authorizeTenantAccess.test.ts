@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { authorizeTenantAccess } from "../../src/auth/authorizeTenantAccess";
 import { createInMemoryMembershipRepository } from "../helpers/inMemoryMembershipRepository";
+import { thrown } from "../helpers/thrown";
+import { AppError } from "../../src/errors/AppError";
 
 describe("authorizeTenantAccess", () => {
   it("활성 Owner와 활성 Staff는 자기 테넌트에 접근할 수 있고 역할이 반환된다", () => {
@@ -69,6 +71,27 @@ describe("authorizeTenantAccess", () => {
       authorizeTenantAccess({ memberships: repo("ACTIVE") }, request),
     ).toEqual({ role: "STAFF" });
   });
+
+  it.each([
+    ["인증 없음(빈 userId)", "", "tenant-a", "UNAUTHENTICATED", 401],
+    ["비멤버", "stranger", "tenant-a", "FORBIDDEN", 403],
+    ["비활성 멤버", "ex-staff", "tenant-a", "FORBIDDEN", 403],
+  ] as const)(
+    "%s는 올바른 code·HTTP 상태의 AppError로 던진다",
+    (_name, userId, tenantId, code, status) => {
+      const memberships = createInMemoryMembershipRepository([
+        { userId: "ex-staff", tenantId: "tenant-a", role: "STAFF", status: "INACTIVE" },
+      ]);
+
+      const error = thrown(() =>
+        authorizeTenantAccess({ memberships }, { userId, tenantId }),
+      );
+
+      expect(error).toBeInstanceOf(AppError);
+      expect((error as AppError).code).toBe(code);
+      expect((error as AppError).httpStatus).toBe(status);
+    },
+  );
 
   it.each(["", "   ", null, undefined])(
     "userId가 비어 있거나 없으면(%j) UNAUTHENTICATED이고 membership을 조회하지 않는다",

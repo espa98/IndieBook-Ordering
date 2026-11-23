@@ -4,6 +4,8 @@ import { addOrderLine } from "../../src/order/addOrderLine";
 import { confirmOrderService } from "../../src/order/confirmOrderService";
 import { createIdempotencyStore } from "../../src/idempotency/executeIdempotent";
 import { createInMemoryOrderRepository } from "../helpers/inMemoryOrderRepository";
+import { thrown } from "../helpers/thrown";
+import { AppError } from "../../src/errors/AppError";
 
 function draftWithLine(tenantId = "tenant-a") {
   return addOrderLine(createDraftOrder({ tenantId }), {
@@ -84,6 +86,28 @@ describe("confirmOrderService", () => {
     ).toThrow(/IDEMPOTENCY_CONFLICT/);
     expect(orders.get("tenant-a", draft.id)).toEqual(first);
     expect(issueDisplayNumber).toHaveBeenCalledTimes(1);
+  });
+
+  it("NOT_FOUND는 AppError(HTTP 404)이다", () => {
+    const error = thrown(() =>
+      confirmOrderService(
+        {
+          orders: createInMemoryOrderRepository(),
+          idempotency: createIdempotencyStore(),
+          issueDisplayNumber: () => 1,
+        },
+        {
+          tenantId: "tenant-a",
+          orderId: "missing",
+          expectedVersion: 1,
+          idempotencyKey: "key-1",
+        },
+      ),
+    );
+
+    expect(error).toBeInstanceOf(AppError);
+    expect((error as AppError).code).toBe("NOT_FOUND");
+    expect((error as AppError).httpStatus).toBe(404);
   });
 
   it("없는 주문이거나 다른 테넌트의 주문이면 NOT_FOUND이고 번호를 발급하지 않는다", () => {

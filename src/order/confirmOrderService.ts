@@ -1,3 +1,4 @@
+import { AppError } from "../errors/AppError";
 import {
   executeIdempotent,
   type IdempotencyStore,
@@ -42,7 +43,7 @@ export function confirmOrderService(
     () => {
       const order = deps.orders.get(request.tenantId, request.orderId);
       if (!order) {
-        throw new Error("NOT_FOUND");
+        throw new AppError("NOT_FOUND");
       }
       const confirmed = confirmOrder(order, {
         expectedVersion: request.expectedVersion,

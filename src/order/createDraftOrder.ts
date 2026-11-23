@@ -1,3 +1,5 @@
+import { AppError } from "../errors/AppError";
+
 export type OrderLine = {
   bookId: string;
   quantity: number;
@@ -20,7 +22,7 @@ export function createDraftOrder(input: {
   now?: () => Date;
 }): Order {
   if (input.tenantId.trim() === "") {
-    throw new Error("tenantId is required");
+    throw new AppError("VALIDATION_ERROR", "tenantId is required");
   }
   return {
     id: crypto.randomUUID(),

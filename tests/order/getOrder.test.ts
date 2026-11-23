@@ -3,6 +3,8 @@ import { createDraftOrder } from "../../src/order/createDraftOrder";
 import { addOrderLine } from "../../src/order/addOrderLine";
 import { getOrder } from "../../src/order/getOrder";
 import { createInMemoryOrderRepository } from "../helpers/inMemoryOrderRepository";
+import { thrown } from "../helpers/thrown";
+import { AppError } from "../../src/errors/AppError";
 
 describe("getOrder", () => {
   it("테넌트에 속한 주문의 상세(품목 포함)를 반환한다", () => {
@@ -31,6 +33,18 @@ describe("getOrder", () => {
       totalKrw: undefined,
       lines: [{ bookId: "book-1", quantity: 2, unitPriceKrw: "15000" }],
     });
+  });
+
+  it("NOT_FOUND는 AppError(HTTP 404)이다", () => {
+    const orders = createInMemoryOrderRepository();
+
+    const error = thrown(() =>
+      getOrder({ orders }, { tenantId: "tenant-a", orderId: "missing" }),
+    );
+
+    expect(error).toBeInstanceOf(AppError);
+    expect((error as AppError).code).toBe("NOT_FOUND");
+    expect((error as AppError).httpStatus).toBe(404);
   });
 
   it("없는 주문이거나 다른 테넌트의 주문이면 같은 NOT_FOUND로 거부한다", () => {

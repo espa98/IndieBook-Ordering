@@ -1,3 +1,4 @@
+import { AppError } from "../errors/AppError";
 import type { OrderRepository } from "./confirmOrderService";
 import type { Order } from "./createDraftOrder";
 
@@ -28,7 +29,7 @@ function decodeCursor(cursor: string): SortKey {
   try {
     parsed = JSON.parse(atob(cursor));
   } catch {
-    throw new Error("VALIDATION_ERROR: invalid cursor");
+    throw new AppError("VALIDATION_ERROR", "invalid cursor");
   }
   if (
     !Array.isArray(parsed) ||
@@ -36,7 +37,7 @@ function decodeCursor(cursor: string): SortKey {
     typeof parsed[0] !== "string" ||
     typeof parsed[1] !== "string"
   ) {
-    throw new Error("VALIDATION_ERROR: invalid cursor");
+    throw new AppError("VALIDATION_ERROR", "invalid cursor");
   }
   return { createdAt: parsed[0], id: parsed[1] };
 }
@@ -52,13 +53,13 @@ export function listOrders(
 ): { items: OrderSummary[]; nextCursor?: string } {
   const limit = request.limit ?? DEFAULT_LIMIT;
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
-    throw new Error("VALIDATION_ERROR: limit must be an integer 1..100");
+    throw new AppError("VALIDATION_ERROR", "limit must be an integer 1..100");
   }
   if (
     request.status !== undefined &&
     !ORDER_STATUSES.includes(request.status)
   ) {
-    throw new Error("VALIDATION_ERROR: invalid status");
+    throw new AppError("VALIDATION_ERROR", "invalid status");
   }
   const sorted = deps.orders
     .list(request.tenantId)

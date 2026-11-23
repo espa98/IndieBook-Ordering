@@ -3,6 +3,8 @@ import { createDraftOrder } from "../../src/order/createDraftOrder";
 import { addOrderLine } from "../../src/order/addOrderLine";
 import { listOrders } from "../../src/order/listOrders";
 import { createInMemoryOrderRepository } from "../helpers/inMemoryOrderRepository";
+import { thrown } from "../helpers/thrown";
+import { AppError } from "../../src/errors/AppError";
 
 function draftWithLine(tenantId: string) {
   return addOrderLine(createDraftOrder({ tenantId }), {
@@ -193,6 +195,28 @@ describe("listOrders", () => {
       expect(() =>
         listOrders({ orders }, { tenantId: "tenant-a", limit }),
       ).toThrow(/VALIDATION_ERROR/);
+    },
+  );
+
+  it.each([
+    ["limit", { limit: 0 }],
+    ["cursor", { cursor: "%%%not-base64%%%" }],
+    ["status", { status: "SHIPPED" as unknown as "DRAFT" }],
+  ] as const)(
+    "잘못된 %s는 AppError(VALIDATION_ERROR, HTTP 400)이고 메시지에 해당 입력이 드러난다",
+    (field, bad) => {
+      const orders = createInMemoryOrderRepository([draftWithLine("tenant-a")]);
+
+      const error = thrown(() =>
+        listOrders({ orders }, { tenantId: "tenant-a", ...bad }),
+      );
+
+      expect(error).toBeInstanceOf(AppError);
+      expect((error as AppError).code).toBe("VALIDATION_ERROR");
+      expect((error as AppError).httpStatus).toBe(400);
+      expect((error as AppError).message).toMatch(
+        new RegExp(`^VALIDATION_ERROR: .*${field}`),
+      );
     },
   );
 

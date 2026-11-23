@@ -1,3 +1,5 @@
+import { AppError } from "../errors/AppError";
+
 export type IdempotencyRequest = {
   tenantId: string;
   operation: string;
@@ -41,7 +43,7 @@ export function executeIdempotent<T>(
   const existing = store.get(storeKey);
   if (existing) {
     if (existing.payloadHash !== payloadHash) {
-      throw new Error("IDEMPOTENCY_CONFLICT");
+      throw new AppError("IDEMPOTENCY_CONFLICT");
     }
     return existing.result as T;
   }

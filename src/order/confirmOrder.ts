@@ -1,3 +1,4 @@
+import { AppError } from "../errors/AppError";
 import type { Order, OrderLine } from "./createDraftOrder";
 
 function sumLineTotals(lines: OrderLine[]): string {
@@ -17,19 +18,25 @@ export function confirmOrder(
   },
 ): Order {
   if (options?.expectedVersion === undefined) {
-    throw new Error("expectedVersion is required");
+    throw new AppError("VALIDATION_ERROR", "expectedVersion is required");
   }
   if (typeof options.issueDisplayNumber !== "function") {
     throw new Error("issueDisplayNumber is required");
   }
   if (order.status !== "DRAFT") {
-    throw new Error("only a DRAFT order can be confirmed");
+    throw new AppError(
+      "BUSINESS_INVARIANT",
+      "only a DRAFT order can be confirmed",
+    );
   }
   if (order.lines.length === 0) {
-    throw new Error("order must have at least one line to confirm");
+    throw new AppError(
+      "BUSINESS_INVARIANT",
+      "order must have at least one line to confirm",
+    );
   }
   if (options.expectedVersion !== order.version) {
-    throw new Error("VERSION_CONFLICT");
+    throw new AppError("VERSION_CONFLICT");
   }
   return {
     ...order,

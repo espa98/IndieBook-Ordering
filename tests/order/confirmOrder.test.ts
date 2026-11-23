@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import { createDraftOrder } from "../../src/order/createDraftOrder";
 import { addOrderLine } from "../../src/order/addOrderLine";
 import { confirmOrder } from "../../src/order/confirmOrder";
+import { AppError } from "../../src/errors/AppError";
+import { thrown } from "../helpers/thrown";
 
 describe("confirmOrder (ST-O03: DRAFT → CONFIRMED)", () => {
   it("품목이 없는 초안은 확정할 수 없다", () => {
@@ -108,6 +110,78 @@ describe("confirmOrder (ST-O03: DRAFT → CONFIRMED)", () => {
       }),
     ).toThrow(/DRAFT/);
     expect(issueDisplayNumber).not.toHaveBeenCalled();
+  });
+
+  describe("오류는 올바른 code·HTTP 상태의 AppError이다", () => {
+    const line = { bookId: "book-1", quantity: 1, unitPriceKrw: "15000" };
+    const issue = { issueDisplayNumber: () => 1 };
+    const cases: Array<[string, () => unknown, string, number]> = [
+      [
+        "expectedVersion 누락",
+        () =>
+          (confirmOrder as (o: unknown, opts: unknown) => unknown)(
+            addOrderLine(createDraftOrder({ tenantId: "t" }), line),
+            issue,
+          ),
+        "VALIDATION_ERROR",
+        400,
+      ],
+      [
+        "버전 불일치",
+        () =>
+          confirmOrder(addOrderLine(createDraftOrder({ tenantId: "t" }), line), {
+            expectedVersion: 99,
+            ...issue,
+          }),
+        "VERSION_CONFLICT",
+        409,
+      ],
+      [
+        "이미 확정된 주문(DRAFT 아님)",
+        () => {
+          const confirmed = confirmOrder(
+            addOrderLine(createDraftOrder({ tenantId: "t" }), line),
+            { expectedVersion: 1, ...issue },
+          );
+          return confirmOrder(confirmed, {
+            expectedVersion: confirmed.version,
+            ...issue,
+          });
+        },
+        "BUSINESS_INVARIANT",
+        422,
+      ],
+      [
+        "품목 없음",
+        () =>
+          confirmOrder(createDraftOrder({ tenantId: "t" }), {
+            expectedVersion: 1,
+            ...issue,
+          }),
+        "BUSINESS_INVARIANT",
+        422,
+      ],
+    ];
+
+    it.each(cases)("%s", (_name, run, code, status) => {
+      const error = thrown(run);
+
+      expect(error).toBeInstanceOf(AppError);
+      expect((error as AppError).code).toBe(code);
+      expect((error as AppError).httpStatus).toBe(status);
+    });
+
+    it("issueDisplayNumber 누락은 서버 설정 오류라 AppError가 아니다 (400으로 오해되지 않게)", () => {
+      const error = thrown(() =>
+        (confirmOrder as (o: unknown, opts: unknown) => unknown)(
+          addOrderLine(createDraftOrder({ tenantId: "t" }), line),
+          { expectedVersion: 1 },
+        ),
+      );
+
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(AppError);
+    });
   });
 
   it("issueDisplayNumber를 생략하면 거부한다 (표시번호 없이 확정 불가)", () => {

@@ -1,3 +1,4 @@
+import { AppError } from "../errors/AppError";
 import type { OrderRepository } from "./confirmOrderService";
 import type { Order } from "./createDraftOrder";
 
@@ -18,7 +19,7 @@ export function getOrder(
 ): OrderDetail {
   const order = deps.orders.get(request.tenantId, request.orderId);
   if (!order) {
-    throw new Error("NOT_FOUND");
+    throw new AppError("NOT_FOUND");
   }
   return {
     id: order.id,

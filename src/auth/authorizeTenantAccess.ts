@@ -1,3 +1,5 @@
+import { AppError } from "../errors/AppError";
+
 export type Role = "OWNER" | "STAFF";
 
 export type Membership = {
@@ -19,11 +21,11 @@ export function authorizeTenantAccess(
     typeof request.userId !== "string" ||
     request.userId.trim() === ""
   ) {
-    throw new Error("UNAUTHENTICATED");
+    throw new AppError("UNAUTHENTICATED");
   }
   const membership = deps.memberships.find(request.userId, request.tenantId);
   if (!membership || membership.status !== "ACTIVE") {
-    throw new Error("FORBIDDEN");
+    throw new AppError("FORBIDDEN");
   }
   return { role: membership.role };
 }

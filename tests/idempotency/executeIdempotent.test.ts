@@ -3,6 +3,8 @@ import {
   createIdempotencyStore,
   executeIdempotent,
 } from "../../src/idempotency/executeIdempotent";
+import { AppError } from "../../src/errors/AppError";
+import { thrown } from "../helpers/thrown";
 
 describe("executeIdempotent", () => {
   it("같은 키·같은 본문으로 재시도하면 실행은 한 번만 하고 저장된 결과를 반환한다", () => {
@@ -47,6 +49,20 @@ describe("executeIdempotent", () => {
 
     expect(second).toEqual(first);
     expect(action).toHaveBeenCalledTimes(1);
+  });
+
+  it("같은 키·다른 본문의 충돌은 AppError(IDEMPOTENCY_CONFLICT, HTTP 409)이다", () => {
+    const store = createIdempotencyStore();
+    const base = { tenantId: "tenant-a", operation: "orders.confirm", key: "key-1" };
+    executeIdempotent(store, { ...base, payload: { n: 1 } }, () => "first");
+
+    const error = thrown(() =>
+      executeIdempotent(store, { ...base, payload: { n: 2 } }, () => "second"),
+    );
+
+    expect(error).toBeInstanceOf(AppError);
+    expect((error as AppError).code).toBe("IDEMPOTENCY_CONFLICT");
+    expect((error as AppError).httpStatus).toBe(409);
   });
 
   it("같은 키에 다른 본문이면 IDEMPOTENCY_CONFLICT로 거부하고 실행하지 않는다", () => {
