@@ -25,13 +25,31 @@ export type PoLine = {
   links: PoLink[];
 };
 
+/** 실제 전달 사실. 공급처 접수 확인(ACKNOWLEDGED)과 구분한다 (PO-005). */
+export type PoDelivery = {
+  method: "WEB" | "EMAIL" | "PHONE" | "MESSENGER" | "FILE" | "API";
+  /** 업무 발생 시각: 실제로 전달한 시각(사용자 입력) */
+  deliveredAt: string;
+  /** 서버 기록 시각 */
+  recordedAt: string;
+  /** 전달 담당자 */
+  deliveredBy: string;
+  /** 확인번호·참조번호(선택) */
+  referenceNumber?: string;
+  /** 전달한 발주 버전 */
+  poVersion: number;
+  /** 전달한 파일의 출력 버전(선택) */
+  fileVersion?: number;
+};
+
 export type PurchaseOrder = {
   id: string;
   tenantId: string;
   supplierCode: string;
-  status: "DRAFT" | "READY" | "CANCELLED";
+  status: "DRAFT" | "READY" | "SENT" | "CANCELLED";
   version: number;
   lines: PoLine[];
+  delivery?: PoDelivery;
 };
 
 export type PurchaseOrderRepository = {
