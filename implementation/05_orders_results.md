@@ -1,20 +1,21 @@
 # 05단계 결과 보고 — 주문 등록·목록·상세·확정
 
-작성 기준 커밋: `b99c713` (main). 이 문서는 실제로 실행해 확인한 것과 그렇지 않은 것을 구분해 기록한다.
-(이전 버전은 `64e407c` 기준이었고, 오류 코드 구조화 이후 이 버전으로 갱신했다.)
+작성 기준: 커밋 `f29e09f` 위에 `http/handle.ts` 어댑터를 추가한 상태(이 보고서와 같은 커밋에 포함). 이 문서는 실제로 실행해 확인한 것과 그렇지 않은 것을 구분해 기록한다.
+(이전 버전: `64e407c` 기준 → `b99c713` 기준. 오류 코드 구조화와 HTTP 변환 계층 구현 이후 이 버전으로 갱신했다.)
 
 ## 0. 한 줄 요약
 
-주문 생성·확정·목록·상세의 **도메인 로직, 권한 적용 진입점, 구조화된 오류(`AppError`)**를 메모리 저장소 기준으로 TDD 구현했고 테스트 108개가 통과한다. **DB(RPC·RLS)·HTTP 라우터·`AppError`의 HTTP 응답 변환·OpenAPI·JWT 검증·동시성은 구현·검증하지 않았다.** 격리 테스트 DB가 없어 DB 계층 항목은 BLOCKED다.
+주문 생성·확정·목록·상세의 **도메인 로직, 권한 적용 진입점, 구조화된 오류(`AppError`), HTTP 응답 변환(`toErrorResponse`)과 성공·오류 어댑터(`handle`)**를 메모리 저장소 기준으로 TDD 구현했고 테스트 136개가 통과한다. **실제 HTTP 서버·라우터, DB(RPC·RLS), OpenAPI, JWT 검증, 동시성은 구현·검증하지 않았다.** 격리 테스트 DB가 없어 DB 계층 항목은 BLOCKED다.
 
 ## 1. 읽은 문서와 충돌·미결정 목록
 
 ### 1.1 실제로 읽은 문서
 - `Docs/README.md`, `Docs/Claude Code 개발지침.md`
 - `BookFlow_Ordering_ClaudeCode_단계별프롬프트_V1.0/00, 01, 02, 05`, `README.md`, 루트 `01_프로젝트_진단_및_요구사항_기준선.md`
-- `Docs/05_API_Security/API_명세서_V2.2.md` (주문 관련 행, 오류 코드, 멱등·인증 규칙)
+- `Docs/05_API_Security/API_명세서_V2.2.md` (주문 관련 행, 오류 코드, 멱등·인증 규칙, 공통 계약)
 - `Docs/02_Policies`의 OPDS(DEC-13 등)·STBR(ST-O01~03, BR-T06, 오류 코드 제안) 중 주문·권한 관련 항목만 검색해 확인
 - `Docs/05_API_Security/RLS_정책설계_V2.2.md` 중 membership·JWT 관련 항목
+- 오류 응답 본문 형식을 `Docs` 전체에서 검색했으나 **정의가 없음**(상태·코드 매핑만 있음)을 확인
 
 **읽지 않은 문서 (한계):** FRD ORD 절 전체, Use Case 주문 절 전체, ERD, 구현현황표 본문, SFS는 검색 일치 부분만 보았다. 따라서 아래 "문서 근거"는 읽은 범위 안에서만 유효하다. `Docs/README.md`가 요구한 "기준 문서 간 불일치 분석"은 전체를 수행하지 않았다.
 
@@ -31,6 +32,8 @@
 - 목록 기본 `limit` = 20
 - `limit` > 100은 잘라서 반환하지 않고 `VALIDATION_ERROR`로 거부
 - 품목 0개 빈 초안 생성 허용
+- 오류 응답 본문 형식 = `{ error: { code, message } }`
+- 오류의 `detail`은 **400 `VALIDATION_ERROR`에만** 응답에 노출, 나머지 코드는 코드별 고정 문구
 
 **제가 가정 (사용자 확정 안 받음)**
 - 표시번호 형식 = 단순 정수. "단순 정수로 시작해도 될까요?"라고 물었으나 명시적 답 없이 "계속 진행"으로 넘어갔으므로 확정이 아니다
@@ -39,8 +42,13 @@
 - 목록 정렬 방향 = 최신순(`(createdAt, id)` 내림차순). 문서는 정렬 키만 명시
 - `status` 필터의 `null`은 "필터 없음"이 아니라 잘못된 값
 - 이미 확정된 주문을 **다른 멱등키**로 재확정하면 `BUSINESS_INVARIANT`(422). 어떤 위반이 이 코드인지는 문서에 명시가 없어 제가 매핑
-- `issueDisplayNumber` 누락은 서버 설정 오류라 `AppError`가 아닌 일반 `Error`로 둠(400으로 오해되지 않게). HTTP 계층에서 `AppError`가 아닌 오류를 500으로 처리한다는 전제이며 이 규칙은 아직 구현·확정되지 않음
-- `AppError`의 `detail` 문자열(입력 이름·규칙 설명)을 HTTP 응답에 그대로 노출할지는 미정. 현재는 사용자 데이터를 담지 않음
+- `issueDisplayNumber` 누락은 서버 설정 오류라 `AppError`가 아닌 일반 `Error`로 둠(클라이언트 잘못 400으로 오해되지 않게). `toErrorResponse`가 이를 500으로 처리한다
+- **500 `INTERNAL_ERROR`와 7개 코드의 고정 문구(영어)**: API V2.2의 오류 목록에 없고 클라이언트에 보이는 문구다. 표현·언어는 사용자 확인 필요
+  `Invalid request` · `Authentication required` · `Access denied` · `Resource not found` · `Idempotency key was already used with a different request` · `The resource was modified; reload and retry` · `The request violates a business rule` · `Internal server error`
+- **성공 응답 본문 = `{ data: ... }`**: 문서에 없고 오류 본문(`{ error }`)과 짝을 맞춰 제가 정했다
+- 성공 상태 기본 200, 생성은 201. 201은 API V2.2("201 DRAFT, orderId")에 근거, 200은 가정
+- `onUnexpectedError` 훅이 던진 예외는 삼키고 응답은 그대로 500 (로깅 실패가 응답을 깨지 않게)
+- `handle`은 동기 함수. 현재 도메인이 모두 동기라서이며, 실제 DB 저장소를 붙이면 비동기로 바꿔야 한다
 - `confirmOrder` 내부 검증 순서: `expectedVersion` 필수 → `issueDisplayNumber` 필수 → DRAFT 여부 → 품목 1개 이상 → 버전 일치
 - 예외가 난 요청의 멱등 결과는 저장하지 않음(재시도 허용). 문서는 "실패 결과 보존 정책은 별도 운영 결정"으로 남김
 - 허용 `status`는 현재 구현된 `DRAFT`, `CONFIRMED`뿐. STBR의 `HELD` 등은 미구현
@@ -50,12 +58,14 @@ DEC-08/15/16, D22/29, DEC-12(개인정보 보존·삭제)는 건드리지 않았
 
 ## 2. 변경 파일
 
-커밋 12개. 초기 문서 `ad5d008` 이후 11개: 코드 9개, 문서 1개(이 보고서의 이전 버전), 설정 1개(`.gitignore`에 `.vitest/` 추가).
+커밋 이력은 `git log` 참조(초기 문서 `ad5d008` 이후 코드·문서·설정 커밋). 이 보고서와 같은 커밋에 `http/handle.ts`와 그 테스트가 포함된다.
 
 **프로덕션 (`src/`)**
 | 파일 | 역할 |
 |---|---|
-| `errors/AppError.ts` | `AppError(code, detail?)`: 코드에서 HTTP 상태 결정(400/401/403/404/409/422), `message`는 `"CODE"` 또는 `"CODE: detail"` |
+| `http/handle.ts` | `handle(fn, { successStatus?, onUnexpectedError? })`: 성공이면 `{ status, body: { data } }`, 실패면 `toErrorResponse` 결과. 예외를 던지지 않음. `AppError`가 아닌 오류만 원본을 훅에 전달 |
+| `http/toErrorResponse.ts` | `unknown` 오류 → `{ status, body: { error: { code, message } } }`. `instanceof AppError`로 판별, `detail`은 400 `VALIDATION_ERROR`에만 노출, 그 외 `AppError`는 고정 문구, `AppError`가 아니면 500 |
+| `errors/AppError.ts` | `AppError(code, detail?)`: 코드에서 HTTP 상태 결정(400/401/403/404/409/422), `detail` 별도 속성, `message`는 `"CODE"` 또는 `"CODE: detail"` |
 | `order/createDraftOrder.ts` | DRAFT 주문 생성(UUID, tenantId, version 1, createdAt, `now` 주입) |
 | `order/addOrderLine.ts` | 품목 추가(수량 정수 ≥ 1, 단가 10진 정수 문자열, DRAFT에서만) |
 | `order/confirmOrder.ts` | 확정(expectedVersion 필수, BigInt 합계, 표시번호 주입, 재확정 거부) |
@@ -67,31 +77,35 @@ DEC-08/15/16, D22/29, DEC-12(개인정보 보존·삭제)는 건드리지 않았
 | `auth/authorizeTenantAccess.ts` | 인증·활성 membership 검사 |
 | `idempotency/executeIdempotent.ts` | `tenant+operation+key` 스코프 멱등 실행 |
 
-**테스트 (`tests/`)** 11개 파일 + 헬퍼 3개(`inMemoryOrderRepository`, `inMemoryMembershipRepository`, `thrown`).
+**테스트 (`tests/`)** 14개 파일 + 헬퍼 3개(`inMemoryOrderRepository`, `inMemoryMembershipRepository`, `thrown`).
 **설정** `package.json`, `package-lock.json`, `tsconfig.json`, `.gitignore`.
 
 ## 3. 실행한 명령과 실제 결과
 
 | 명령 | 결과 |
 |---|---|
-| `npx vitest run` | Test Files 11 passed, Tests **108 passed** |
+| `npx vitest run` | Test Files 14 passed, Tests **136 passed** |
 | `npx tsc --noEmit` | 오류 없음 |
 
-파일별 테스트 수: authorizeTenantAccess 15 · AppError 7 · executeIdempotent 4 · addOrderLine 16 · confirmOrder 14 · confirmOrderService 5 · createDraftOrder 4 · createOrderService 6 · getOrder 3 · listOrders 29 · orderApi 5 (합계 108).
+파일별 테스트 수: authorizeTenantAccess 15 · AppError 8 · handle 6 · orderHttp(통합) 7 · toErrorResponse 14 · executeIdempotent 4 · addOrderLine 16 · confirmOrder 14 · confirmOrderService 5 · createDraftOrder 4 · createOrderService 6 · getOrder 3 · listOrders 29 · orderApi 5 (합계 136).
 
-**실행하지 않은 것:** lint(설정 없음), 빌드, CI(없음), 커버리지 측정.
+**실행하지 않은 것:** lint(설정 없음), 빌드, CI(없음), 커버리지 측정, 실제 HTTP 서버를 통한 요청(서버 없음).
 
 ### 3.1 TDD 준수에 대한 정직한 기록
 - 모든 기능은 실패하는 테스트(RED)를 먼저 확인한 뒤 구현했다.
-- **RED 없이 통과한 "특성화(회귀 보호) 테스트"**가 있다. 새 동작을 이끈 것이 아니라 이미 구현된 동작을 고정한다.
+- **RED 없이 통과한 "특성화(회귀 보호)·통합 테스트"**가 있다. 새 동작을 이끈 것이 아니라 이미 구현된 동작을 고정한다.
   - `listOrders`: `limit` 경계값 1·100 허용, 유효한 `status` 허용, 같은 시각 항목이 페이지 경계에 걸린 순회
   - `confirmOrderService`: 같은 키·다른 본문 `IDEMPOTENCY_CONFLICT`
   - `createOrderService`: 같은 키·다른 품목 충돌, 잘못된 품목 전체 거부, 빈 초안 허용
   - `orderApi`: 비활성화된 직원의 같은 키 재시도 차단
   - `confirmOrder`: `issueDisplayNumber` 누락이 `AppError`가 아님을 고정
+  - `handle`: 성공·`AppError`에서 훅 미호출, 훅이 예외를 던져도 500 유지
+  - `orderHttp`(통합 7건): 진입점 + `handle`을 처음부터 끝까지 연결해 확인. 새 프로덕션 코드 없이 통과했고, 계층 사이 연결 오류가 없음을 보여 준다
 - 호출 계약이 바뀔 때(`expectedVersion`·`issueDisplayNumber`를 필수로 변경) 기존 테스트의 **호출부만** 수정했고 검증 내용·기대값은 바꾸지 않았다.
-- 오류 코드 구조화 단계에서는 `message` 형식을 유지해, 그 이전에 있던 83개 테스트의 **검증 내용은 수정하지 않고** 새 테스트(25개)만 추가했다. 기존 테스트 파일에는 import와 새 테스트만 더했다.
-- 변이 실험: `createOrder`에서 권한 검사를 서비스 뒤로 옮기자 "저장되지 않는다" 테스트가 실패했다(순서 보호 확인). 같은 변이에서 재시도 테스트는 통과했는데, 그 테스트는 순서가 아니라 "이전 결과를 받아가지 못함"이라는 외부 결과를 보호하기 때문이다. 변이는 되돌렸다.
+- 오류 코드 구조화와 HTTP 변환 계층 단계에서는 기존 테스트를 **수정하지 않고** 새 테스트만 추가했다. `git diff`로 확인: `64e407c..b99c713`, `b99c713..f29e09f`, `f29e09f..작업 트리` 세 구간 모두 테스트 파일의 삭제된 줄이 0개.
+- 변이 실험 두 건(모두 되돌림):
+  1. `createOrder`에서 권한 검사를 서비스 뒤로 옮기자 "저장되지 않는다" 테스트가 실패했다(순서 보호 확인). 같은 변이에서 재시도 테스트는 통과했는데, 그 테스트는 순서가 아니라 "이전 결과를 받아가지 못함"이라는 외부 결과를 보호하기 때문이다.
+  2. `handle`에서 훅 호출을 `try/catch` 밖으로 꺼내자 "훅이 던져도 500 유지" 테스트 1건만 정확히 실패했다(보호용 테스트가 의미 있음을 확인).
 - 작업 중 제 실수 세 건을 바로잡았다: (1) 기존 `.gitignore`를 덮어썼다가 커밋 전에 복원, (2) 테스트 없이 넣은 `NOT_FOUND`·품목 복사 분기를 제거하고 테스트 후 다시 구현, (3) 오류 테스트의 `it.each` 제목 형식 오타(`%s %i`가 엉뚱한 인자에 대응)를 구현 전에 수정.
 
 ## 4. 구현 현황 (설계·구현·테스트 구분)
@@ -104,19 +118,21 @@ DEC-08/15/16, D22/29, DEC-12(개인정보 보존·삭제)는 건드리지 않았
 | 상세(타 테넌트 비노출) | 구현, 메모리 테스트 통과 |
 | 인증·활성 membership·Owner/Staff 허용 | 구현, 메모리 테스트 통과 |
 | 비활성 직원 새 요청·재시도 차단(BR-T06) | 구현, 메모리 테스트 통과 |
-| 구조화된 오류(`AppError`, API V2.2 코드·HTTP 상태 매핑) | 구현, 단위 테스트 통과. **응답으로 변환하는 계층은 없음** |
+| 구조화된 오류(`AppError`) | 구현, 단위 테스트 통과 |
+| 오류 → HTTP 응답 변환(`toErrorResponse`) | 구현, 단위 테스트 통과 |
+| 성공·오류 어댑터(`handle`)와 진입점 통합 | 구현, 통합 테스트 통과. **실제 HTTP 서버에는 연결되지 않음** |
 
-**오류 매핑 (API V2.2 기준)**
-| HTTP | 코드 | 발생 위치 |
-|---|---|---|
-| 400 | `VALIDATION_ERROR` | `quantity`·`unitPriceKrw`·`tenantId`·`expectedVersion`·`limit`·`cursor`·`status` |
-| 401 | `UNAUTHENTICATED` | 인증 없음 |
-| 403 | `FORBIDDEN` | 비멤버·타 테넌트·없는 테넌트·비활성 멤버(구별 불가) |
-| 404 | `NOT_FOUND` | 없는 주문, 타 테넌트 주문(구별 불가) |
-| 409 | `IDEMPOTENCY_CONFLICT` | 같은 키·다른 본문 |
-| 409 | `VERSION_CONFLICT` | `expectedVersion` 불일치 |
-| 422 | `BUSINESS_INVARIANT` | 재확정, 품목 없는 확정, 확정된 주문에 품목 추가 |
-| (500 전제) | 일반 `Error` | `issueDisplayNumber` 누락(서버 설정 오류) |
+**오류 응답 (API V2.2 코드·상태 기준, 본문은 `{ error: { code, message } }`)**
+| HTTP | 코드 | 발생 위치 | message |
+|---|---|---|---|
+| 400 | `VALIDATION_ERROR` | `quantity`·`unitPriceKrw`·`tenantId`·`expectedVersion`·`limit`·`cursor`·`status` | `detail` 그대로(없으면 `Invalid request`) |
+| 401 | `UNAUTHENTICATED` | 인증 없음 | 고정 문구 |
+| 403 | `FORBIDDEN` | 비멤버·타 테넌트·없는 테넌트·비활성 멤버(구별 불가) | 고정 문구 |
+| 404 | `NOT_FOUND` | 없는 주문, 타 테넌트 주문(응답 전체가 동일, 통합 테스트로 확인) | 고정 문구 |
+| 409 | `IDEMPOTENCY_CONFLICT` | 같은 키·다른 본문 | 고정 문구 |
+| 409 | `VERSION_CONFLICT` | `expectedVersion` 불일치 | 고정 문구 |
+| 422 | `BUSINESS_INVARIANT` | 재확정, 품목 없는 확정, 확정된 주문에 품목 추가 | 고정 문구 |
+| 500 | `INTERNAL_ERROR` | `AppError`가 아닌 모든 오류(예: `issueDisplayNumber` 누락). 원본은 응답에 없음 | `Internal server error` |
 
 ## 5. 미구현 및 미실행 테스트
 
@@ -129,9 +145,10 @@ DEC-08/15/16, D22/29, DEC-12(개인정보 보존·삭제)는 건드리지 않았
 - 기존 `ordering_v2_command` 레거시 **회귀 테스트**(프롬프트 요구) — 레거시 접근 없음
 
 **미구현 (코드로 가능하나 하지 않음)**
-- `HTTP /v1` 라우터, `openapi/ordering.yaml` — **미배포**로 표기
-- JWT 검증. 현재 `userId`는 호출자가 준 값을 그대로 신뢰
-- `AppError`를 HTTP 응답(상태·본문)으로 변환하는 계층, `AppError`가 아닌 오류의 500 처리, `detail` 노출 정책
+- **실제 HTTP 서버·`/v1` 라우터**, `openapi/ordering.yaml` — **미배포**로 표기. 서버 방식(Edge Functions 또는 별도 백엔드)이 02단계의 사용자 결정 사항이라 아직 정해지지 않음
+- **요청 파싱 계층**: `Authorization` JWT 검증, `Idempotency-Key` 헤더 필수 검사, "알 수 없는 필드는 400"(API V2.2 공통 계약) 모두 없음. 현재 `userId`는 호출자가 준 값을 그대로 신뢰
+- **서버 로깅 구현체**: `onUnexpectedError` 훅만 있고 실제 로거는 연결하지 않음. 훅을 주입하지 않으면 500의 원인이 어디에도 남지 않는다
+- 응답 `requestId`, `handle`의 비동기 지원
 - 고객 스냅샷, `HELD`(ST-O02) 보류/재개, 역할별 응답 필드 제한, 목록 요약의 `createdAt`
 - `status` 필터와 커서 조합 테스트
 - 서비스 직접 호출 시 권한 우회: 서비스·`authorizeTenantAccess`가 모두 export되어 있고 진입점만 쓰도록 강제하는 장치가 없음
@@ -141,8 +158,9 @@ DEC-08/15/16, D22/29, DEC-12(개인정보 보존·삭제)는 건드리지 않았
 
 자동으로 다음 단계로 진행하지 않는다. 사용자 확인이 필요한 항목:
 
-1. **오류 코드 이름**: API V2.2 기준으로 구조화까지 끝냈다. STBR 제안 이름(`VALIDATION_FAILED`·`INVALID_TRANSITION`·`AUTH_REQUIRED` 등)으로 바꾸려면 `AppError`의 코드 표와 관련 테스트를 고쳐야 한다(1.2). 이 기준을 유지할지 확인 필요
-2. **제가 가정한 값 확정**: 표시번호 형식, 초기 `version`=1, `unitPriceKrw` `"0"` 허용, 정렬 방향, `BUSINESS_INVARIANT` 매핑 범위(1.3)
-3. **`detail` 노출 정책**: 오류 응답 본문에 `detail`을 포함할지
+1. **오류 코드 이름**: API V2.2 기준으로 구조화·응답 변환까지 끝냈다. STBR 제안 이름(`VALIDATION_FAILED`·`INVALID_TRANSITION`·`AUTH_REQUIRED` 등)으로 바꾸려면 `AppError`의 코드 표, `toErrorResponse`의 고정 문구 표와 관련 테스트를 고쳐야 한다(1.2). 이 기준을 유지할지 확인 필요
+2. **제가 가정한 값 확정**: 표시번호 형식, 초기 `version`=1, `unitPriceKrw` `"0"` 허용, 정렬 방향, `BUSINESS_INVARIANT` 매핑 범위, 성공 본문 `{ data }`와 기본 상태 200(1.3)
+3. **500 `INTERNAL_ERROR`와 고정 문구의 표현·언어**(영어): 클라이언트에 노출되는 문구라 확인 필요(1.3)
 4. **격리 테스트 DB 제공·사용 승인**: 승인 전에는 SQL 적용과 실DB 테스트 불가. DB 계층 항목(5번 BLOCKED)이 모두 여기에 묶여 있다
-5. 다음 작업 선택: `AppError`→HTTP 변환 계층 / OpenAPI 초안 / 06단계(조달·발주) 진입
+5. **서버 방식 결정**(Edge Functions 또는 별도 백엔드, 02단계 요구): 실제 라우터·요청 파싱 계층을 만들기 전에 필요
+6. 다음 작업 선택: OpenAPI 초안 / 06단계(조달·발주) 진입 / 서버 방식 결정 후 요청 파싱 계층
