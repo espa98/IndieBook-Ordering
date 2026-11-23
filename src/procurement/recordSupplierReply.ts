@@ -3,6 +3,7 @@ import {
   executeIdempotent,
   type IdempotencyStore,
 } from "../idempotency/executeIdempotent";
+import type { CancellationRepository } from "./createCancellationRequest";
 import type { PurchaseOrderRepository } from "./createPurchaseOrder";
 import { poLineState, type PoReplyEffect } from "./poLineState";
 import {
@@ -42,6 +43,8 @@ export type PoReplyRepository = {
 export type RecordSupplierReplyDeps = {
   purchaseOrders: PurchaseOrderRepository;
   replies: PoReplyRepository;
+  /** 수락된 취소를 품절 확정과 합산해 Qsend를 넘지 않는지 확인하는 데 쓴다 (필수: 빠뜨리면 이중 차감 검사가 꺼진다) */
+  cancellations: CancellationRepository;
   idempotency: IdempotencyStore;
   now?: () => Date;
 };
@@ -148,13 +151,22 @@ export function recordSupplierReply(
         repliedAt: new Date(repliedAtMs).toISOString(),
         recordedAt: now.toISOString(),
       };
-      // 저장하기 전에 이 품목의 수량 불변식을 확인한다: 위반하면 아무것도 바뀌지 않는다
-      poLineState(line.quantity, [
-        ...deps.replies
-          .list(request.tenantId, po.id)
-          .filter((r) => r.poLineId === line.poLineId),
-        reply,
-      ]);
+      // 저장하기 전에 이 품목의 수량 불변식을 확인한다: 위반하면 아무것도 바뀌지 않는다.
+      // 수락된 취소도 함께 본다: 품절 확정 + 수락된 취소는 Qsend를 넘을 수 없다 (BR-P01).
+      // 취소 회신 쪽(respondToCancellationRequest)이 같은 규칙을 확인하므로 두 순서가 대칭이다.
+      poLineState(
+        line.quantity,
+        [
+          ...deps.replies
+            .list(request.tenantId, po.id)
+            .filter((r) => r.poLineId === line.poLineId),
+          reply,
+        ],
+        deps.cancellations
+          .listResponses(request.tenantId, po.id)
+          .filter((r) => r.poLineId === line.poLineId)
+          .reduce((sum, r) => sum + r.acceptedQuantity, 0),
+      );
 
       deps.replies.save(reply);
       if (po.status === "SENT") {

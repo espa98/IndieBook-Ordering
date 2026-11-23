@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { recordSupplierReply } from "../../src/procurement/recordSupplierReply";
+import { createCancellationRequest } from "../../src/procurement/createCancellationRequest";
+import { respondToCancellationRequest } from "../../src/procurement/respondToCancellationRequest";
 import { poLineState } from "../../src/procurement/poLineState";
 import { AppError } from "../../src/errors/AppError";
 import { thrown } from "../helpers/thrown";
@@ -266,6 +268,75 @@ describe("recordSupplierReply (ST-P07: SENT → ACKNOWLEDGED, 공급처 회신)"
       expect(() =>
         recordSupplierReply(s.deps, { ...base, poLineId: s.secondPoLineId!, quantity: 1, idempotencyKey: "r-3" }),
       ).toThrow(/BUSINESS_INVARIANT/);
+    });
+  });
+
+  describe("수락된 취소와의 대칭: 품절 확정과 수락된 취소의 합은 발주 수량을 넘을 수 없다 (BR-P01)", () => {
+    /** 발주 10권에서 공급처가 취소 4권을 수락한 상태 */
+    function withAcceptedCancel(options: { secondBook?: boolean } = {}) {
+      const s = sentScene({ quantities: [4, 6], ...options });
+      const asked = createCancellationRequest(s.deps, {
+        tenantId: "tenant-a",
+        purchaseOrderId: s.sent.id,
+        poLineId: s.poLineId,
+        quantity: 4,
+        reason: "고객 취소",
+        idempotencyKey: "cancel-1",
+      });
+      respondToCancellationRequest(s.deps, {
+        tenantId: "tenant-a",
+        purchaseOrderId: s.sent.id,
+        cancellationRequestId: asked.id,
+        acceptedQuantity: 4,
+        rejectedQuantity: 0,
+        evidence: "공급처 수락 회신",
+        repliedAt: REPLIED_AT,
+        idempotencyKey: "respond-1",
+      });
+      const reply = (extra: Record<string, unknown>, target = s.poLineId) =>
+        recordSupplierReply(s.deps, {
+          tenantId: "tenant-a",
+          purchaseOrderId: s.sent.id,
+          poLineId: target,
+          kind: "OUT_OF_STOCK",
+          quantity: 1,
+          evidence: "공급처 이메일",
+          repliedAt: REPLIED_AT,
+          idempotencyKey: `r-${Math.random()}`,
+          ...extra,
+        } as never);
+      return { ...s, reply };
+    }
+
+    it("수락된 취소 4권 후 품절 7권은 4 + 7 > 10이라 422이고, 저장하지 않으며 발주는 ACKNOWLEDGED가 되지 않는다", () => {
+      const { sent, deps, reply } = withAcceptedCancel();
+
+      const error = thrown(() => reply({ quantity: 7 }));
+
+      expect((error as AppError).code).toBe("BUSINESS_INVARIANT");
+      expect((error as AppError).httpStatus).toBe(422);
+      expect(deps.replies.list("tenant-a", sent.id)).toHaveLength(0);
+      expect(deps.purchaseOrders.get("tenant-a", sent.id)!.status).toBe("SENT");
+    });
+
+    it("합이 정확히 발주 수량이면 허용한다 (수락 4 + 품절 6 = 10, 유효 발주 0권)", () => {
+      const { deps, reply } = withAcceptedCancel();
+
+      expect(() => reply({ quantity: 6 })).not.toThrow();
+      expect(deps.replies.list("tenant-a", deps.purchaseOrders.list("tenant-a")[0]!.id)).toHaveLength(1);
+    });
+
+    it("수락된 취소는 확정·지연 풀을 바꾸지 않는다: 확정·지연 회신은 영향받지 않는다", () => {
+      const { reply } = withAcceptedCancel();
+
+      expect(() => reply({ kind: "CONFIRM", quantity: 6, idempotencyKey: "c1" })).not.toThrow();
+      expect(() => reply({ kind: "DELAY", quantity: 4, eta: "2026-03-20", idempotencyKey: "d1" })).not.toThrow();
+    });
+
+    it("다른 품목의 수락된 취소는 이 품목의 품절 확정 가능 수량을 줄이지 않는다", () => {
+      const { secondPoLineId, reply } = withAcceptedCancel({ secondBook: true }); // 품목1: 취소 4 수락, 품목2: 5권
+
+      expect(() => reply({ quantity: 5 }, secondPoLineId!)).not.toThrow(); // 품목2 품절 5 (4 + 5 = 9가 아니다)
     });
   });
 

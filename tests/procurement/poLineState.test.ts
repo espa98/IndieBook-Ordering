@@ -129,6 +129,46 @@ describe("poLineState: 발주 품목 수량을 미응답/지연/확정/품절 4�
     });
   });
 
+  describe("수락된 취소는 Qreduce에 합산된다 (사용자 결정: 공급처가 수락한 수량만 차감, BR-P01·TC-77)", () => {
+    it("TC-77: 발주 10권에서 공급처가 수락한 취소 2권만 차감하면 유효 발주는 8권이다", () => {
+      const state = poLineState(10, [], 2);
+
+      expect(state).toMatchObject({ qsend: 10, qreduce: 2, qvalid: 8 });
+    });
+
+    it("품절 확정과 수락된 취소는 합산된다 (3 + 2 → Qreduce 5, Qvalid 5)", () => {
+      const state = poLineState(10, [{ kind: "OUT_OF_STOCK", quantity: 3 }], 2);
+
+      expect(state).toMatchObject({ outOfStock: 3, qreduce: 5, qvalid: 5 });
+    });
+
+    it("수락된 취소는 풀(미응답·지연·확정·품절)을 바꾸지 않는다 — 별도 차감이다", () => {
+      const withCancel = poLineState(10, [{ kind: "CONFIRM", quantity: 4 }], 3);
+      const without = poLineState(10, [{ kind: "CONFIRM", quantity: 4 }]);
+
+      expect({ ...withCancel, qreduce: 0, qvalid: 10 }).toEqual(without);
+    });
+
+    it("품절 확정과 수락된 취소의 합이 Qsend를 넘으면 BUSINESS_INVARIANT(422)이다 (이중 차감 방지)", () => {
+      const error = thrown(() => poLineState(10, [{ kind: "OUT_OF_STOCK", quantity: 7 }], 4)); // 7 + 4 > 10
+
+      expect(error).toBeInstanceOf(AppError);
+      expect((error as AppError).code).toBe("BUSINESS_INVARIANT");
+      expect((error as AppError).httpStatus).toBe(422);
+    });
+
+    it("수락된 취소만으로 Qsend를 넘어도 거절한다", () => {
+      expect(() => poLineState(10, [], 11)).toThrow(/BUSINESS_INVARIANT/);
+    });
+
+    it("합이 정확히 Qsend이면 허용한다 (유효 발주 0권)", () => {
+      expect(poLineState(10, [{ kind: "OUT_OF_STOCK", quantity: 6 }], 4)).toMatchObject({
+        qreduce: 10,
+        qvalid: 0,
+      });
+    });
+  });
+
   it("어떤 이벤트 순서에서도 네 풀의 합은 Qsend이고 Qvalid = Qsend − Qreduce이다", () => {
     const events = [
       { kind: "DELAY", quantity: 3 },

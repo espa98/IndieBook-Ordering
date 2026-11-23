@@ -8,6 +8,7 @@ import { createInMemoryOrderRepository } from "./inMemoryOrderRepository";
 import {
   confirmedOrder,
   createInMemoryAllocationRepository,
+  createInMemoryCancellationRepository,
   createInMemoryExportRepository,
   createInMemoryPurchaseOrderRepository,
   createInMemoryReplyRepository,
@@ -69,14 +70,18 @@ export function world(tenantId = "tenant-a") {
 
 /**
  * 전달 완료(SENT) 발주 1개가 있는 세계 (회신·취소 요청 테스트 공용).
- * 고객 3명이 같은 도서를 2+3+1권 주문했고, 합산된 발주 품목은 6권이다 (PO-003).
+ * 고객이 같은 도서를 주문했고(기본 2+3+1권), 합산된 발주 품목은 그 합계다 (PO-003).
  */
-export function sentScene(options: { secondBook?: boolean } = {}) {
+export function sentScene(
+  options: { secondBook?: boolean; quantities?: number[] } = {},
+) {
   const w = world();
-  const orders = [2, 3, 1].map((qty) =>
+  // 고객별 주문 수량. 기본은 2+3+1=6권, TC-77은 발주 10권이 필요해 [4, 6]을 쓴다
+  const quantities = options.quantities ?? [2, 3, 1];
+  const orders = quantities.map((qty) =>
     w.addOrder([{ bookId: "book-1", quantity: qty, unitPriceKrw: "15000" }]),
   );
-  const allocations = orders.map((o, i) => w.allocate(o, 0, [2, 3, 1][i]!));
+  const allocations = orders.map((o, i) => w.allocate(o, 0, quantities[i]!));
   if (options.secondBook) {
     // 다품목 검증용: 다른 도서(book-2) 5권이 같은 발주에 별도 품목으로 들어간다
     const other = w.addOrder([{ bookId: "book-2", quantity: 5, unitPriceKrw: "9000" }]);
@@ -114,6 +119,7 @@ export function sentScene(options: { secondBook?: boolean } = {}) {
     deps: {
       purchaseOrders: w.deps.purchaseOrders,
       replies,
+      cancellations: createInMemoryCancellationRepository(),
       idempotency: w.deps.idempotency,
       now: () => new Date("2026-03-04T07:00:00.000Z"),
     },

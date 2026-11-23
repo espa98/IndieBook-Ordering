@@ -12,6 +12,10 @@ import type {
 import type { PurchaseOrder } from "../../src/procurement/createPurchaseOrder";
 import type { PoExportRecord } from "../../src/procurement/exportPurchaseOrderCsv";
 import type { PoReply } from "../../src/procurement/recordSupplierReply";
+import type {
+  CancellationRequest,
+  CancellationResponse,
+} from "../../src/procurement/createCancellationRequest";
 
 /** 지정한 품목을 가진 확정 주문을 만든다 (표시번호는 고정). */
 export function confirmedOrder(tenantId: string, lines: NewOrderLine[]): Order {
@@ -25,6 +29,32 @@ export function createInMemorySupplierRepository(initial: Supplier[] = []) {
   return {
     get(tenantId: string, code: string): Supplier | undefined {
       return suppliers.get(`${tenantId}:${code}`);
+    },
+  };
+}
+
+export function createInMemoryCancellationRepository() {
+  const requests: CancellationRequest[] = [];
+  const responses: CancellationResponse[] = [];
+  return {
+    getRequest(tenantId: string, id: string): CancellationRequest | undefined {
+      return requests.find((r) => r.tenantId === tenantId && r.id === id);
+    },
+    listRequests(tenantId: string, purchaseOrderId: string): CancellationRequest[] {
+      return requests.filter(
+        (r) => r.tenantId === tenantId && r.purchaseOrderId === purchaseOrderId,
+      );
+    },
+    saveRequest(request: CancellationRequest): void {
+      requests.push(request);
+    },
+    listResponses(tenantId: string, purchaseOrderId: string): CancellationResponse[] {
+      return responses.filter(
+        (r) => r.tenantId === tenantId && r.purchaseOrderId === purchaseOrderId,
+      );
+    },
+    saveResponse(response: CancellationResponse): void {
+      responses.push(response);
     },
   };
 }

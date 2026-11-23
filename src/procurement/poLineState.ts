@@ -31,6 +31,8 @@ export type PoLineState = {
 export function poLineState(
   qsend: number,
   events: readonly PoReplyEffect[],
+  /** 공급처가 수락한 취소 수량의 합. 풀을 바꾸지 않는 별도 차감이다 (DEC-04, BR-P01) */
+  acceptedCancel = 0,
 ): PoLineState {
   let unanswered = qsend;
   let delayed = 0;
@@ -55,13 +57,22 @@ export function poLineState(
     }
   }
 
+  // 품절 확정과 수락된 취소는 합산하되 Qsend를 넘을 수 없다: 같은 수량을 두 번 차감하지 않는다
+  const qreduce = outOfStock + acceptedCancel;
+  if (qreduce > qsend) {
+    throw new AppError(
+      "BUSINESS_INVARIANT",
+      "out-of-stock plus accepted cancellation exceeds the quantity sent",
+    );
+  }
+
   return {
     qsend,
     unanswered,
     delayed,
     confirmed,
     outOfStock,
-    qreduce: outOfStock,
-    qvalid: qsend - outOfStock,
+    qreduce,
+    qvalid: qsend - qreduce,
   };
 }
