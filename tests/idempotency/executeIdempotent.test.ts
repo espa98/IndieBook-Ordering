@@ -51,6 +51,35 @@ describe("executeIdempotent", () => {
     expect(action).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ["빈 문자열", ""],
+    ["공백만", "   "],
+    ["undefined", undefined],
+    ["null", null],
+    ["숫자", 123],
+  ])(
+    "멱등키가 비어 있지 않은 문자열이 아니면(%s) 400 VALIDATION_ERROR이고 실행도 저장도 하지 않는다",
+    (_name, key) => {
+      const store = createIdempotencyStore();
+      const action = vi.fn(() => "done");
+      const request = {
+        tenantId: "tenant-a",
+        operation: "orders.create",
+        key: key as unknown as string,
+        payload: { n: 1 },
+      };
+
+      const error = thrown(() => executeIdempotent(store, request, action));
+
+      expect(error).toBeInstanceOf(AppError);
+      expect((error as AppError).code).toBe("VALIDATION_ERROR");
+      expect((error as AppError).httpStatus).toBe(400);
+      expect((error as AppError).message).toMatch(/^VALIDATION_ERROR: .*Idempotency-Key/);
+      expect(action).not.toHaveBeenCalled();
+      expect(store.size).toBe(0);
+    },
+  );
+
   it("같은 키·다른 본문의 충돌은 AppError(IDEMPOTENCY_CONFLICT, HTTP 409)이다", () => {
     const store = createIdempotencyStore();
     const base = { tenantId: "tenant-a", operation: "orders.confirm", key: "key-1" };

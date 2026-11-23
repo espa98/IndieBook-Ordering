@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { createOrderService } from "../../src/order/createOrderService";
 import { createIdempotencyStore } from "../../src/idempotency/executeIdempotent";
 import { createInMemoryOrderRepository } from "../helpers/inMemoryOrderRepository";
+import { thrown } from "../helpers/thrown";
+import { AppError } from "../../src/errors/AppError";
 
 describe("createOrderService", () => {
   it("품목이 담긴 DRAFT 주문을 만들어 저장하고 반환한다", () => {
@@ -45,6 +47,38 @@ describe("createOrderService", () => {
     expect(retry).toEqual(first);
     expect(orders.list("tenant-a")).toHaveLength(1);
   });
+
+  it.each([
+    ["undefined(누락)", undefined],
+    ["null", null],
+    ["문자열", "x"],
+    ["객체", { bookId: "b" }],
+    ["원소가 null", [null]],
+    ["원소가 문자열", ["x"]],
+    ["원소가 배열", [[]]],
+  ])(
+    "lines가 객체 배열이 아니면(%s) 400 VALIDATION_ERROR이고 아무것도 저장하지 않는다 (500이 아님)",
+    (_name, lines) => {
+      const orders = createInMemoryOrderRepository();
+
+      const error = thrown(() =>
+        createOrderService(
+          { orders, idempotency: createIdempotencyStore() },
+          {
+            tenantId: "tenant-a",
+            idempotencyKey: "key-1",
+            lines: lines as unknown as [],
+          },
+        ),
+      );
+
+      expect(error).toBeInstanceOf(AppError);
+      expect((error as AppError).code).toBe("VALIDATION_ERROR");
+      expect((error as AppError).httpStatus).toBe(400);
+      expect((error as AppError).message).toMatch(/^VALIDATION_ERROR: .*lines/);
+      expect(orders.list("tenant-a")).toHaveLength(0);
+    },
+  );
 
   it("품목이 0개인 빈 초안도 만들 수 있다 (확정 시 최소 1품목 규칙은 confirmOrder가 담당)", () => {
     const orders = createInMemoryOrderRepository();

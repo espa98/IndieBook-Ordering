@@ -112,6 +112,38 @@ describe("confirmOrder (ST-O03: DRAFT → CONFIRMED)", () => {
     expect(issueDisplayNumber).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["0", 0],
+    ["음수", -1],
+    ["소수", 1.5],
+    ["NaN", Number.NaN],
+    ["문자열 '1'", "1"],
+    ["null", null],
+  ])(
+    "expectedVersion이 1 이상의 정수가 아니면(%s) 400 VALIDATION_ERROR이다 (VERSION_CONFLICT 409가 아님)",
+    (_name, expectedVersion) => {
+      const draft = addOrderLine(createDraftOrder({ tenantId: "t" }), {
+        bookId: "book-1",
+        quantity: 1,
+        unitPriceKrw: "15000",
+      });
+      const issueDisplayNumber = vi.fn(() => 1);
+
+      const error = thrown(() =>
+        confirmOrder(draft, {
+          expectedVersion: expectedVersion as unknown as number,
+          issueDisplayNumber,
+        }),
+      );
+
+      expect(error).toBeInstanceOf(AppError);
+      expect((error as AppError).code).toBe("VALIDATION_ERROR");
+      expect((error as AppError).httpStatus).toBe(400);
+      expect((error as AppError).message).toMatch(/^VALIDATION_ERROR: .*expectedVersion/);
+      expect(issueDisplayNumber).not.toHaveBeenCalled();
+    },
+  );
+
   describe("오류는 올바른 code·HTTP 상태의 AppError이다", () => {
     const line = { bookId: "book-1", quantity: 1, unitPriceKrw: "15000" };
     const issue = { issueDisplayNumber: () => 1 };

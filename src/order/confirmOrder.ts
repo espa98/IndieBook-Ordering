@@ -17,8 +17,14 @@ export function confirmOrder(
     issueDisplayNumber: (tenantId: string) => number;
   },
 ): Order {
-  if (options?.expectedVersion === undefined) {
-    throw new AppError("VALIDATION_ERROR", "expectedVersion is required");
+  if (
+    !Number.isInteger(options?.expectedVersion) ||
+    options.expectedVersion < 1
+  ) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      "expectedVersion must be an integer >= 1",
+    );
   }
   if (typeof options.issueDisplayNumber !== "function") {
     throw new Error("issueDisplayNumber is required");

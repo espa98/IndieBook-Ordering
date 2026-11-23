@@ -34,6 +34,12 @@ export function executeIdempotent<T>(
   request: IdempotencyRequest,
   action: () => T,
 ): T {
+  if (typeof request.key !== "string" || request.key.trim() === "") {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      "Idempotency-Key must be a non-empty string",
+    );
+  }
   const storeKey = JSON.stringify([
     request.tenantId,
     request.operation,

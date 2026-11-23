@@ -113,6 +113,92 @@ describe("주문 API 통합 (진입점 + handle)", () => {
     expect(onUnexpectedError).not.toHaveBeenCalled(); // 예상된 오류는 로깅 대상이 아니다
   });
 
+  describe("OpenAPI 요청 제약 위반은 500·409·201이 아니라 400이다", () => {
+    const owner = { userId: "owner-a" };
+    const body400 = { error: { code: "VALIDATION_ERROR" } };
+
+    it.each([
+      ["lines 누락", { lines: undefined }],
+      ["lines가 배열이 아님", { lines: "x" }],
+      ["lines 원소가 null", { lines: [null] }],
+      ["lines 원소에 알 수 없는 필드", { lines: [{ ...lines[0], isAdmin: true }] }],
+      ["lines 원소의 bookId가 숫자", { lines: [{ ...lines[0], bookId: 123 }] }],
+      ["lines 원소의 bookId 누락", { lines: [{ quantity: 1, unitPriceKrw: "1" }] }],
+      ["Idempotency-Key 빈 문자열", { idempotencyKey: "" }],
+      ["Idempotency-Key 누락", { idempotencyKey: undefined }],
+    ])("POST /orders: %s → 400", (_name, override) => {
+      const { api } = setup();
+
+      const response = handle(
+        () =>
+          api.createOrder(owner, {
+            tenantId: "tenant-a",
+            idempotencyKey: "k-1",
+            lines,
+            ...override,
+          } as never),
+        { successStatus: 201 },
+      );
+
+      expect(response.status).toBe(400);
+      expect(response.body).toMatchObject(body400);
+    });
+
+    it.each([
+      ["0", 0],
+      ["문자열 '1'", "1"],
+      ["null", null],
+      ["소수", 1.5],
+    ])("POST /confirm: expectedVersion %s → 400", (_name, expectedVersion) => {
+      const { api } = setup();
+      const created = api.createOrder(owner, {
+        tenantId: "tenant-a",
+        idempotencyKey: "k-1",
+        lines,
+      });
+
+      const response = handle(() =>
+        api.confirmOrder(owner, {
+          tenantId: "tenant-a",
+          orderId: created.id,
+          expectedVersion: expectedVersion as never,
+          idempotencyKey: "c-1",
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      expect(response.body).toMatchObject(body400);
+    });
+
+    it("POST /confirm: Idempotency-Key 누락 → 400", () => {
+      const { api } = setup();
+      const created = api.createOrder(owner, {
+        tenantId: "tenant-a",
+        idempotencyKey: "k-1",
+        lines,
+      });
+
+      const response = handle(() =>
+        api.confirmOrder(owner, {
+          tenantId: "tenant-a",
+          orderId: created.id,
+          expectedVersion: 1,
+          idempotencyKey: undefined as never,
+        }),
+      );
+
+      expect(response.status).toBe(400);
+    });
+
+    it("입력이 잘못되어도 권한 검사가 먼저다: 인증 없음은 400이 아니라 401, 비활성은 403", () => {
+      const { api } = setup();
+      const bad = { tenantId: "tenant-a", idempotencyKey: "", lines: "x" } as never;
+
+      expect(handle(() => api.createOrder({ userId: "" }, bad)).status).toBe(401);
+      expect(handle(() => api.createOrder({ userId: "ex-staff" }, bad)).status).toBe(403);
+    });
+  });
+
   it("없는 주문 → 404, 타 테넌트 주문 ID도 같은 404 (존재 비노출)", () => {
     const { api } = setup();
     const ownerA = { userId: "owner-a" };
