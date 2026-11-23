@@ -1,0 +1,41 @@
+import {
+  executeIdempotent,
+  type IdempotencyStore,
+} from "../idempotency/executeIdempotent";
+import { addOrderLine } from "./addOrderLine";
+import type { OrderRepository } from "./confirmOrderService";
+import { createDraftOrder, type Order, type OrderLine } from "./createDraftOrder";
+
+export type CreateOrderDeps = {
+  orders: OrderRepository;
+  idempotency: IdempotencyStore;
+};
+
+export type CreateOrderRequest = {
+  tenantId: string;
+  idempotencyKey: string;
+  lines: OrderLine[];
+};
+
+export function createOrderService(
+  deps: CreateOrderDeps,
+  request: CreateOrderRequest,
+): Order {
+  return executeIdempotent(
+    deps.idempotency,
+    {
+      tenantId: request.tenantId,
+      operation: "orders.create",
+      key: request.idempotencyKey,
+      payload: { lines: request.lines },
+    },
+    () => {
+      const order = request.lines.reduce(
+        addOrderLine,
+        createDraftOrder({ tenantId: request.tenantId }),
+      );
+      deps.orders.save(order);
+      return order;
+    },
+  );
+}
