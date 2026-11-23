@@ -20,4 +20,13 @@ describe("AppError", () => {
     expect(error.httpStatus).toBe(status);
     expect(error.message).toBe(code);
   });
+
+  it("detail은 별도 속성으로 노출되고, 없으면 undefined이다 (message 형식은 유지)", () => {
+    const withDetail = new AppError("VALIDATION_ERROR", "limit must be an integer 1..100");
+    const withoutDetail = new AppError("NOT_FOUND");
+
+    expect(withDetail.detail).toBe("limit must be an integer 1..100");
+    expect(withDetail.message).toBe("VALIDATION_ERROR: limit must be an integer 1..100");
+    expect(withoutDetail.detail).toBeUndefined();
+  });
 });

@@ -13,11 +13,13 @@ export type ErrorCode = keyof typeof HTTP_STATUS;
 export class AppError extends Error {
   readonly code: ErrorCode;
   readonly httpStatus: number;
+  readonly detail: string | undefined;
 
   constructor(code: ErrorCode, detail?: string) {
     super(detail === undefined ? code : `${code}: ${detail}`);
     this.name = "AppError";
     this.code = code;
+    this.detail = detail;
     this.httpStatus = HTTP_STATUS[code];
   }
 }
