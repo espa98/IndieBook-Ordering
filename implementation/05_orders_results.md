@@ -1,11 +1,17 @@
 # 05단계 결과 보고 — 주문 등록·목록·상세·확정
 
-작성 기준: 커밋 `12a5b0e` 위에 계약-구현 불일치 수정(입력 검증 4곳)과 그 테스트를 추가한 상태(이 보고서와 같은 커밋에 포함). 이 문서는 실제로 실행해 확인한 것과 그렇지 않은 것을 구분해 기록한다.
-(이전 버전: `64e407c` → `b99c713` → `f29e09f` → `a092ad9` 기준. 오류 코드 구조화, HTTP 변환 계층, OpenAPI 초안, 계약-구현 불일치 수정 이후 이 버전으로 갱신했다.)
+작성 기준: 커밋 `0981e76`(06단계 완료 시점) 위에 **06단계로 바뀐 05 범위의 사실을 반영해 갱신**한 상태(이 보고서와 같은 커밋에 포함). 이 문서는 실제로 실행해 확인한 것과 그렇지 않은 것을 구분해 기록한다.
+(이전 버전: `64e407c` → `b99c713` → `f29e09f` → `a092ad9` → `12a5b0e` → `fbc018d` 기준. 06단계 조달·발주의 내용은 `implementation/06_procurement_results.md`를 본다.)
 
 ## 0. 한 줄 요약
 
-주문 생성·확정·목록·상세의 **도메인 로직, 권한 적용 진입점, 구조화된 오류(`AppError`), HTTP 응답 변환(`toErrorResponse`)과 성공·오류 어댑터(`handle`), OpenAPI 3.1 계약 초안과 계약 테스트, 요청 입력 검증**을 메모리 저장소 기준으로 TDD 구현했고 테스트 204개가 통과한다. **실제 HTTP 서버·라우터, 요청 파싱 계층(요청 최상위 필드 검증·JWT·경로 파라미터), DB(RPC·RLS), 동시성은 구현·검증하지 않았다.** 이전 버전에서 기록한 "계약과 구현의 불일치 6건"은 모두 수정했다(5번). 격리 테스트 DB가 없어 DB 계층 항목은 BLOCKED다.
+주문 생성·확정·목록·상세의 **도메인 로직, 권한 적용 진입점, 구조화된 오류(`AppError`), HTTP 응답 변환(`toErrorResponse`)과 성공·오류 어댑터(`handle`), OpenAPI 3.1 계약 초안과 계약 테스트, 요청 입력 검증, 서버 부여 품목 식별자(`lineId`)**를 메모리 저장소 기준으로 TDD 구현했고 05단계 범위의 테스트 207개가 통과한다(저장소 전체는 06단계 포함 588개, 3번). **실제 HTTP 서버·라우터, 요청 파싱 계층(요청 최상위 필드 검증·JWT·경로 파라미터), DB(RPC·RLS), 동시성은 구현·검증하지 않았다.** 이전 버전에서 기록한 "계약과 구현의 불일치 6건"은 모두 수정했다(5번). 격리 테스트 DB가 없어 DB 계층 항목은 BLOCKED다.
+
+### 이번 갱신에서 바뀐 것 (06단계 이후)
+06단계를 진행하면서 **05 범위에도 영향을 준 변경과 발견**이 있어 이 보고서를 갱신했다. 원문은 보존하고 아래 3가지를 반영했다.
+1. **주문 품목에 서버 부여 `lineId` 추가**(`8c4c75f`). 06단계의 N:M 배분이 품목 식별자를 필요로 해서 05의 도메인·OpenAPI를 수정했다. 05 테스트의 기대값 4줄이 바뀌었다(3.1).
+2. **멱등 본문 비교의 테스트 약점 발견·수정**. 06단계의 변이 스캔이 05 코드(`confirmOrderService`)에서도 같은 빈틈을 찾았다(3.1).
+3. **오래된 서술 정정**: "다음 단계는 06 진입"이던 승인 게이트, "취소·발주는 05 밖"이던 미구현 목록.
 
 ## 1. 읽은 문서와 충돌·미결정 목록
 
@@ -60,18 +66,19 @@
 - `confirmOrder` 내부 검증 순서: `expectedVersion`(1 이상의 정수) → `issueDisplayNumber` 필수 → DRAFT 여부 → 품목 1개 이상 → 버전 일치
 - 예외가 난 요청의 멱등 결과는 저장하지 않음(재시도 허용). 문서는 "실패 결과 보존 정책은 별도 운영 결정"으로 남김
 - 허용 `status`는 현재 구현된 `DRAFT`, `CONFIRMED`뿐. STBR의 `HELD` 등은 미구현
+- **품목 식별자 `lineId`(06단계에서 추가)**: 서버가 `addOrderLine`에서 품목마다 **UUID를 부여**한다. 같은 내용의 품목도 별개의 `lineId`를 가지며 확정 후에도 바뀌지 않는다. **클라이언트가 `lineId`를 지정하면 알 수 없는 필드로 400**이다. 응답의 품목에는 `lineId`가 있다. 형식(UUID)과 "클라이언트 지정 불가" 정책은 문서에 없어 제가 정했다(API V2.2의 취소 요청이 `lineId`를 쓰므로 품목 식별자가 필요했다)
 
 ### 1.4 미승인·보류 정책
 DEC-08/15/16, D22/29, DEC-12(개인정보 보존·삭제)는 건드리지 않았다. 고객 정보(개인정보)를 다루는 필드는 아직 도메인에 없다.
 
 ## 2. 변경 파일
 
-커밋 이력은 `git log` 참조(초기 문서 `ad5d008` 이후 코드·문서·설정 커밋). 이 보고서와 같은 커밋에 입력 검증 수정(`executeIdempotent`, `confirmOrder`, `createOrderService`, `addOrderLine`)과 그 테스트, OpenAPI 본문 갱신이 포함된다.
+커밋 이력은 `git log` 참조(초기 문서 `ad5d008` 이후 코드·문서·설정 커밋). 05 범위의 마지막 코드 변경은 `lineId` 추가(`8c4c75f`)이고, 그 이후 06단계 커밋은 `src/procurement/`에 있다.
 
 **계약 (`openapi/`)**
 | 파일 | 역할 |
 |---|---|
-| `openapi/ordering.yaml` | OpenAPI 3.1 초안. 엔드포인트 4개(`GET·POST /orders`, `GET /orders/{orderId}`, `POST /orders/{orderId}/confirm`), Bearer JWT, `Idempotency-Key`, 성공·오류 응답 스키마. **구현된 동작만** 기술하고, 도메인이 400으로 강제하는 요청 제약과 아직 강제하지 않는 것을 본문에 구분해 명시. **미배포** |
+| `openapi/ordering.yaml` | OpenAPI 3.1 초안. 엔드포인트 4개(`GET·POST /orders`, `GET /orders/{orderId}`, `POST /orders/{orderId}/confirm`), Bearer JWT, `Idempotency-Key`, 성공·오류 응답 스키마. **구현된 동작만** 기술하고, 도메인이 400으로 강제하는 요청 제약과 아직 강제하지 않는 것을 본문에 구분해 명시. **`lineId` 추가로 품목 스키마를 요청용 `OrderLineInput`(`lineId` 없음, 보내면 400)과 응답용 `OrderLine`(`lineId` 필수·UUID)으로 분리**(하나로 두면 요청에서 `lineId`를 허용하게 되어 계약이 풀린다). 계약 테스트가 먼저 RED로 이를 알려 주었다. **미배포. 06단계 조달·발주 엔드포인트는 포함하지 않는다** |
 
 **프로덕션 (`src/`)**
 | 파일 | 역할 |
@@ -79,18 +86,19 @@ DEC-08/15/16, D22/29, DEC-12(개인정보 보존·삭제)는 건드리지 않았
 | `http/handle.ts` | `handle(fn, { successStatus?, onUnexpectedError? })`: 성공이면 `{ status, body: { data } }`, 실패면 `toErrorResponse` 결과. 예외를 던지지 않음. `AppError`가 아닌 오류만 원본을 훅에 전달 |
 | `http/toErrorResponse.ts` | `unknown` 오류 → `{ status, body: { error: { code, message } } }`. `instanceof AppError`로 판별, `detail`은 400 `VALIDATION_ERROR`에만 노출, 그 외 `AppError`는 고정 문구, `AppError`가 아니면 500 |
 | `errors/AppError.ts` | `AppError(code, detail?)`: 코드에서 HTTP 상태 결정(400/401/403/404/409/422), `detail` 별도 속성, `message`는 `"CODE"` 또는 `"CODE: detail"` |
-| `order/createDraftOrder.ts` | DRAFT 주문 생성(UUID, tenantId, version 1, createdAt, `now` 주입) |
-| `order/addOrderLine.ts` | 품목 추가(DRAFT에서만). **이번에 추가:** 알 수 없는 필드 거부, `bookId` 문자열. 기존: 수량 정수 ≥ 1, 단가 10진 정수 문자열 |
+| `order/createDraftOrder.ts` | DRAFT 주문 생성(UUID, tenantId, version 1, createdAt, `now` 주입). **06단계에서 타입 분리:** 입력 `NewOrderLine`(`lineId` 없음)과 저장 `OrderLine`(`lineId` 포함) |
+| `order/addOrderLine.ts` | 품목 추가(DRAFT에서만). 알 수 없는 필드 거부, `bookId` 문자열, 수량 정수 ≥ 1, 단가 10진 정수 문자열. **06단계에서 추가:** 품목마다 서버가 UUID `lineId`를 부여하고 입력 필드를 명시적으로 복사(입력 객체 불변) |
 | `order/confirmOrder.ts` | 확정(BigInt 합계, 표시번호 주입, 재확정 거부). **이번에 변경:** `expectedVersion`을 1 이상의 정수로 검증(0·소수·문자열·`null`은 400) |
 | `order/confirmOrderService.ts` | 저장소 조회→확정→저장, 멱등 감쌈 |
-| `order/createOrderService.ts` | 생성 서비스, 멱등 감쌈. **이번에 추가:** `lines`가 객체 배열인지 먼저 검증(멱등 처리보다 앞) |
+| `order/createOrderService.ts` | 생성 서비스, 멱등 감쌈. `lines`가 객체 배열인지 먼저 검증(멱등 처리보다 앞). 요청의 품목 타입은 `NewOrderLine[]` |
 | `order/listOrders.ts` | 목록(테넌트 격리, 안정 커서, limit, status 필터) |
 | `order/getOrder.ts` | 상세(타 테넌트는 `NOT_FOUND`) + 외부 응답 형태 `toOrderDetail`(필드를 하나씩 골라 반환). **이번에 변환 함수를 꺼내 공용화** |
 | `order/orderApi.ts` | 권한 적용 진입점 `guarded(...)`. **이번에 생성·확정 응답도 `toOrderDetail`로 변환**(내부 `Order`가 그대로 새지 않게) |
 | `auth/authorizeTenantAccess.ts` | 인증·활성 membership 검사 |
 | `idempotency/executeIdempotent.ts` | `tenant+operation+key` 스코프 멱등 실행. **이번에 추가:** 키가 비어 있지 않은 문자열인지 검증(공백만도 거부) |
 
-**테스트 (`tests/`)** 16개 파일 + 헬퍼 3개(`inMemoryOrderRepository`, `inMemoryMembershipRepository`, `thrown`).
+**테스트 (`tests/`)** 05 범위 16개 파일 + 헬퍼 3개(`inMemoryOrderRepository`, `inMemoryMembershipRepository`, `thrown`). 저장소 전체에는 06단계 테스트가 더 있다(3번).
+- `tests/idempotency/payloadCoverage.test.ts`(06단계에서 추가, 05와 공유): 모든 멱등 기능에서 요청 본문의 **필드를 하나씩 바꿔** 같은 키로 보내면 409인지 확인. 05 범위로는 `confirmOrderService`의 `orderId`·`expectedVersion`이 여기에 등록되어 있다. (`createOrderService`의 멱등 본문은 `lines` 하나뿐이고 기존 테스트가 이미 잡았다)
 - `tests/openapi/ordering.spec.test.ts`: 스펙이 유효한 OpenAPI 3.1인지, 엔드포인트 4개만 있는지, Bearer 인증과 `Idempotency-Key` 필수인지
 - `tests/openapi/ordering.contract.test.ts`: 실제 응답(진입점 + `handle`)을 스펙의 응답 스키마로 검증. 성공 응답과 스펙이 선언한 오류 응답 21종 전체, 그리고 "스펙이 선언한 조합 = 시나리오가 다루는 조합" 정합성
 
@@ -102,10 +110,10 @@ DEC-08/15/16, D22/29, DEC-12(개인정보 보존·삭제)는 건드리지 않았
 
 | 명령 | 결과 |
 |---|---|
-| `npx vitest run` | Test Files 16 passed, Tests **204 passed** |
+| `npx vitest run` (저장소 전체, 06단계 포함) | Test Files 28 passed, Tests **588 passed** |
 | `npx tsc --noEmit` | 오류 없음 |
 
-파일별 테스트 수: authorizeTenantAccess 15 · AppError 8 · handle 6 · orderHttp(통합) 21 · toErrorResponse 14 · executeIdempotent 9 · openapi 계약 23 · openapi 스펙 3 · addOrderLine 26 · confirmOrder 20 · confirmOrderService 5 · createDraftOrder 4 · createOrderService 13 · getOrder 3 · listOrders 29 · orderApi 5 (합계 204, 스크립트로 합산 확인).
+05 범위 16개 파일의 테스트 수: authorizeTenantAccess 15 · AppError 8 · handle 6 · orderHttp(통합) 21 · toErrorResponse 14 · executeIdempotent 9 · openapi 계약 23 · openapi 스펙 3 · addOrderLine 29 · confirmOrder 20 · confirmOrderService 5 · createDraftOrder 4 · createOrderService 13 · getOrder 3 · listOrders 29 · orderApi 5 (**합계 207**). 이전 버전의 204에서 `addOrderLine`이 `lineId` 테스트 3개만큼 늘었다. 나머지 381개(조달 11개 파일 344 + `payloadCoverage` 37)는 06단계 범위다.
 
 **실행하지 않은 것:** lint(설정 없음), 빌드, CI(없음), 커버리지 측정, 실제 HTTP 서버를 통한 요청(서버 없음).
 
@@ -125,7 +133,9 @@ DEC-08/15/16, D22/29, DEC-12(개인정보 보존·삭제)는 건드리지 않았
 - **계약-구현 불일치 수정은 정식 TDD 사이클 5개**(63~67)로 진행했다. 각각 실패하는 단위 테스트를 먼저 확인한 뒤 구현했다: `expectedVersion` 검증(6케이스 RED), `Idempotency-Key` 검증(5), `lines` 형태(7), 알 수 없는 필드(4), `bookId` 타입(5).
 - 이 불일치들은 **실제 실행으로 먼저 확인**했다. 임시 프로브 테스트로 잘못된 요청을 진입점에 보내 결과(500·201·409)를 관찰한 뒤 삭제했다. 첫 프로브는 출력이 비어 원인을 확인하고 결과를 파일로 받아 재실행했다.
 - 호출 계약이 바뀔 때(`expectedVersion`·`issueDisplayNumber`를 필수로 변경) 기존 테스트의 **호출부만** 수정했고 검증 내용·기대값은 바꾸지 않았다.
-- 오류 코드 구조화, HTTP 변환 계층, OpenAPI 단계에서는 기존 테스트를 **수정하지 않고** 새 테스트만 추가했다. `git diff`로 확인: `64e407c..b99c713`, `b99c713..f29e09f`, `f29e09f..a092ad9`, `a092ad9..12a5b0e`, `12a5b0e..작업 트리` 다섯 구간 모두 테스트 파일의 삭제된 줄이 0개.
+- 오류 코드 구조화, HTTP 변환 계층, OpenAPI 단계에서는 기존 테스트를 **수정하지 않고** 새 테스트만 추가했다. `git diff`로 확인: `64e407c..b99c713`, `b99c713..f29e09f`, `f29e09f..a092ad9`, `a092ad9..12a5b0e`, `12a5b0e..작업 트리` 다섯 구간 모두 테스트 파일의 삭제된 줄이 0개. (**이전 버전의 이 문장은 `fbc018d`까지만 해당한다.**)
+- **06단계의 `lineId` 추가(`8c4c75f`)로 05의 기존 테스트 4줄이 바뀌었다.** `git diff fbc018d..HEAD`로 확인: `addOrderLine` 1줄, `createOrderService` 2줄, `getOrder` 1줄(3개 파일). 모두 저장된 품목에 `lineId`가 생겨 **기대값에 `lineId`가 포함되도록 한 변경**이며, 다른 검증 내용을 약화하지 않았다. 다만 "테스트를 고치지 않는다"는 규칙의 예외에 해당하므로 사실대로 기록한다. 새 동작은 새 테스트로 먼저 RED를 확인했고(`addOrderLine`의 `lineId` 3개), OpenAPI 계약 테스트가 요청·응답 스키마 분리를 먼저 RED로 알려 주었다.
+- **멱등 본문 비교의 테스트 약점**: 이전 버전의 변이 실험은 05의 멱등 기능에서 모든 요청 필드를 하나씩 바꿔 보지는 않았다. 06단계에서 전 필드 자동 스캔을 하자 `confirmOrderService`의 `orderId` 변경을 잡는 테스트가 없었다(변이 생존). `tests/idempotency/payloadCoverage.test.ts`를 추가해 고쳤고(`expectedVersion`은 이미 잡혔고 `createOrderService.lines`도 기존 테스트가 잡음), 재스캔에서 전부 killed였다. 프로덕션 코드 결함은 아니었고 테스트 공백이었다.
 - 변이 실험 열 건(모두 되돌림):
   1. `createOrder`에서 권한 검사를 서비스 뒤로 옮기자 "저장되지 않는다" 테스트가 실패했다(순서 보호 확인). 같은 변이에서 재시도 테스트는 통과했는데, 그 테스트는 순서가 아니라 "이전 결과를 받아가지 못함"이라는 외부 결과를 보호하기 때문이다.
   2. `handle`에서 훅 호출을 `try/catch` 밖으로 꺼내자 "훅이 던져도 500 유지" 테스트 1건만 정확히 실패했다(보호용 테스트가 의미 있음을 확인).
@@ -138,7 +148,7 @@ DEC-08/15/16, D22/29, DEC-12(개인정보 보존·삭제)는 건드리지 않았
   9. 알 수 없는 필드 검사를 제거하자 5건 실패(단위 4 + HTTP 1).
   10. `bookId` 검사를 제거하자 7건 실패(단위 5 + HTTP 2).
   6~10은 실패한 개수가 각 수정을 지키는 테스트 수와 정확히 일치했다.
-- 작업 중 제 실수 여섯 건을 바로잡았다: (1) 기존 `.gitignore`를 덮어썼다가 커밋 전에 복원, (2) 테스트 없이 넣은 `NOT_FOUND`·품목 복사 분기를 제거하고 테스트 후 다시 구현, (3) 오류 테스트의 `it.each` 제목 형식 오타(`%s %i`가 엉뚱한 인자에 대응)를 구현 전에 수정, (4) 스펙 테스트가 `$ref`를 해석하지 않고 읽어 실패했을 때 원인이 스펙이 아니라 제 테스트임을 확인하고 **기대값은 두고 읽는 방식만** 고침(이후 변이 실험으로 테스트가 유효함을 재확인), (5) 테스트 합계를 암산으로 더하다 두 번 틀렸고(161·196) 스크립트·실행 결과로 바로잡음, (6) 보고서 표에 같은 파일 행을 중복 추가했다가 검사로 발견해 병합.
+- 작업 중 제 실수 여섯 건(06단계 갱신에서 발견한 위 문장 오류와 테스트 공백은 별도)을 바로잡았다: (1) 기존 `.gitignore`를 덮어썼다가 커밋 전에 복원, (2) 테스트 없이 넣은 `NOT_FOUND`·품목 복사 분기를 제거하고 테스트 후 다시 구현, (3) 오류 테스트의 `it.each` 제목 형식 오타(`%s %i`가 엉뚱한 인자에 대응)를 구현 전에 수정, (4) 스펙 테스트가 `$ref`를 해석하지 않고 읽어 실패했을 때 원인이 스펙이 아니라 제 테스트임을 확인하고 **기대값은 두고 읽는 방식만** 고침(이후 변이 실험으로 테스트가 유효함을 재확인), (5) 테스트 합계를 암산으로 더하다 두 번 틀렸고(161·196) 스크립트·실행 결과로 바로잡음, (6) 보고서 표에 같은 파일 행을 중복 추가했다가 검사로 발견해 병합.
 
 ## 4. 구현 현황 (설계·구현·테스트 구분)
 
@@ -156,6 +166,7 @@ DEC-08/15/16, D22/29, DEC-12(개인정보 보존·삭제)는 건드리지 않았
 | OpenAPI 3.1 계약 초안(엔드포인트 4개) | 작성, 스펙 유효성·계약 테스트 통과. **미배포**. 응답 형태는 계약 테스트로 구현과 일치 확인 |
 | 응답 형태 통일(`toOrderDetail`) | 구현. 생성·확정·상세가 같은 스키마(`tenantId` 제외) |
 | 요청 입력 검증(도메인 계층): `lines`·품목 필드·`Idempotency-Key`·`expectedVersion` | 구현, 단위·HTTP 수준 테스트 통과. 잘못된 입력은 400(500·409·201이 아님), 권한 검사가 먼저 |
+| 서버 부여 품목 식별자 `lineId`(06단계에서 추가) | 구현, 단위·계약 테스트 통과. UUID, 클라이언트 지정 시 400, 응답에 포함. 형식·정책은 제가 정한 값 |
 
 **오류 응답 (API V2.2 코드·상태 기준, 본문은 `{ error: { code, message } }`)**
 | HTTP | 코드 | 발생 위치 | message |
@@ -198,14 +209,14 @@ OpenAPI 스펙의 요청 제약을 구현이 강제하지 않았다. 도메인 �
 
 **미구현 (코드로 가능하나 하지 않음)**
 - **실제 HTTP 서버·`/v1` 라우터** — **미배포**. 서버 방식(Edge Functions 또는 별도 백엔드)이 02단계의 사용자 결정 사항이라 아직 정해지지 않음. OpenAPI 초안은 작성했으나 서빙하지 않으며 `servers`도 정의하지 않았다
-- OpenAPI에서 제외한 엔드포인트: 취소 요청, 발주 등 05단계 밖의 것. 고객 스냅샷도 도메인에 없어 스펙에 없다
+- OpenAPI에서 제외한 엔드포인트: 06단계에서 도메인 함수로 구현한 공급처 발주·회신·취소 요청 등 05단계 밖의 것(06 함수에는 진입점·권한 적용·OpenAPI가 아직 없다). 고객 스냅샷도 도메인에 없어 스펙에 없다
 - **요청 파싱 계층**(HTTP 요청을 도메인 입력으로 바꾸는 곳): `Authorization` JWT 검증, HTTP 헤더·본문 읽기, **요청 최상위의 알 수 없는 필드 400**(API V2.2 공통 계약. 도메인은 이미 파싱된 값을 받아 볼 수 없음), `Idempotency-Key`의 최대 길이, 경로 파라미터(`tenantId`, `orderId`) 형식. 현재 `userId`는 호출자가 준 값을 그대로 신뢰
   (품목 단위 입력 검증은 위에서 도메인에 구현했으므로 이 목록에 포함되지 않는다)
 - **서버 로깅 구현체**: `onUnexpectedError` 훅만 있고 실제 로거는 연결하지 않음. 훅을 주입하지 않으면 500의 원인이 어디에도 남지 않는다
 - 응답 `requestId`, `handle`의 비동기 지원
 - 고객 스냅샷, `HELD`(ST-O02) 보류/재개, 역할별 응답 필드 제한, 목록 요약의 `createdAt`
 - `status` 필터와 커서 조합 테스트
-- 서비스 직접 호출 시 권한 우회: 서비스·`authorizeTenantAccess`가 모두 export되어 있고 진입점만 쓰도록 강제하는 장치가 없음
+- 서비스 직접 호출 시 권한 우회: 서비스·`authorizeTenantAccess`가 모두 export되어 있고 진입점만 쓰도록 강제하는 장치가 없음. **06단계 함수(`src/procurement/`)는 진입점 자체가 없어 권한 검사를 거치지 않고 호출된다**(`tenantId`는 호출자가 준 값을 신뢰)
 - 프롬프트 테스트 목록 중 "누락/초과 입력": **누락**은 `lines`·품목 필드·`Idempotency-Key`·`expectedVersion`까지 검증한다. **초과(과대) 입력**은 문서에 상한이 없어 검사하는 코드가 없다(품목 수, 문자열 길이, 금액 자릿수, 본문 크기). 코드 확인 기준이며 별도 테스트는 없다
 
 ## 6. 다음 단계 승인 게이트
@@ -219,4 +230,4 @@ OpenAPI 스펙의 요청 제약을 구현이 강제하지 않았다. 도메인 �
 5. **서버 방식 결정**(Edge Functions 또는 별도 백엔드, 02단계 요구): 실제 라우터·요청 파싱 계층을 만들기 전에 필요
 6. **입력 검증 정책 확인**(1.3): 알 수 없는 필드를 400으로 거부(품목 단위만 적용), 오류 메시지에 클라이언트 필드 이름 비노출, `bookId` 빈 문자열 허용, 공백만 있는 `Idempotency-Key` 거부
 7. **과대 입력 상한 결정**: 품목 수·문자열 길이·금액 자릿수·본문 크기의 상한이 문서에 없다. 상한 없이 두면 매우 큰 입력으로 서버 자원을 소모시킬 수 있다
-8. 다음 작업 선택: 06단계(조달·발주) 진입 / 서버 방식 결정 후 요청 파싱 계층 / 과대 입력 상한(7번 결정 후)
+8. 다음 작업 선택: 서버 방식 결정 후 요청 파싱 계층 / 과대 입력 상한(7번 결정 후) / 06 함수의 진입점·권한·OpenAPI 연결. (06단계 조달·발주는 도메인 로직까지 진행했고, 그 승인 게이트는 `implementation/06_procurement_results.md`를 본다)
