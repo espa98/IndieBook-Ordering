@@ -1,0 +1,120 @@
+{
+  "project": "ordering-dev",
+  "executed_at": "2026-11-22T09:47:05.275Z",
+  "results": [
+    {
+      "name": "A 자기 서점 주문 등록",
+      "pass": true,
+      "http_status": 200,
+      "details": "92370303-b85f-4623-8ea6-015f0744abae"
+    },
+    {
+      "name": "B 자기 서점 주문 등록",
+      "pass": true,
+      "http_status": 200,
+      "details": "b2794ff9-705d-422e-aba0-83f594bd0d97"
+    },
+    {
+      "name": "A → B 주문 조회 차단",
+      "pass": true,
+      "http_status": 200,
+      "details": "반환 행 0"
+    },
+    {
+      "name": "B → A 주문 조회 차단",
+      "pass": true,
+      "http_status": 200,
+      "details": "반환 행 0"
+    },
+    {
+      "name": "A → B RPC 등록 차단",
+      "pass": true,
+      "http_status": 400,
+      "details": "TENANT_ACCESS_DENIED"
+    },
+    {
+      "name": "B → A RPC 등록 차단",
+      "pass": true,
+      "http_status": 400,
+      "details": "TENANT_ACCESS_DENIED"
+    },
+    {
+      "name": "A → B RPC 변경 차단",
+      "pass": true,
+      "http_status": 400,
+      "details": "TENANT_ACCESS_DENIED"
+    },
+    {
+      "name": "B → A RPC 변경 차단",
+      "pass": true,
+      "http_status": 400,
+      "details": "TENANT_ACCESS_DENIED"
+    },
+    {
+      "name": "A → B 직접 PATCH 차단",
+      "pass": true,
+      "http_status": 403,
+      "details": "permission denied for table ordering_orders"
+    },
+    {
+      "name": "B → A 직접 PATCH 차단",
+      "pass": true,
+      "http_status": 403,
+      "details": "permission denied for table ordering_orders"
+    },
+    {
+      "name": "B 원본 주문 무결성",
+      "pass": true,
+      "http_status": 200,
+      "details": "고객명 원본 유지"
+    },
+    {
+      "name": "A 원본 주문 무결성",
+      "pass": true,
+      "http_status": 200,
+      "details": "고객명 원본 유지"
+    },
+    {
+      "name": "A → B 승인 요청 차단",
+      "pass": true,
+      "http_status": 400,
+      "details": "TENANT_ACCESS_DENIED"
+    },
+    {
+      "name": "B → A 승인 요청 차단",
+      "pass": true,
+      "http_status": 400,
+      "details": "TENANT_ACCESS_DENIED"
+    },
+    {
+      "name": "A → B 승인 결정 차단",
+      "pass": true,
+      "http_status": 400,
+      "details": "OWNER_APPROVAL_REQUIRED"
+    },
+    {
+      "name": "A → B 환급 차단",
+      "pass": true,
+      "http_status": 400,
+      "details": "OWNER_APPROVAL_REQUIRED"
+    },
+    {
+      "name": "B → A 승인 결정 차단",
+      "pass": true,
+      "http_status": 400,
+      "details": "OWNER_APPROVAL_REQUIRED"
+    },
+    {
+      "name": "B → A 환급 차단",
+      "pass": true,
+      "http_status": 400,
+      "details": "OWNER_APPROVAL_REQUIRED"
+    },
+    {
+      "name": "알 수 없는 명령 거부",
+      "pass": true,
+      "http_status": 400,
+      "details": "UNKNOWN_ACTION"
+    }
+  ]
+}

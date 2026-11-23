@@ -1,0 +1,69 @@
+erDiagram
+  ordering_tenants ||--o{ ordering_members : authorizes
+  ordering_tenants ||--o{ ordering_customers : owns
+  ordering_tenants ||--o{ ordering_orders : owns
+  ordering_customers o|--o{ ordering_orders : identifies
+  ordering_orders ||--o{ ordering_order_lines : contains
+  ordering_books o|--o{ ordering_order_lines : catalog_match
+  ordering_tenants ||--o{ ordering_purchase_orders : owns
+  ordering_purchase_orders ||--o{ ordering_supplier_po_lines : contains
+  ordering_supplier_po_lines ||--o{ ordering_po_order_allocations : links
+  ordering_order_lines ||--o{ ordering_po_order_allocations : sourced_for
+  ordering_supplier_po_lines ||--o{ ordering_supplier_cancel_requests : cancel_request
+  ordering_supplier_po_lines ||--o{ ordering_receipt_lots : received
+  ordering_receipt_lots ||--o{ ordering_receipt_dispositions : balances
+  ordering_receipt_lots ||--o{ ordering_lot_movements : movements
+  ordering_order_lines o|--o{ ordering_lot_movements : attributed_to
+  ordering_order_lines ||--o{ ordering_order_allocations : allocated
+  ordering_receipt_lots ||--o{ ordering_order_allocations : attributed
+  ordering_order_lines ||--o{ ordering_handover_lines : delivered
+  ordering_order_allocations ||--o{ ordering_handover_lines : from_allocation
+  ordering_receipt_lots ||--o{ ordering_stock_transfers : transferred
+  ordering_stock_transfers ||--|| ordering_inventory_ledger : posted_once
+  ordering_receipt_lots ||--o{ ordering_supplier_returns : returned
+  ordering_order_lines ||--o{ ordering_reservation_ledger : reserved
+  ordering_orders ||--o{ ordering_customer_notices : notified
+  ordering_customer_notices ||--o{ ordering_notice_attempts : attempts
+  ordering_orders ||--o{ ordering_payment_attempts : payment_recorded
+  ordering_payment_attempts ||--o{ ordering_payment_evidence : supported_by
+  ordering_payment_attempts o|--o| ordering_payment_ledger : verified_payment
+  ordering_orders ||--o{ ordering_payment_ledger : accounted
+  ordering_payment_ledger o|--o{ ordering_payment_ledger : refunded_from
+  ordering_orders ||--o{ ordering_exceptions : exceptions
+  ordering_orders ||--o{ ordering_order_closure_checks : checks
+  ordering_order_lines ||--o{ ordering_order_cancel_requests : cancel_request
+  ordering_tenants ||--o{ ordering_approval_requests : approvals
+  ordering_tenants ||--o{ ordering_audit_ledger : audited
+  ordering_tenants ||--o{ ordering_commands : idempotency
+  ordering_tenants ||--o{ ordering_outbox : outgoing
+  ordering_tenants { uuid id PK string name }
+  ordering_members { uuid tenant_id PK uuid user_id PK string role boolean active }
+  ordering_customers { uuid id PK uuid tenant_id string display_name }
+  ordering_books { uuid id PK string isbn string title string source }
+  ordering_orders { uuid id PK uuid tenant_id uuid customer_id FK bigint order_number bigint version string status }
+  ordering_order_lines { uuid id PK uuid tenant_id uuid order_id FK string book_key int ordered_qty int cancelled_qty bigint unit_price_krw }
+  ordering_purchase_orders { uuid id PK uuid tenant_id string supplier_code bigint version }
+  ordering_supplier_po_lines { uuid id PK uuid tenant_id uuid purchase_order_id FK uuid order_line_id int sent_qty int supplier_accepted_reduction }
+  ordering_po_order_allocations { uuid id PK uuid tenant_id uuid po_line_id FK uuid order_line_id FK int linked_qty }
+  ordering_supplier_cancel_requests { uuid id PK uuid tenant_id uuid po_line_id FK int accepted_qty string status }
+  ordering_receipt_lots { uuid id PK uuid tenant_id uuid po_line_id FK int accepted_qty }
+  ordering_receipt_dispositions { uuid id PK uuid tenant_id uuid receipt_lot_id FK string bucket int qty }
+  ordering_lot_movements { uuid id PK uuid tenant_id uuid lot_id FK uuid order_line_id FK string from_bucket string to_bucket int qty }
+  ordering_order_allocations { uuid id PK uuid tenant_id uuid order_line_id FK uuid lot_id FK int allocated_qty int released_qty int delivered_qty }
+  ordering_handover_lines { uuid id PK uuid tenant_id uuid order_line_id FK uuid allocation_id FK int qty bigint allocated_amount_krw }
+  ordering_inventory_ledger { uuid id PK uuid tenant_id string book_key int delta_qty }
+  ordering_reservation_ledger { uuid id PK uuid tenant_id uuid order_line_id FK int delta_qty }
+  ordering_stock_transfers { uuid id PK uuid tenant_id uuid lot_id FK uuid inventory_entry_id FK int qty }
+  ordering_supplier_returns { uuid id PK uuid tenant_id uuid lot_id FK int dispatched_qty int completed_qty }
+  ordering_order_cancel_requests { uuid id PK uuid tenant_id uuid order_line_id FK int requested_qty string status }
+  ordering_customer_notices { uuid id PK uuid tenant_id uuid order_id FK string status }
+  ordering_notice_attempts { uuid id PK uuid tenant_id uuid notice_id FK string attempt_status }
+  ordering_payment_attempts { uuid id PK uuid tenant_id uuid order_id FK bigint amount_krw string status }
+  ordering_payment_evidence { uuid id PK uuid tenant_id uuid attempt_id FK string verification_result }
+  ordering_payment_ledger { uuid id PK uuid tenant_id uuid order_id FK uuid attempt_id FK uuid original_payment_id FK string kind bigint amount_krw }
+  ordering_exceptions { uuid id PK uuid tenant_id uuid order_id FK boolean blocking string status }
+  ordering_order_closure_checks { uuid id PK uuid tenant_id uuid order_id FK bigint checked_version boolean result }
+  ordering_approval_requests { uuid id PK uuid tenant_id uuid entity_id string action string status }
+  ordering_audit_ledger { uuid id PK uuid tenant_id string action }
+  ordering_commands { uuid tenant_id PK string command_key PK string payload_hash }
+  ordering_outbox { uuid id PK uuid tenant_id string event_type string status }

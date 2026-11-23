@@ -1,0 +1,78 @@
+{
+  "project": "ordering-dev",
+  "executed_at": "2026-11-22T09:27:13.652Z",
+  "results": [
+    {
+      "name": "A 자기 서점 주문 등록",
+      "pass": true,
+      "http_status": 200,
+      "details": "9aacd60b-2c66-4bfa-ba1d-d57655d6ff23"
+    },
+    {
+      "name": "B 자기 서점 주문 등록",
+      "pass": true,
+      "http_status": 200,
+      "details": "ae68ffbb-0c42-4a18-9ace-e7c895080861"
+    },
+    {
+      "name": "A → B 주문 조회 차단",
+      "pass": true,
+      "http_status": 200,
+      "details": "반환 행 0"
+    },
+    {
+      "name": "B → A 주문 조회 차단",
+      "pass": true,
+      "http_status": 200,
+      "details": "반환 행 0"
+    },
+    {
+      "name": "A → B RPC 등록 차단",
+      "pass": true,
+      "http_status": 400,
+      "details": "TENANT_ACCESS_DENIED"
+    },
+    {
+      "name": "B → A RPC 등록 차단",
+      "pass": true,
+      "http_status": 400,
+      "details": "TENANT_ACCESS_DENIED"
+    },
+    {
+      "name": "A → B RPC 변경 차단",
+      "pass": true,
+      "http_status": 400,
+      "details": "TENANT_ACCESS_DENIED"
+    },
+    {
+      "name": "B → A RPC 변경 차단",
+      "pass": true,
+      "http_status": 400,
+      "details": "TENANT_ACCESS_DENIED"
+    },
+    {
+      "name": "A → B 직접 PATCH 차단",
+      "pass": true,
+      "http_status": 403,
+      "details": "permission denied for table ordering_orders"
+    },
+    {
+      "name": "B → A 직접 PATCH 차단",
+      "pass": true,
+      "http_status": 403,
+      "details": "permission denied for table ordering_orders"
+    },
+    {
+      "name": "B 원본 주문 무결성",
+      "pass": true,
+      "http_status": 200,
+      "details": "고객명 원본 유지"
+    },
+    {
+      "name": "A 원본 주문 무결성",
+      "pass": true,
+      "http_status": 200,
+      "details": "고객명 원본 유지"
+    }
+  ]
+}
