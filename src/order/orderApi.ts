@@ -12,7 +12,7 @@ import {
   createOrderService,
   type CreateOrderRequest,
 } from "./createOrderService";
-import { getOrder } from "./getOrder";
+import { getOrder, toOrderDetail } from "./getOrder";
 import { listOrders } from "./listOrders";
 
 export type OrderApiDeps = {
@@ -51,20 +51,24 @@ export function createOrderApi(deps: OrderApiDeps) {
     ),
 
     createOrder: guarded((request: CreateOrderRequest) =>
-      createOrderService(
-        { orders: deps.orders, idempotency: deps.idempotency },
-        request,
+      toOrderDetail(
+        createOrderService(
+          { orders: deps.orders, idempotency: deps.idempotency },
+          request,
+        ),
       ),
     ),
 
     confirmOrder: guarded((request: ConfirmOrderRequest) =>
-      confirmOrderService(
-        {
-          orders: deps.orders,
-          idempotency: deps.idempotency,
-          issueDisplayNumber: deps.issueDisplayNumber,
-        },
-        request,
+      toOrderDetail(
+        confirmOrderService(
+          {
+            orders: deps.orders,
+            idempotency: deps.idempotency,
+            issueDisplayNumber: deps.issueDisplayNumber,
+          },
+          request,
+        ),
       ),
     ),
   };

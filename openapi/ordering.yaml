@@ -1,0 +1,472 @@
+openapi: 3.1.0
+
+info:
+  title: BookFlow Ordering API - 주문 (초안)
+  version: 0.1.0-draft
+  description: |
+    05단계(주문 등록·목록·상세·확정)에서 **구현된 동작만** 기술한 계약 초안이다.
+
+    **배포 상태: 미배포.** 이 계약을 서빙하는 HTTP 서버·라우터는 아직 없다. 계약은
+    도메인 계층(`createOrderApi` + `handle`)의 동작을 기준으로 하며, 그 계층의 응답이 이
+    스키마를 만족하는지는 `tests/openapi`의 계약 테스트가 검증한다.
+
+    **기준 문서:** `Docs/05_API_Security/API_명세서_V2.2.md`. 경로 접두어 `/v1/tenants/{tenantId}`는
+    그 문서의 "제안 경로"이다.
+
+    **문서에는 있으나 이 초안에서 의도적으로 제외한 것 (미구현):**
+    - 고객 스냅샷, 취소 요청, 발주 등 다른 엔드포인트
+    - 알 수 없는 요청 필드를 400으로 거부하는 규칙(API V2.2 공통 계약). 요청 파싱 계층이 없다
+    - JWT 검증과 `Idempotency-Key` 헤더 필수 검사. 현재는 검증된 값이 주입된다고 가정한다
+    - `HELD` 등 `DRAFT`·`CONFIRMED` 이외의 주문 상태
+    - 역할(Owner/Staff)별 응답 필드 제한, 응답 `requestId`
+
+    **요청 검증 계층이 없어 현재 구현이 이 계약을 지키지 않는 것 (실제 실행으로 확인함):**
+    - `lines`가 없거나 배열이 아니면 계약은 400이지만 현재는 **500 `INTERNAL_ERROR`**
+    - `Idempotency-Key`가 비어 있거나 없어도 **201로 처리**된다(계약은 필수, `minLength: 1`)
+    - `expectedVersion`이 0이거나 정수가 아니면 계약은 400이지만 현재는 **409 `VERSION_CONFLICT`**
+    - 위 항목은 도메인 함수가 타입이 맞는 입력을 전제로 하기 때문이며, 요청 파싱 계층에서 해결해야 한다
+
+    **이 초안에서 제가 정한 값 (문서에 없음, 사용자 확인 필요):**
+    성공 본문 `{ data }` 래퍼, 성공 상태 기본 200, 500 `INTERNAL_ERROR`와 오류 `message` 고정 문구,
+    목록 정렬(최신순), 표시번호 형식(정수).
+
+    **사용자가 결정한 값:** 오류 본문 `{ error: { code, message } }`, `detail`은 400에만 노출,
+    목록 기본 `limit` 20·최대 100(초과는 400 거부), 빈 초안 허용.
+
+tags:
+  - name: orders
+    description: 주문
+
+security:
+  - bearerAuth: []
+
+paths:
+  /v1/tenants/{tenantId}/orders:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      tags: [orders]
+      operationId: listOrders
+      summary: 주문 요약 목록
+      description: |
+        요청자의 활성 membership이 있는 테넌트의 주문만 `(createdAt, id)` 내림차순(최신순)으로 반환한다.
+        `nextCursor`가 있으면 그 값을 `cursor`로 넘겨 이어서 조회한다. 마지막 페이지에는 `nextCursor`가 없다.
+        요약에는 품목과 개인정보를 넣지 않는다.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/OrderStatus"
+        - name: cursor
+          in: query
+          required: false
+          description: 이전 응답의 `nextCursor`. 불투명 문자열이며 해석하지 않는다. 잘못된 값은 400.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: 1 이상 100 이하의 정수. 생략하면 20. 범위를 벗어나면 잘라서 반환하지 않고 400.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: 주문 요약 페이지
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListOrdersResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [orders]
+      operationId: createOrder
+      summary: 주문 초안 생성
+      description: |
+        `DRAFT` 상태의 주문을 만든다(내부 UUID, `version` 1). 품목이 0개인 빈 초안도 허용한다.
+        같은 `Idempotency-Key`·같은 본문으로 재시도하면 같은 주문을 반환하고 중복 생성하지 않는다.
+        같은 키에 다른 본문이면 409 `IDEMPOTENCY_CONFLICT`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrderRequest"
+      responses:
+        "201":
+          description: 생성된 `DRAFT` 주문
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/tenants/{tenantId}/orders/{orderId}:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/OrderId"
+    get:
+      tags: [orders]
+      operationId: getOrder
+      summary: 주문 상세
+      description: |
+        없는 주문과 **다른 테넌트의 주문 ID는 구별할 수 없는 동일한 404**로 응답한다(존재 비노출).
+      responses:
+        "200":
+          description: 주문 상세(품목 포함)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderResponse"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/tenants/{tenantId}/orders/{orderId}/confirm:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/OrderId"
+    post:
+      tags: [orders]
+      operationId: confirmOrder
+      summary: 주문 확정
+      description: |
+        `DRAFT` 주문을 `CONFIRMED`로 바꾼다. 같은 트랜잭션 개념으로 `version`을 1 올리고,
+        합계(`totalKrw`)를 계산하고, 서점별 표시번호(`displayNumber`)를 발급한다.
+        확정 조건: `DRAFT` 상태, 품목 1개 이상, `expectedVersion`이 현재 `version`과 일치.
+        같은 `Idempotency-Key`·같은 본문으로 재시도하면 같은 주문·같은 번호를 반환한다.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmOrderRequest"
+      responses:
+        "200":
+          description: 확정된 주문
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Supabase access JWT. 테넌트 ID는 선택자일 뿐 인증 근거가 아니며, 매 요청마다 활성 membership을
+        재확인한다. 활성 Owner와 Staff 모두 이 엔드포인트를 사용할 수 있다.
+
+  parameters:
+    TenantId:
+      name: tenantId
+      in: path
+      required: true
+      schema:
+        type: string
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      schema:
+        type: string
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        요청별 유일한 키. `tenantId + 연산 + 키` 단위로 유일하다. 같은 키에 본문이 달라지면 409.
+        본문 비교는 객체 키 순서와 무관하다(배열 순서는 유지).
+      schema:
+        type: string
+        minLength: 1
+
+  schemas:
+    OrderStatus:
+      type: string
+      enum: [DRAFT, CONFIRMED]
+
+    KrwAmount:
+      type: string
+      description: 금액은 JSON 숫자가 아니라 10진 정수 문자열이다(앞자리 0·음수·소수·공백 불가).
+      pattern: "^(0|[1-9][0-9]*)$"
+      examples: ["15000"]
+
+    OrderLine:
+      type: object
+      additionalProperties: false
+      required: [bookId, quantity, unitPriceKrw]
+      properties:
+        bookId:
+          type: string
+        quantity:
+          type: integer
+          minimum: 1
+        unitPriceKrw:
+          $ref: "#/components/schemas/KrwAmount"
+
+    CreateOrderRequest:
+      type: object
+      description: |
+        계약상 명시되지 않은 필드는 400이어야 하나(API V2.2) 요청 파싱 계층이 없어 **현재 구현은 강제하지 않는다**.
+      additionalProperties: false
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          description: 품목 0개(빈 초안)도 허용한다. 확정할 때 최소 1품목이 필요하다.
+          items:
+            $ref: "#/components/schemas/OrderLine"
+
+    ConfirmOrderRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        expectedVersion:
+          type: integer
+          minimum: 1
+          description: 확정 대상 주문의 현재 `version`. 다르면 409 `VERSION_CONFLICT`.
+
+    Order:
+      type: object
+      description: |
+        `tenantId`는 포함하지 않는다(요청 경로에 이미 있고 응답 최소화). `displayNumber`와 `totalKrw`는
+        확정된 주문에만 있다.
+      additionalProperties: false
+      required: [id, status, version, createdAt, lines]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/OrderStatus"
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        displayNumber:
+          type: integer
+          description: 서점별 표시번호. 확정 시 발급, 재사용 금지, 결번 허용(DEC-13).
+        totalKrw:
+          $ref: "#/components/schemas/KrwAmount"
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderLine"
+
+    OrderSummary:
+      type: object
+      additionalProperties: false
+      required: [id, status, version]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/OrderStatus"
+        version:
+          type: integer
+          minimum: 1
+        displayNumber:
+          type: integer
+        totalKrw:
+          $ref: "#/components/schemas/KrwAmount"
+
+    OrderResponse:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/Order"
+
+    ListOrdersResponse:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          type: object
+          additionalProperties: false
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/OrderSummary"
+            nextCursor:
+              type: string
+              description: 남은 항목이 있을 때만 존재한다.
+
+    ErrorBody:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - VALIDATION_ERROR
+                - UNAUTHENTICATED
+                - FORBIDDEN
+                - NOT_FOUND
+                - IDEMPOTENCY_CONFLICT
+                - VERSION_CONFLICT
+                - BUSINESS_INVARIANT
+                - INTERNAL_ERROR
+            message:
+              type: string
+              description: |
+                400 `VALIDATION_ERROR`에서만 문제가 된 입력을 설명하는 문구이고, 그 외 코드는 코드별 고정 문구이다.
+                내부 원본 오류 메시지는 어떤 경우에도 포함하지 않는다.
+
+  responses:
+    ValidationError:
+      description: 입력 검증 실패 (`limit`·`cursor`·`status`·`quantity`·`unitPriceKrw`·`expectedVersion` 등)
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ErrorBody"
+              - properties:
+                  error:
+                    properties:
+                      code:
+                        const: VALIDATION_ERROR
+    Unauthenticated:
+      description: 인증 없음
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ErrorBody"
+              - properties:
+                  error:
+                    properties:
+                      code:
+                        const: UNAUTHENTICATED
+    Forbidden:
+      description: |
+        비멤버, 다른 테넌트 멤버, 존재하지 않는 테넌트, 비활성 멤버. **서로 구별할 수 없는 동일한 응답**이다.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ErrorBody"
+              - properties:
+                  error:
+                    properties:
+                      code:
+                        const: FORBIDDEN
+    NotFound:
+      description: 없는 주문, 또는 다른 테넌트의 주문(구별 불가)
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ErrorBody"
+              - properties:
+                  error:
+                    properties:
+                      code:
+                        const: NOT_FOUND
+    IdempotencyConflict:
+      description: 같은 `Idempotency-Key`에 다른 본문
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ErrorBody"
+              - properties:
+                  error:
+                    properties:
+                      code:
+                        const: IDEMPOTENCY_CONFLICT
+    Conflict:
+      description: 같은 키·다른 본문(`IDEMPOTENCY_CONFLICT`) 또는 `expectedVersion` 불일치(`VERSION_CONFLICT`)
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ErrorBody"
+              - properties:
+                  error:
+                    properties:
+                      code:
+                        enum: [IDEMPOTENCY_CONFLICT, VERSION_CONFLICT]
+    BusinessInvariant:
+      description: 업무 규칙 위반 (이미 확정된 주문, 품목 없는 확정)
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ErrorBody"
+              - properties:
+                  error:
+                    properties:
+                      code:
+                        const: BUSINESS_INVARIANT
+    InternalError:
+      description: 예상하지 못한 서버 오류. 원인은 응답에 없고 서버 로그(`onUnexpectedError` 훅)에만 남는다.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ErrorBody"
+              - properties:
+                  error:
+                    properties:
+                      code:
+                        const: INTERNAL_ERROR
