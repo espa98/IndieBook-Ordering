@@ -22,6 +22,8 @@ import { recordSupplierReply } from "../../src/procurement/recordSupplierReply";
 import { createCancellationRequest } from "../../src/procurement/createCancellationRequest";
 import { respondToCancellationRequest } from "../../src/procurement/respondToCancellationRequest";
 import { confirmPurchaseOrderCancellation } from "../../src/procurement/confirmPurchaseOrderCancellation";
+import { receiveGoods } from "../../src/inventory/receiveGoods";
+import { receivingScene } from "../helpers/inventoryFixtures";
 import { createInMemoryOrderRepository } from "../helpers/inMemoryOrderRepository";
 import { createInMemoryExportRepository } from "../helpers/procurementFixtures";
 import { sentScene, world } from "../helpers/procurementWorld";
@@ -306,6 +308,26 @@ describe("confirmPurchaseOrderCancellation: 모든 필드가 멱등 비교에 �
   it.each([
     ["purchaseOrderId", "other-po"],
     ["expectedVersion", 99],
+  ])("%s", (field, alt) => {
+    const { call, base } = setup();
+    expectFieldIsCompared(call, base, field, alt);
+  });
+});
+
+describe("receiveGoods: 모든 필드가 멱등 비교에 들어간다", () => {
+  function setup() {
+    const s = receivingScene();
+    return { call: (r: Fields) => receiveGoods(s.deps, r as never), base: s.request() };
+  }
+
+  it.each([
+    ["purchaseOrderId", "other-po"],
+    ["poLineId", "other-line"],
+    ["normalQuantity", 3],
+    ["damagedQuantity", 1],
+    ["misdeliveredQuantity", 1],
+    ["inspectedBy", "이검수"],
+    ["receivedAt", "2026-03-04T06:30:01.000Z"],
   ])("%s", (field, alt) => {
     const { call, base } = setup();
     expectFieldIsCompared(call, base, field, alt);
