@@ -21,6 +21,7 @@ import { recordPurchaseOrderDelivery } from "../../src/procurement/recordPurchas
 import { recordSupplierReply } from "../../src/procurement/recordSupplierReply";
 import { createCancellationRequest } from "../../src/procurement/createCancellationRequest";
 import { respondToCancellationRequest } from "../../src/procurement/respondToCancellationRequest";
+import { confirmPurchaseOrderCancellation } from "../../src/procurement/confirmPurchaseOrderCancellation";
 import { createInMemoryOrderRepository } from "../helpers/inMemoryOrderRepository";
 import { createInMemoryExportRepository } from "../helpers/procurementFixtures";
 import { sentScene, world } from "../helpers/procurementWorld";
@@ -266,6 +267,45 @@ describe("respondToCancellationRequest: 모든 필드가 멱등 비교에 들어
     ["rejectedQuantity", 2],
     ["evidence", "전화 통화 기록"],
     ["repliedAt", "2026-03-04T05:30:01.000Z"],
+  ])("%s", (field, alt) => {
+    const { call, base } = setup();
+    expectFieldIsCompared(call, base, field, alt);
+  });
+});
+
+describe("confirmPurchaseOrderCancellation: 모든 필드가 멱등 비교에 들어간다", () => {
+  function setup() {
+    const s = sentScene();
+    const asked = createCancellationRequest(s.deps, {
+      tenantId: "tenant-a",
+      purchaseOrderId: s.sent.id,
+      poLineId: s.poLineId,
+      quantity: 6,
+      reason: "고객 취소",
+      idempotencyKey: "ask-1",
+    });
+    respondToCancellationRequest(s.deps, {
+      tenantId: "tenant-a",
+      purchaseOrderId: s.sent.id,
+      cancellationRequestId: asked.id,
+      acceptedQuantity: 6,
+      rejectedQuantity: 0,
+      evidence: "공급처 수락",
+      repliedAt: "2026-03-04T05:30:00.000Z",
+      idempotencyKey: "answer-1",
+    });
+    const base = {
+      tenantId: "tenant-a",
+      purchaseOrderId: s.sent.id,
+      expectedVersion: s.sent.version,
+      idempotencyKey: "k-1",
+    };
+    return { call: (r: Fields) => confirmPurchaseOrderCancellation(s.deps, r as never), base };
+  }
+
+  it.each([
+    ["purchaseOrderId", "other-po"],
+    ["expectedVersion", 99],
   ])("%s", (field, alt) => {
     const { call, base } = setup();
     expectFieldIsCompared(call, base, field, alt);

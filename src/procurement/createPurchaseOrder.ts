@@ -50,6 +50,8 @@ export type PurchaseOrder = {
   version: number;
   lines: PoLine[];
   delivery?: PoDelivery;
+  /** 공급처 전량 취소를 확정한 서버 기록 시각 (ST-P10) */
+  cancelledAt?: string;
 };
 
 export type PurchaseOrderRepository = {
