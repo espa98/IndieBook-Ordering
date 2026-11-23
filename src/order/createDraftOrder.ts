@@ -1,10 +1,14 @@
 import { AppError } from "../errors/AppError";
 
-export type OrderLine = {
+/** 클라이언트가 보내는 품목. lineId는 서버가 부여하므로 입력에 없다. */
+export type NewOrderLine = {
   bookId: string;
   quantity: number;
   unitPriceKrw: string;
 };
+
+/** 저장되는 품목. lineId는 N:M 배분 등에서 품목을 식별한다. */
+export type OrderLine = NewOrderLine & { lineId: string };
 
 export type Order = {
   id: string;

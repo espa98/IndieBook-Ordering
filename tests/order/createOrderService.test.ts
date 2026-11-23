@@ -25,8 +25,8 @@ describe("createOrderService", () => {
     expect(created.tenantId).toBe("tenant-a");
     expect(created.version).toBe(1);
     expect(created.lines).toEqual([
-      { bookId: "book-1", quantity: 2, unitPriceKrw: "15000" },
-      { bookId: "book-2", quantity: 1, unitPriceKrw: "9000" },
+      { lineId: expect.any(String), bookId: "book-1", quantity: 2, unitPriceKrw: "15000" },
+      { lineId: expect.any(String), bookId: "book-2", quantity: 1, unitPriceKrw: "9000" },
     ]);
     expect(orders.get("tenant-a", created.id)).toEqual(created);
   });

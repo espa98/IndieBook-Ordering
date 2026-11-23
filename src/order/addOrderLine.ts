@@ -1,9 +1,9 @@
 import { AppError } from "../errors/AppError";
-import type { Order, OrderLine } from "./createDraftOrder";
+import type { NewOrderLine, Order, OrderLine } from "./createDraftOrder";
 
 const LINE_FIELDS = ["bookId", "quantity", "unitPriceKrw"];
 
-export function addOrderLine(order: Order, line: OrderLine): Order {
+export function addOrderLine(order: Order, line: NewOrderLine): Order {
   if (order.status !== "DRAFT") {
     throw new AppError(
       "BUSINESS_INVARIANT",
@@ -32,5 +32,11 @@ export function addOrderLine(order: Order, line: OrderLine): Order {
       "unitPriceKrw must be a decimal integer string",
     );
   }
-  return { ...order, lines: [...order.lines, line] };
+  const stored: OrderLine = {
+    lineId: crypto.randomUUID(),
+    bookId: line.bookId,
+    quantity: line.quantity,
+    unitPriceKrw: line.unitPriceKrw,
+  };
+  return { ...order, lines: [...order.lines, stored] };
 }

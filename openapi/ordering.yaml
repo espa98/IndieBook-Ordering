@@ -242,11 +242,32 @@ components:
       pattern: "^(0|[1-9][0-9]*)$"
       examples: ["15000"]
 
-    OrderLine:
+    OrderLineInput:
       type: object
+      description: |
+        **요청**용 품목. `lineId`는 서버가 부여하므로 클라이언트가 보낼 수 없다(보내면 알 수 없는 필드로 400).
       additionalProperties: false
       required: [bookId, quantity, unitPriceKrw]
       properties:
+        bookId:
+          type: string
+        quantity:
+          type: integer
+          minimum: 1
+        unitPriceKrw:
+          $ref: "#/components/schemas/KrwAmount"
+
+    OrderLine:
+      type: object
+      description: |
+        **응답**용 품목. `lineId`는 서버가 품목마다 부여하는 UUID이며 확정 후에도 바뀌지 않는다.
+        주문 품목과 발주 품목을 N:M으로 연결할 때(06단계) 품목을 식별하는 데 쓴다.
+      additionalProperties: false
+      required: [lineId, bookId, quantity, unitPriceKrw]
+      properties:
+        lineId:
+          type: string
+          format: uuid
         bookId:
           type: string
         quantity:
@@ -266,7 +287,7 @@ components:
           type: array
           description: 품목 0개(빈 초안)도 허용한다. 확정할 때 최소 1품목이 필요하다.
           items:
-            $ref: "#/components/schemas/OrderLine"
+            $ref: "#/components/schemas/OrderLineInput"
 
     ConfirmOrderRequest:
       type: object

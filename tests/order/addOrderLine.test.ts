@@ -16,10 +16,50 @@ describe("addOrderLine", () => {
     });
 
     expect(updated.lines).toEqual([
-      { bookId: "book-1", quantity: 2, unitPriceKrw: "15000" },
+      { lineId: expect.any(String), bookId: "book-1", quantity: 2, unitPriceKrw: "15000" },
     ]);
     expect(updated.id).toBe(draft.id);
     expect(draft.lines).toEqual([]);
+  });
+
+  describe("lineId (06단계 N:M 배분의 품목 식별자)", () => {
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const input = { bookId: "book-1", quantity: 1, unitPriceKrw: "15000" };
+
+    it("서버가 품목마다 서로 다른 UUID lineId를 부여하고 입력 객체는 바꾸지 않는다", () => {
+      const before = { ...input };
+      let order = createDraftOrder({ tenantId: "t" });
+      order = addOrderLine(order, input);
+      order = addOrderLine(order, input); // 같은 내용의 품목도 별개의 품목이다
+
+      expect(order.lines).toHaveLength(2);
+      expect(order.lines[0]!.lineId).toMatch(UUID_RE);
+      expect(order.lines[1]!.lineId).toMatch(UUID_RE);
+      expect(order.lines[0]!.lineId).not.toBe(order.lines[1]!.lineId);
+      expect(input).toEqual(before);
+    });
+
+    it("클라이언트가 lineId를 지정할 수 없다 (알 수 없는 필드로 400)", () => {
+      const draft = createDraftOrder({ tenantId: "t" });
+
+      const error = thrown(() =>
+        addOrderLine(draft, { ...input, lineId: "chosen-by-client" } as never),
+      );
+
+      expect(error).toBeInstanceOf(AppError);
+      expect((error as AppError).code).toBe("VALIDATION_ERROR");
+      expect(draft.lines).toEqual([]);
+    });
+
+    it("확정 후에도 lineId는 그대로 유지된다", () => {
+      const draft = addOrderLine(createDraftOrder({ tenantId: "t" }), input);
+      const confirmed = confirmOrder(draft, {
+        expectedVersion: 1,
+        issueDisplayNumber: () => 1,
+      });
+
+      expect(confirmed.lines[0]!.lineId).toBe(draft.lines[0]!.lineId);
+    });
   });
 
   it.each([

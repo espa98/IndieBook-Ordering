@@ -5,7 +5,11 @@ import {
 } from "../idempotency/executeIdempotent";
 import { addOrderLine } from "./addOrderLine";
 import type { OrderRepository } from "./confirmOrderService";
-import { createDraftOrder, type Order, type OrderLine } from "./createDraftOrder";
+import {
+  createDraftOrder,
+  type NewOrderLine,
+  type Order,
+} from "./createDraftOrder";
 
 export type CreateOrderDeps = {
   orders: OrderRepository;
@@ -15,7 +19,7 @@ export type CreateOrderDeps = {
 export type CreateOrderRequest = {
   tenantId: string;
   idempotencyKey: string;
-  lines: OrderLine[];
+  lines: NewOrderLine[];
 };
 
 export function createOrderService(

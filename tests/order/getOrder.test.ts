@@ -31,7 +31,9 @@ describe("getOrder", () => {
       createdAt: "2026-01-02T03:04:05.000Z",
       displayNumber: undefined,
       totalKrw: undefined,
-      lines: [{ bookId: "book-1", quantity: 2, unitPriceKrw: "15000" }],
+      lines: [
+        { lineId: expect.any(String), bookId: "book-1", quantity: 2, unitPriceKrw: "15000" },
+      ],
     });
   });
 
