@@ -513,6 +513,39 @@ describe("HTTP 서버: 입고 후속 (파손 해소·초과 결정·입고 정�
   });
 });
 
+describe("HTTP 서버: 배분 취소·재배정", () => {
+  it("배분을 다른 고객에게 옮기고(Owner만) 남은 배분을 취소 처분으로 돌리는 것(Owner만)이 HTTP로 이어진다", async () => {
+    const first = await confirmedOrder(9, 2);
+    const second = await confirmedOrder(9, 2);
+    const c = await db.connect();
+    const po = (await c.query(`insert into public.ordering_purchase_orders (tenant_id, supplier_code, status, version) values ($1, 'sup-a', 'SENT', 3) returning id`, [T_A])).rows[0].id as string;
+    const poLine = (await c.query(`insert into public.ordering_po_lines (tenant_id, purchase_order_id, book_key, quantity) values ($1, $2, $3, 4) returning id`, [T_A, po, BOOK(9)])).rows[0].id as string;
+    for (const o of [first, second]) {
+      await c.query(`insert into public.ordering_po_links (tenant_id, po_line_id, allocation_id, order_id, order_line_id, quantity) values ($1, $2, gen_random_uuid(), $3, $4, 2)`, [T_A, poLine, o.orderId, o.lineId]);
+    }
+    await c.end();
+    const receipt = await call(`/v1/tenants/${T_A}/purchase-orders/${po}/receipts`, { method: "POST", sub: STAFF_A, body: { poLineId: poLine, normalQuantity: 4, damagedQuantity: 0, misdeliveredQuantity: 0, receivedAt: "2026-03-04T06:35:00.000Z" } });
+    const allocation = await call(`/v1/tenants/${T_A}/receipts/${receipt.json.data.id}/allocations`, { method: "POST", sub: STAFF_A, body: { orderId: first.orderId, orderLineId: first.lineId, quantity: 2, allocatedAt: "2026-03-04T06:40:00.000Z" } });
+    const base = `/v1/tenants/${T_A}/allocations/${allocation.json.data.id}`;
+
+    const move = { toOrderId: second.orderId, toOrderLineId: second.lineId, quantity: 1, reason: "다른 고객에게 배분", actedAt: "2026-03-04T06:55:00.000Z" };
+    expect((await call(`${base}/reallocations`, { method: "POST", sub: STAFF_A, body: move })).status).toBe(403); // 다른 고객으로의 재배분은 Owner만
+    const moved = await call(`${base}/reallocations`, { method: "POST", sub: OWNER_A, body: move });
+    expect(moved.status).toBe(201);
+    expect(moved.json.data.release).toMatchObject({ quantity: 1 });
+    expect(moved.json.data.allocation).toMatchObject({ orderId: second.orderId, quantity: 1, allocatedBy: OWNER_A });
+    expect((await call(`${base}/reallocations`, { method: "POST", sub: OWNER_A, body: { ...move, quantity: 5 } })).status).toBe(422);
+
+    const cancel = { quantity: 1, reason: "고객 취소", cancelledAt: "2026-03-04T06:50:00.000Z" };
+    expect((await call(`${base}/cancellations`, { method: "POST", sub: STAFF_A, body: cancel })).status).toBe(403); // 취소 확정은 Owner만
+    expect((await call(`${base}/cancellations`, { method: "POST", sub: OWNER_A, body: { ...cancel, cancelledBy: STAFF_A } })).status).toBe(400); // 행위자 위조
+    const cancelled = await call(`${base}/cancellations`, { method: "POST", sub: OWNER_A, body: cancel });
+    expect(cancelled.status).toBe(201);
+    expect(cancelled.json.data).toMatchObject({ quantity: 1, cancelledBy: OWNER_A });
+    expect((await call(`${base}/cancellations`, { method: "POST", sub: OWNER_A, body: cancel })).status).toBe(422); // 잔량 0
+  });
+});
+
 describe("HTTP 서버: 입력 방어", () => {
   it("Idempotency-Key 누락·공백·128자 초과는 400이다", async () => {
     const body = { lines: lines() };

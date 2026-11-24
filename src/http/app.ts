@@ -295,6 +295,16 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
       fields: ["orderId", "orderLineId", "quantity", "allocatedAt"],
       run: (c) => receiving.allocateReceipt(actor(c), merge(c, { tenantId: t(c), receiptId: c.params.receiptId!, idempotencyKey: c.idempotencyKey })),
     }),
+    route("POST", "/allocations/(?<allocationId>[^/]+)/cancellations", {
+      success: 201,
+      fields: ["quantity", "reason", "cancelledAt"],
+      run: (c) => receiving.cancelAllocation(actor(c), merge(c, { tenantId: t(c), allocationId: c.params.allocationId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/allocations/(?<allocationId>[^/]+)/reallocations", {
+      success: 201,
+      fields: ["toOrderId", "toOrderLineId", "quantity", "reason", "actedAt"],
+      run: (c) => receiving.reallocateAllocation(actor(c), merge(c, { tenantId: t(c), allocationId: c.params.allocationId!, idempotencyKey: c.idempotencyKey })),
+    }),
     route("POST", "/allocations/(?<allocationId>[^/]+)/releases", {
       success: 201,
       fields: ["quantity", "reason", "releasedAt"],

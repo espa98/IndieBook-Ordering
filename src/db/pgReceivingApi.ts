@@ -5,9 +5,10 @@ import type { DecideExcessReceiptRequest, ExcessDecision } from "../inventory/de
 import type { ReceiptDefectResolution, ResolveReceiptDefectRequest } from "../inventory/resolveReceiptDefect";
 import { AppError } from "../errors/AppError";
 import type { ReceiptAllocation, AllocateReceiptRequest } from "../inventory/allocateReceipt";
-import type { AllocationCancellation } from "../inventory/cancelAllocation";
+import type { AllocationCancellation, CancelAllocationRequest } from "../inventory/cancelAllocation";
 import type { AllocationDelivery } from "../inventory/deliverAllocation";
 import type { GoodsReceipt, ReceiveGoodsRequest } from "../inventory/receiveGoods";
+import type { ReallocateAllocationRequest } from "../inventory/reallocateAllocation";
 import type { AllocationRelease, ReleaseAllocationRequest } from "../inventory/releaseAllocation";
 import type { CancellationRequest, CancellationResponse } from "../procurement/createCancellationRequest";
 import type { PurchaseOrder } from "../procurement/createPurchaseOrder";
@@ -30,6 +31,8 @@ export const polLockKey = (tenantId: string, poLineId: string) => `pol:${tenantI
 
 export type ReceiveGoodsBody = Omit<ReceiveGoodsRequest, "inspectedBy">;
 export type AllocateReceiptBody = Omit<AllocateReceiptRequest, "allocatedBy">;
+export type CancelAllocationBody = Omit<CancelAllocationRequest, "actorRole" | "cancelledBy">;
+export type ReallocateAllocationBody = Omit<ReallocateAllocationRequest, "actorRole" | "actedBy">;
 export type ResolveReceiptDefectBody = Omit<ResolveReceiptDefectRequest, "actorRole" | "resolvedBy">;
 export type DecideExcessReceiptBody = Omit<DecideExcessReceiptRequest, "actorRole" | "decidedBy">;
 export type CorrectReceiptBody = Omit<CorrectReceiptRequest, "actorRole" | "correctedBy">;
@@ -344,6 +347,80 @@ export function createPgReceivingApi(deps: { pool: PoolLike }) {
           async (client) => {
             for (const c of saved) {
               await client.query("insert into public.ordering_receipt_corrections (id, tenant_id, receipt_id, quantity, reason, corrected_by, corrected_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8)", [c.id, c.tenantId, c.receiptId, c.quantity, c.reason, c.correctedBy, c.correctedAt, c.recordedAt]);
+            }
+          },
+        );
+      }),
+    cancelAllocation: (actor: Actor, request: CancelAllocationBody): Promise<AllocationCancellation> =>
+      withRetry(() => {
+        const sink = { receipts: [] as GoodsReceipt[], allocations: [] as ReceiptAllocation[], releases: [] as AllocationRelease[] };
+        const saved: AllocationCancellation[] = [];
+        const { tenantId: _t, ...rest } = request;
+        void _t;
+        return run(
+          actor,
+          request,
+          async (client) => {
+            if (!isUuid(request.allocationId)) return undefined;
+            const a = (await client.query("select receipt_id from public.ordering_receipt_allocations where tenant_id = $1 and id = $2", [request.tenantId, request.allocationId])).rows[0];
+            const r = a ? await lookupReceipt(client, request.tenantId, a.receipt_id) : undefined;
+            return r ? { poLineId: r.po_line_id, poId: r.purchase_order_id } : undefined;
+          },
+          (ctx) => {
+            const repos = receiptRepos(ctx.state, sink);
+            return authorizedActions.cancelAllocation(
+              {
+                receipts: repos.receipts,
+                purchaseOrders: repos.purchaseOrders,
+                receiptAllocations: repos.receiptAllocations,
+                allocationReleases: repos.allocationReleases,
+                allocationDeliveries: repos.allocationDeliveries,
+                allocationCancellations: {
+                  get: (_t2: string, id: string) => ctx.state?.cancellations.find((c) => c.id === id),
+                  list: repos.allocationCancellations.list,
+                  save: (c: AllocationCancellation) => void saved.push(c),
+                },
+                idempotency: ctx.idempotency,
+              },
+              ctx.principal,
+              rest,
+            );
+          },
+          async (client) => {
+            for (const c of saved) {
+              await client.query(
+                "insert into public.ordering_allocation_cancellations (id, tenant_id, book_key, receipt_id, allocation_id, order_id, order_line_id, quantity, reason, cancelled_by, cancelled_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+                [c.id, c.tenantId, c.bookId, c.receiptId, c.allocationId, c.orderId, c.orderLineId, c.quantity, c.reason, c.cancelledBy, c.cancelledAt, c.recordedAt],
+              );
+            }
+          },
+        );
+      }),
+    reallocateAllocation: (actor: Actor, request: ReallocateAllocationBody) =>
+      withRetry(() => {
+        const sink = { receipts: [] as GoodsReceipt[], allocations: [] as ReceiptAllocation[], releases: [] as AllocationRelease[] };
+        const { tenantId: _t, ...rest } = request;
+        void _t;
+        return run(
+          actor,
+          request,
+          async (client) => {
+            if (!isUuid(request.allocationId)) return undefined;
+            const a = (await client.query("select receipt_id from public.ordering_receipt_allocations where tenant_id = $1 and id = $2", [request.tenantId, request.allocationId])).rows[0];
+            const r = a ? await lookupReceipt(client, request.tenantId, a.receipt_id) : undefined;
+            return r ? { poLineId: r.po_line_id, poId: r.purchase_order_id } : undefined;
+          },
+          (ctx) => authorizedActions.reallocateAllocation({ ...receiptRepos(ctx.state, sink), idempotency: ctx.idempotency }, ctx.principal, rest),
+          async (client) => {
+            // 해제와 새 배분은 한 트랜잭션에서 함께 저장한다
+            for (const r of sink.releases) {
+              await client.query("insert into public.ordering_allocation_releases (id, tenant_id, allocation_id, quantity, reason, released_by, released_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8)", [r.id, r.tenantId, r.allocationId, r.quantity, r.reason, r.releasedBy, r.releasedAt, r.recordedAt]);
+            }
+            for (const a of sink.allocations) {
+              await client.query(
+                "insert into public.ordering_receipt_allocations (id, tenant_id, receipt_id, order_id, order_line_id, quantity, allocated_by, allocated_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                [a.id, a.tenantId, a.receiptId, a.orderId, a.orderLineId, a.quantity, a.allocatedBy, a.allocatedAt, a.recordedAt],
+              );
             }
           },
         );
