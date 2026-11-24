@@ -3,6 +3,10 @@ import type {
   DecideExcessReceiptRequest,
   ExcessDecision,
 } from "../../src/inventory/decideExcessReceipt";
+import type {
+  AllocateReceiptRequest,
+  ReceiptAllocation,
+} from "../../src/inventory/allocateReceipt";
 import { receiveGoods } from "../../src/inventory/receiveGoods";
 import { sentScene } from "./procurementWorld";
 
@@ -33,6 +37,41 @@ export function createInMemoryExcessDecisionRepository() {
       all.push(decision);
     },
   };
+}
+
+export function createInMemoryReceiptAllocationRepository() {
+  const all: ReceiptAllocation[] = [];
+  return {
+    list(tenantId: string, receiptId: string): ReceiptAllocation[] {
+      return all.filter((a) => a.tenantId === tenantId && a.receiptId === receiptId);
+    },
+    save(allocation: ReceiptAllocation): void {
+      all.push(allocation);
+    },
+  };
+}
+
+/** 6권 발주(주문 2/3/1권)에 4권이 정상 입고되어 미배분 4권인 세계 */
+export function allocationScene() {
+  const s = receivingScene();
+  const receipt = receiveGoods(s.deps, s.request() as never);
+  const receiptAllocations = createInMemoryReceiptAllocationRepository();
+  const deps = { ...s.deps, orders: s.w.deps.orders, receiptAllocations };
+  let seq = 0; // 호출마다 다른 작업이므로 기본 멱등 키는 고유해야 한다
+  const request = (
+    extra: Partial<AllocateReceiptRequest> = {},
+  ): AllocateReceiptRequest => ({
+    tenantId: "tenant-a",
+    receiptId: receipt.id,
+    orderId: s.orders[0]!.id,
+    orderLineId: s.orders[0]!.lines[0]!.lineId,
+    quantity: 2,
+    allocatedBy: "김직원",
+    allocatedAt: "2026-03-04T06:40:00.000Z",
+    idempotencyKey: `alloc-${++seq}`,
+    ...extra,
+  });
+  return { ...s, deps, receipt, receiptAllocations, request };
 }
 
 /** 6권 발주에 8권이 입고되어 초과 2권이 승인 대기인 세계 */
