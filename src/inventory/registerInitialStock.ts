@@ -13,7 +13,7 @@ export type StockMovement = {
   id: string;
   tenantId: string;
   bookId: string;
-  kind: "INITIAL";
+  kind: "INITIAL" | "ADJUST";
   direction: "IN" | "OUT";
   quantity: number;
   reason: string;

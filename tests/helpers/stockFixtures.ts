@@ -1,4 +1,7 @@
 import { createIdempotencyStore } from "../../src/idempotency/executeIdempotent";
+import type { StockReservation } from "../../src/inventory/stockReservation";
+import type { AdjustStockRequest } from "../../src/inventory/adjustStock";
+import { registerInitialStock } from "../../src/inventory/registerInitialStock";
 import type {
   RegisterInitialStockRequest,
   StockMovement,
@@ -38,4 +41,51 @@ export function stockScene() {
     ...extra,
   });
   return { deps, stockMovements, initialRequest };
+}
+
+export function createInMemoryStockReservationRepository() {
+  const all: StockReservation[] = [];
+  return {
+    list(tenantId: string, bookId: string): StockReservation[] {
+      return all.filter((r) => r.tenantId === tenantId && r.bookId === bookId);
+    },
+    save(reservation: StockReservation): void {
+      all.push(reservation);
+    },
+  };
+}
+
+/** book-1 재고 5권이 Owner에 의해 초기 등록된 세계 */
+export function adjustScene() {
+  const base = stockScene();
+  const stockReservations = createInMemoryStockReservationRepository();
+  // 점주가 재고 조정을 명시적으로 위임한 직원 (DEC-19)
+  const delegated = new Set<string>();
+  const stockDelegations = {
+    isDelegated: (tenantId: string, userId: string) => delegated.has(`${tenantId}:${userId}`),
+    grant: (tenantId: string, userId: string) => void delegated.add(`${tenantId}:${userId}`),
+  };
+  const s = {
+    ...base,
+    deps: { ...base.deps, stockReservations, stockDelegations },
+    stockReservations,
+    stockDelegations,
+  };
+  registerInitialStock(s.deps, s.initialRequest({ quantity: 5 }));
+  let seq = 0;
+  const adjustRequest = (
+    extra: Partial<AdjustStockRequest> = {},
+  ): AdjustStockRequest => ({
+    tenantId: "tenant-a",
+    bookId: "book-1",
+    direction: "IN",
+    quantity: 3,
+    reason: "실사 결과 3권 추가 발견",
+    actorRole: "OWNER",
+    actedBy: "점주",
+    actedAt: "2026-03-04T06:30:00.000Z",
+    idempotencyKey: `adj-${++seq}`,
+    ...extra,
+  });
+  return { ...s, adjustRequest };
 }
