@@ -11,6 +11,10 @@ import type {
   AllocationRelease,
   ReleaseAllocationRequest,
 } from "../../src/inventory/releaseAllocation";
+import type {
+  AllocationDelivery,
+  DeliverAllocationRequest,
+} from "../../src/inventory/deliverAllocation";
 import { allocateReceipt } from "../../src/inventory/allocateReceipt";
 import { receiveGoods } from "../../src/inventory/receiveGoods";
 import { sentScene } from "./procurementWorld";
@@ -71,6 +75,18 @@ export function createInMemoryAllocationReleaseRepository() {
   };
 }
 
+export function createInMemoryAllocationDeliveryRepository() {
+  const all: AllocationDelivery[] = [];
+  return {
+    list(tenantId: string, allocationId: string): AllocationDelivery[] {
+      return all.filter((d) => d.tenantId === tenantId && d.allocationId === allocationId);
+    },
+    save(delivery: AllocationDelivery): void {
+      all.push(delivery);
+    },
+  };
+}
+
 /** 4권 입고 중 주문 B(연결 3권)에 3권이 배분되어 OPEN인 세계 */
 export function releaseScene() {
   const s = allocationScene();
@@ -115,7 +131,14 @@ export function allocationScene() {
   const receipt = receiveGoods(s.deps, s.request() as never);
   const receiptAllocations = createInMemoryReceiptAllocationRepository();
   const allocationReleases = createInMemoryAllocationReleaseRepository();
-  const deps = { ...s.deps, orders: s.w.deps.orders, receiptAllocations, allocationReleases };
+  const allocationDeliveries = createInMemoryAllocationDeliveryRepository();
+  const deps = {
+    ...s.deps,
+    orders: s.w.deps.orders,
+    receiptAllocations,
+    allocationReleases,
+    allocationDeliveries,
+  };
   let seq = 0; // 호출마다 다른 작업이므로 기본 멱등 키는 고유해야 한다
   const request = (
     extra: Partial<AllocateReceiptRequest> = {},
@@ -178,4 +201,27 @@ export function receivingScene(options: Parameters<typeof sentScene>[0] = {}) {
 
 function receiveGoodsForScene(s: ReturnType<typeof receivingScene>) {
   return receiveGoods(s.deps, s.request({ normalQuantity: 8, idempotencyKey: "recv-excess" }) as never);
+}
+
+/** releaseScene(주문 B에 3권 배분, OPEN)에서 인도 요청을 만드는 세계 */
+export function deliveryScene() {
+  const s = releaseScene();
+  let seq = 0;
+  const request = (
+    extra: Partial<DeliverAllocationRequest> = {},
+  ): DeliverAllocationRequest => ({
+    tenantId: "tenant-a",
+    allocationId: s.allocation.id,
+    quantity: 1,
+    deliveredBy: "김직원",
+    deliveredAt: "2026-03-04T06:55:00.000Z",
+    idempotencyKey: `dlv-${++seq}`,
+    ...extra,
+  });
+  return {
+    ...s,
+    /** 인도 요청 */
+    request,
+    releaseRequest: s.request,
+  };
 }

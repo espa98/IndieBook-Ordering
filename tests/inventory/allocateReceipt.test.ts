@@ -2,8 +2,9 @@ import { describe, it, expect } from "vitest";
 import { AppError } from "../../src/errors/AppError";
 import { allocateReceipt } from "../../src/inventory/allocateReceipt";
 import { receiveGoods } from "../../src/inventory/receiveGoods";
+import { deliverAllocation } from "../../src/inventory/deliverAllocation";
 import { releaseAllocation } from "../../src/inventory/releaseAllocation";
-import { allocationScene, releaseScene } from "../helpers/inventoryFixtures";
+import { allocationScene, deliveryScene, releaseScene } from "../helpers/inventoryFixtures";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -229,5 +230,24 @@ describe("allocateReceipt: 입고 수량의 고객별 배분 (ST-R04, UC-11, BR-
     expect(toB(2)).toBeUndefined(); // 순배분 B 1 -> 3, 입고 순배분 2 -> 4
     expect(toB(1)).toBeInstanceOf(AppError); // B의 연결 수량 3 소진
     expect(deps.receiptAllocations.list("tenant-a", receipt.id)).toHaveLength(3);
+  });
+
+  it("인도한 수량은 해제와 달리 한도를 다시 열지 않는다(순인도도 배분 누적에 포함)", () => {
+    const { deps, request, allocateRequest, receipt, orders } = deliveryScene();
+    deliverAllocation(deps, request({ quantity: 3 })); // 주문 B 연결 수량 3을 모두 인도
+
+    let thrown: unknown;
+    try {
+      allocateReceipt(
+        deps,
+        allocateRequest({ orderId: orders[1]!.id, orderLineId: orders[1]!.lines[0]!.lineId, quantity: 1 }),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AppError);
+    expect((thrown as AppError).code).toBe("BUSINESS_INVARIANT");
+    expect(deps.receiptAllocations.list("tenant-a", receipt.id)).toHaveLength(1);
   });
 });

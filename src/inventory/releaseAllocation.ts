@@ -5,6 +5,7 @@ import {
 } from "../idempotency/executeIdempotent";
 import { invalid, isNonEmptyString, parseUtcTimestamp } from "../procurement/validation";
 import { allocationState } from "./allocationState";
+import type { AllocationDeliveryRepository } from "./deliverAllocation";
 import type { ReceiptAllocationRepository } from "./allocateReceipt";
 
 /** 입고 배분 해제 기록 (추가 전용). 원 배분 기록은 바꾸지 않는다 (BR-Q16). */
@@ -27,6 +28,7 @@ export type AllocationReleaseRepository = {
 export type ReleaseAllocationDeps = {
   receiptAllocations: ReceiptAllocationRepository;
   allocationReleases: AllocationReleaseRepository;
+  allocationDeliveries: AllocationDeliveryRepository;
   idempotency: IdempotencyStore;
   now?: () => Date;
 };
@@ -77,6 +79,7 @@ export function releaseAllocation(
       const { remaining } = allocationState(
         allocation,
         deps.allocationReleases.list(request.tenantId, allocation.id),
+        deps.allocationDeliveries.list(request.tenantId, allocation.id),
       );
       if (request.quantity > remaining) {
         throw new AppError(

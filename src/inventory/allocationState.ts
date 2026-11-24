@@ -1,4 +1,5 @@
 import type { ReceiptAllocation } from "./allocateReceipt";
+import type { AllocationDelivery } from "./deliverAllocation";
 import type { AllocationRelease } from "./releaseAllocation";
 
 export type AllocationState = {
@@ -8,13 +9,15 @@ export type AllocationState = {
   status: "OPEN" | "CLOSED";
 };
 
-/** 원 배분 단위의 잔량 B=G-L (인도 Fsrc는 ST-R06에서 더한다)과 상태 (BR-Q16). */
+/** 원 배분 단위의 잔량 B=G-L-Fsrc와 상태 (BR-Q16). released는 해제량 L이다. */
 export function allocationState(
   allocation: ReceiptAllocation,
   releases: readonly AllocationRelease[],
+  deliveries: readonly AllocationDelivery[] = [],
 ): AllocationState {
   const released = releases.reduce((sum, r) => sum + r.quantity, 0);
-  const remaining = allocation.quantity - released;
+  const delivered = deliveries.reduce((sum, d) => sum + d.quantity, 0);
+  const remaining = allocation.quantity - released - delivered;
   return {
     generated: allocation.quantity,
     released,
