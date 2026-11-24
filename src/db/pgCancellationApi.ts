@@ -2,6 +2,7 @@ import type { PoolClient } from "pg";
 import { authorizedActions } from "../auth/authorizedActions";
 import { createSystemPrincipal } from "../auth/principal";
 import { AppError } from "../errors/AppError";
+import type { FulfillmentCorrection } from "../fulfillment/correctFulfillment";
 import type { Fulfillment } from "../fulfillment/postFulfillment";
 import type { ReceiptAllocation } from "../inventory/allocateReceipt";
 import type { AllocationCancellation } from "../inventory/cancelAllocation";
@@ -20,6 +21,7 @@ import type { Order } from "../order/createDraftOrder";
 import type { ApplyOrderCancellationRequest } from "../order/applyOrderCancellation";
 import type { DecideOrderCancellationRequest } from "../order/decideOrderCancellation";
 import type { OrderClosure, ExecuteOrderClosureRequest } from "../order/executeOrderClosure";
+import type { ExecuteOrderReopeningRequest, OrderReopening } from "../order/executeOrderReopening";
 import type { OrderClosureRequest, RequestOrderClosureRequest } from "../order/requestOrderClosure";
 import type { OrderCancellationDecision, OrderCancellationRequest } from "../order/requestOrderCancellation";
 import type { RefundTask } from "../payment/openRefundTask";
@@ -50,6 +52,7 @@ export type DecideOrderCancellationBody = Omit<DecideOrderCancellationRequest, "
 export type ApplyOrderCancellationBody = Omit<ApplyOrderCancellationRequest, "actorRole" | "appliedBy">;
 export type RequestOrderClosureBody = Omit<RequestOrderClosureRequest, "requestedBy">;
 export type ExecuteOrderClosureBody = Omit<ExecuteOrderClosureRequest, "executedBy">;
+export type ExecuteOrderReopeningBody = Omit<ExecuteOrderReopeningRequest, "executedBy">;
 
 const toClosureRequest = (r: any): OrderClosureRequest => ({
   id: r.id,
@@ -281,6 +284,52 @@ export function createPgCancellationApi(deps: { pool: PoolLike }) {
       return result;
     });
 
+  /** 주문 하나의 종결 판정에 필요한 기록(수령·결제·입고 배분 처분·반품)을 적재한다. 주문 인도 락을 먼저 잡는다 */
+  async function loadClosureState(client: PoolClient, order: Order | undefined) {
+    let closureRequests: OrderClosureRequest[] = [];
+    let closures: OrderClosure[] = [];
+    let fulfillments: Fulfillment[] = [];
+    let paymentLedger: Awaited<ReturnType<typeof loadLedger>> | undefined;
+    let allocations: ReceiptAllocation[] = [];
+    let cancellations: AllocationCancellation[] = [];
+    let intakes: StockIntake[] = [];
+    let returnRequests: ReturnRequest[] = [];
+    let completions: ReturnCompletion[] = [];
+    let exceptions: ReturnException[] = [];
+    let resolutions: ReturnExceptionResolution[] = [];
+    if (order) {
+      await lockFul(client, order);
+      closureRequests = (await client.query("select * from public.ordering_order_closure_requests where tenant_id = $1 and order_id = $2", [order.tenantId, order.id])).rows.map(toClosureRequest);
+      closures = (await client.query("select * from public.ordering_order_closures where tenant_id = $1 and order_id = $2 order by recorded_at, id", [order.tenantId, order.id])).rows.map(toClosure);
+      fulfillments = await loadFulfillments(client, order.tenantId, order.id);
+      paymentLedger = await loadLedger(client, order);
+      const allocRows = (await client.query("select * from public.ordering_receipt_allocations where tenant_id = $1 and order_id = $2", [order.tenantId, order.id])).rows;
+      allocations = allocRows.map((a): ReceiptAllocation => ({ id: a.id, tenantId: a.tenant_id, receiptId: a.receipt_id, orderId: a.order_id, orderLineId: a.order_line_id, quantity: a.quantity, allocatedBy: a.allocated_by, allocatedAt: iso(a.allocated_at), recordedAt: iso(a.recorded_at) }));
+      const allocIds = allocations.map((a) => a.id);
+      cancellations = (await client.query("select * from public.ordering_allocation_cancellations where tenant_id = $1 and allocation_id = any($2::uuid[])", [order.tenantId, allocIds])).rows.map(
+        (c): AllocationCancellation => ({ id: c.id, tenantId: c.tenant_id, bookId: c.book_key, receiptId: c.receipt_id, allocationId: c.allocation_id, orderId: c.order_id, orderLineId: c.order_line_id, quantity: c.quantity, reason: c.reason, cancelledBy: c.cancelled_by, cancelledAt: iso(c.cancelled_at), recordedAt: iso(c.recorded_at) }),
+      );
+      const cancelIds = cancellations.map((c) => c.id);
+      intakes = (await client.query("select * from public.ordering_stock_intakes where tenant_id = $1 and cancellation_id = any($2::uuid[])", [order.tenantId, cancelIds])).rows.map(
+        (i): StockIntake => ({ id: i.id, tenantId: i.tenant_id, bookId: "", cancellationId: i.cancellation_id, receiptId: "", orderId: order.id, orderLineId: "", quantity: i.quantity, actedBy: i.acted_by, actedAt: iso(i.acted_at), recordedAt: iso(i.recorded_at) }),
+      );
+      returnRequests = (await client.query("select * from public.ordering_return_requests where tenant_id = $1 and cancellation_id = any($2::uuid[])", [order.tenantId, cancelIds])).rows.map(
+        (r): ReturnRequest => ({ id: r.id, tenantId: r.tenant_id, bookId: "", cancellationId: r.cancellation_id, receiptId: "", supplierCode: "", quantity: r.quantity, requestedBy: r.requested_by, requestedAt: iso(r.requested_at), recordedAt: iso(r.recorded_at) }),
+      );
+      const reqIds = returnRequests.map((r) => r.id);
+      completions = (await client.query("select * from public.ordering_return_completions where tenant_id = $1 and return_request_id = any($2::uuid[])", [order.tenantId, reqIds])).rows.map(
+        (c): ReturnCompletion => ({ id: c.id, tenantId: c.tenant_id, returnRequestId: c.return_request_id, quantity: c.quantity, evidence: "", confirmedBy: c.confirmed_by, confirmedAt: iso(c.confirmed_at), recordedAt: iso(c.recorded_at) }),
+      );
+      exceptions = (await client.query("select * from public.ordering_return_exceptions where tenant_id = $1 and return_request_id = any($2::uuid[])", [order.tenantId, reqIds])).rows.map(
+        (e): ReturnException => ({ id: e.id, tenantId: e.tenant_id, returnRequestId: e.return_request_id, quantity: e.quantity, kind: e.kind, evidence: "", reportedBy: e.reported_by, reportedAt: iso(e.reported_at), recordedAt: iso(e.recorded_at) }),
+      );
+      resolutions = (await client.query("select * from public.ordering_return_exception_resolutions where tenant_id = $1 and return_exception_id = any($2::uuid[])", [order.tenantId, exceptions.map((e) => e.id)])).rows.map(
+        (r): ReturnExceptionResolution => ({ id: r.id, tenantId: r.tenant_id, returnExceptionId: r.return_exception_id, returnRequestId: exceptions.find((e) => e.id === r.return_exception_id)?.returnRequestId ?? "", outcome: r.outcome, quantity: r.quantity, evidence: "", resolvedBy: r.resolved_by, resolvedAt: iso(r.resolved_at), recordedAt: iso(r.recorded_at) }),
+      );
+    }
+    return { closureRequests, closures, fulfillments, paymentLedger, allocations, cancellations, intakes, returnRequests, completions, exceptions, resolutions };
+  }
+
   const executeClosureOnce = (request: ExecuteOrderClosureBody): Promise<OrderClosure> =>
     inTransaction(deps.pool, "service_role", "", async (client) => {
       const principal = createSystemPrincipal(request.tenantId);
@@ -288,47 +337,7 @@ export function createPgCancellationApi(deps: { pool: PoolLike }) {
         ? (await client.query("select * from public.ordering_order_closure_requests where tenant_id = $1 and id = $2", [request.tenantId, request.closureRequestId])).rows[0]
         : undefined;
       const [order] = closureRow ? await loadOrders(client, request.tenantId, { orderId: closureRow.order_id, lock: "update" }) : [];
-      let closureRequests: OrderClosureRequest[] = [];
-      let closures: OrderClosure[] = [];
-      let fulfillments: Fulfillment[] = [];
-      let paymentLedger: Awaited<ReturnType<typeof loadLedger>> | undefined;
-      let allocations: ReceiptAllocation[] = [];
-      let cancellations: AllocationCancellation[] = [];
-      let intakes: StockIntake[] = [];
-      let returnRequests: ReturnRequest[] = [];
-      let completions: ReturnCompletion[] = [];
-      let exceptions: ReturnException[] = [];
-      let resolutions: ReturnExceptionResolution[] = [];
-      if (order) {
-        await lockFul(client, order);
-        closureRequests = (await client.query("select * from public.ordering_order_closure_requests where tenant_id = $1 and order_id = $2", [order.tenantId, order.id])).rows.map(toClosureRequest);
-        closures = (await client.query("select * from public.ordering_order_closures where tenant_id = $1 and order_id = $2 order by recorded_at, id", [order.tenantId, order.id])).rows.map(toClosure);
-        fulfillments = await loadFulfillments(client, order.tenantId, order.id);
-        paymentLedger = await loadLedger(client, order);
-        const allocRows = (await client.query("select * from public.ordering_receipt_allocations where tenant_id = $1 and order_id = $2", [order.tenantId, order.id])).rows;
-        allocations = allocRows.map((a): ReceiptAllocation => ({ id: a.id, tenantId: a.tenant_id, receiptId: a.receipt_id, orderId: a.order_id, orderLineId: a.order_line_id, quantity: a.quantity, allocatedBy: a.allocated_by, allocatedAt: iso(a.allocated_at), recordedAt: iso(a.recorded_at) }));
-        const allocIds = allocations.map((a) => a.id);
-        cancellations = (await client.query("select * from public.ordering_allocation_cancellations where tenant_id = $1 and allocation_id = any($2::uuid[])", [order.tenantId, allocIds])).rows.map(
-          (c): AllocationCancellation => ({ id: c.id, tenantId: c.tenant_id, bookId: c.book_key, receiptId: c.receipt_id, allocationId: c.allocation_id, orderId: c.order_id, orderLineId: c.order_line_id, quantity: c.quantity, reason: c.reason, cancelledBy: c.cancelled_by, cancelledAt: iso(c.cancelled_at), recordedAt: iso(c.recorded_at) }),
-        );
-        const cancelIds = cancellations.map((c) => c.id);
-        intakes = (await client.query("select * from public.ordering_stock_intakes where tenant_id = $1 and cancellation_id = any($2::uuid[])", [order.tenantId, cancelIds])).rows.map(
-          (i): StockIntake => ({ id: i.id, tenantId: i.tenant_id, bookId: "", cancellationId: i.cancellation_id, receiptId: "", orderId: order.id, orderLineId: "", quantity: i.quantity, actedBy: i.acted_by, actedAt: iso(i.acted_at), recordedAt: iso(i.recorded_at) }),
-        );
-        returnRequests = (await client.query("select * from public.ordering_return_requests where tenant_id = $1 and cancellation_id = any($2::uuid[])", [order.tenantId, cancelIds])).rows.map(
-          (r): ReturnRequest => ({ id: r.id, tenantId: r.tenant_id, bookId: "", cancellationId: r.cancellation_id, receiptId: "", supplierCode: "", quantity: r.quantity, requestedBy: r.requested_by, requestedAt: iso(r.requested_at), recordedAt: iso(r.recorded_at) }),
-        );
-        const reqIds = returnRequests.map((r) => r.id);
-        completions = (await client.query("select * from public.ordering_return_completions where tenant_id = $1 and return_request_id = any($2::uuid[])", [order.tenantId, reqIds])).rows.map(
-          (c): ReturnCompletion => ({ id: c.id, tenantId: c.tenant_id, returnRequestId: c.return_request_id, quantity: c.quantity, evidence: "", confirmedBy: c.confirmed_by, confirmedAt: iso(c.confirmed_at), recordedAt: iso(c.recorded_at) }),
-        );
-        exceptions = (await client.query("select * from public.ordering_return_exceptions where tenant_id = $1 and return_request_id = any($2::uuid[])", [order.tenantId, reqIds])).rows.map(
-          (e): ReturnException => ({ id: e.id, tenantId: e.tenant_id, returnRequestId: e.return_request_id, quantity: e.quantity, kind: e.kind, evidence: "", reportedBy: e.reported_by, reportedAt: iso(e.reported_at), recordedAt: iso(e.recorded_at) }),
-        );
-        resolutions = (await client.query("select * from public.ordering_return_exception_resolutions where tenant_id = $1 and return_exception_id = any($2::uuid[])", [order.tenantId, exceptions.map((e) => e.id)])).rows.map(
-          (r): ReturnExceptionResolution => ({ id: r.id, tenantId: r.tenant_id, returnExceptionId: r.return_exception_id, returnRequestId: exceptions.find((e) => e.id === r.return_exception_id)?.returnRequestId ?? "", outcome: r.outcome, quantity: r.quantity, evidence: "", resolvedBy: r.resolved_by, resolvedAt: iso(r.resolved_at), recordedAt: iso(r.recorded_at) }),
-        );
-      }
+      const { closureRequests, closures, fulfillments, paymentLedger, allocations, cancellations, intakes, returnRequests, completions, exceptions, resolutions } = await loadClosureState(client, order);
       const idempotency = await loadCommands(client, request.tenantId, request.idempotencyKey);
       const known = new Set(idempotency.keys());
       const savedOrders: Order[] = [];
@@ -368,6 +377,65 @@ export function createPgCancellationApi(deps: { pool: PoolLike }) {
       return result;
     });
 
+  /** 서버 내부 업무다(HTTP로 노출하지 않는다). 종결 뒤 승인된 정정으로 종결 조건이 깨졌다면 주문을 재개하고 근거를 남긴다 (ST-O10, BR-O07) */
+  const reopenOnce = (request: ExecuteOrderReopeningBody): Promise<OrderReopening> =>
+    inTransaction(deps.pool, "service_role", "", async (client) => {
+      const principal = createSystemPrincipal(request.tenantId);
+      const [order] = isUuid(request.tenantId) && isUuid(request.orderId) ? await loadOrders(client, request.tenantId, { orderId: request.orderId, lock: "update" }) : [];
+      const state = await loadClosureState(client, order);
+      const fulfillmentCorrections: FulfillmentCorrection[] = order
+        ? (await client.query("select * from public.ordering_fulfillment_corrections where tenant_id = $1 and order_id = $2 order by recorded_at, id", [order.tenantId, order.id])).rows.map(
+            (c): FulfillmentCorrection => ({ id: c.id, tenantId: c.tenant_id, orderId: c.order_id, fulfillmentId: c.fulfillment_id, reversalFulfillmentId: c.reversal_fulfillment_id, quantity: c.quantity, restorations: c.restorations, reason: c.reason, evidence: c.evidence, correctedBy: c.corrected_by, correctedAt: iso(c.corrected_at), recordedAt: iso(c.recorded_at) }),
+          )
+        : [];
+      const reopenings: OrderReopening[] = order
+        ? (await client.query("select * from public.ordering_order_reopenings where tenant_id = $1 and order_id = $2 order by recorded_at, id", [order.tenantId, order.id])).rows.map(
+            (r): OrderReopening => ({ id: r.id, tenantId: r.tenant_id, orderId: r.order_id, trigger: { kind: r.trigger_kind, id: r.trigger_id }, blockers: r.blockers, orderVersionBefore: Number(r.order_version_before), orderVersionAfter: Number(r.order_version_after), executedBy: "SYSTEM", reopenedAt: iso(r.reopened_at), recordedAt: iso(r.recorded_at) }),
+          )
+        : [];
+      const idempotency = await loadCommands(client, request.tenantId, request.idempotencyKey);
+      const known = new Set(idempotency.keys());
+      const savedOrders: Order[] = [];
+      const newReopenings: OrderReopening[] = [];
+      const pl = state.paymentLedger;
+      const { tenantId: _t, ...rest } = request;
+      void _t;
+      const result = authorizedActions.executeOrderReopening(
+        {
+          orders: { get: (t, id) => (order && order.tenantId === t && order.id === id ? order : undefined), list: () => (order ? [order] : []), save: (o) => void savedOrders.push(o) },
+          fulfillments: { list: () => state.fulfillments },
+          fulfillmentCorrections: { list: () => fulfillmentCorrections },
+          payments: { list: (_t2, oid) => (pl?.payments ?? []).filter((p) => p.orderId === oid) },
+          paymentConfirmations: { list: (_t2, id) => (pl?.confirmations ?? []).filter((c) => c.paymentId === id) },
+          paymentVoids: { list: (_t2, id) => (pl?.voids ?? []).filter((v) => v.paymentId === id) },
+          refundConfirmations: { list: (_t2, id) => (pl?.refunds ?? []).filter((r) => r.refundTaskId === id), listByOrder: (_t2, oid) => (pl?.refunds ?? []).filter((r) => r.orderId === oid) },
+          refundTasks: { list: (_t2, oid) => (pl?.tasks ?? []).filter((r) => r.orderId === oid) },
+          paymentCorrections: { get: (_t2, id) => (pl?.corrections ?? []).find((c) => c.id === id), listByOrder: (_t2, oid) => (pl?.corrections ?? []).filter((c) => c.orderId === oid), list: forbidden as never, save: forbidden },
+          receiptAllocations: { listByOrder: (_t2, oid) => state.allocations.filter((a) => a.orderId === oid) },
+          allocationCancellations: { list: (_t2, id) => state.cancellations.filter((c) => c.allocationId === id) },
+          stockIntakes: { list: (_t2, id) => state.intakes.filter((i) => i.cancellationId === id) },
+          returnRequests: { list: (_t2, id) => state.returnRequests.filter((r) => r.cancellationId === id) },
+          returnCompletions: { list: (_t2, id) => state.completions.filter((c) => c.returnRequestId === id) },
+          returnExceptions: { list: (_t2, id) => state.exceptions.filter((e) => e.returnRequestId === id) },
+          returnExceptionResolutions: { list: (_t2, id) => state.resolutions.filter((r) => r.returnExceptionId === id) },
+          orderReopenings: { list: () => reopenings, save: (r) => void newReopenings.push(r) },
+          idempotency,
+        },
+        principal,
+        rest,
+      );
+      // 재개 기록을 먼저 넣는다: 주문 갱신 트리거가 이 기록을 확인한다
+      for (const r of newReopenings) {
+        await client.query(
+          "insert into public.ordering_order_reopenings (id, tenant_id, order_id, trigger_kind, trigger_id, blockers, order_version_before, order_version_after, executed_by, reopened_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+          [r.id, r.tenantId, r.orderId, r.trigger.kind, r.trigger.id, JSON.stringify(r.blockers), r.orderVersionBefore, r.orderVersionAfter, r.executedBy, r.reopenedAt, r.recordedAt],
+        );
+      }
+      for (const o of savedOrders) await saveOrder(client, o, order);
+      await saveNewCommands(client, idempotency, known);
+      return result;
+    });
+
   async function insertDecisions(client: PoolClient, decisions: OrderCancellationDecision[]) {
     for (const d of decisions) {
       await client.query(
@@ -383,5 +451,7 @@ export function createPgCancellationApi(deps: { pool: PoolLike }) {
     requestOrderClosure: (actor: Actor, request: RequestOrderClosureBody) => withRetry(() => requestClosureOnce(actor, request)),
     /** 서버 내부 업무다. HTTP로 노출하지 않으며, 호출자는 서버 코드(작업 실행기)다 */
     executeOrderClosure: (request: ExecuteOrderClosureBody) => withRetry(() => executeClosureOnce(request)),
+    /** 서버 내부 업무다. HTTP로 노출하지 않는다 */
+    executeOrderReopening: (request: ExecuteOrderReopeningBody) => withRetry(() => reopenOnce(request)),
   };
 }

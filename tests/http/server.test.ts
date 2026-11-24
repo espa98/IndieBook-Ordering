@@ -546,6 +546,39 @@ describe("HTTP 서버: 배분 취소·재배정", () => {
   });
 });
 
+describe("HTTP 서버: 결제·수령 정정 (Owner 전용)", () => {
+  it("확인된 결제의 감액 정정과 수령 정정을 Owner만 할 수 있고(Staff 403), 행위자 위조는 400이며 수량·금액 초과는 422이다", async () => {
+    await seedStock(4, 2);
+    const o = await confirmedOrder(4, 2);
+    const reservation = await call(`${orders()}/${o.orderId}/lines/${o.lineId}/stock-reservations`, { method: "POST", sub: STAFF_A, body: { quantity: 2, reservedAt: "2026-03-04T06:40:00.000Z" } });
+    const payment = await call(`${orders()}/${o.orderId}/payments`, { method: "POST", sub: STAFF_A, body: { method: "CARD", amountKrw: "30000", externalReference: `HTTP-COR-${++seq}`, paidAt: "2026-03-04T06:00:00.000Z" } });
+    await call(`/v1/tenants/${T_A}/payments/${payment.json.data.id}/confirmation`, { method: "POST", sub: STAFF_A, body: { evidence: "카드 승인 내역", confirmedAt: "2026-03-04T06:30:00.000Z" } });
+    const fulfillment = await call(`${orders()}/${o.orderId}/fulfillments`, {
+      method: "POST", sub: STAFF_A,
+      body: { orderLineId: o.lineId, sources: [{ kind: "STOCK_RESERVATION", sourceId: reservation.json.data.id, quantity: 2 }], receivedAt: "2026-03-04T06:50:00.000Z" },
+    });
+
+    const payBody = { reducedKrw: "10000", reason: "금액 오기록", evidence: "입금 내역 재확인", correctedAt: "2026-03-04T07:00:00.000Z" };
+    const payPath = `/v1/tenants/${T_A}/payments/${payment.json.data.id}/corrections`;
+    expect((await call(payPath, { method: "POST", sub: STAFF_A, body: payBody })).status).toBe(403);
+    expect((await call(payPath, { method: "POST", sub: OWNER_A, body: { ...payBody, correctedBy: STAFF_A } })).status).toBe(400); // 행위자 위조
+    expect((await call(payPath, { method: "POST", sub: OWNER_A, body: { ...payBody, reducedKrw: "0" } })).status).toBe(400);
+    const corrected = await call(payPath, { method: "POST", sub: OWNER_A, body: payBody });
+    expect(corrected.status).toBe(201);
+    expect(corrected.json.data).toMatchObject({ reducedKrw: "10000", correctedBy: OWNER_A });
+    expect((await call(payPath, { method: "POST", sub: OWNER_A, body: { ...payBody, reducedKrw: "20001" } })).status).toBe(422); // 남은 20,000원 초과
+
+    const fulPath = `${orders()}/${o.orderId}/fulfillments/${fulfillment.json.data.id}/corrections`;
+    const fulBody = { quantity: 1, restorations: [{ kind: "STOCK_RESERVATION", sourceId: reservation.json.data.id, quantity: 1 }], reason: "수령 오기록", evidence: "매장 반입 확인", physicalReturnConfirmed: true, correctedAt: "2026-03-04T07:30:00.000Z" };
+    expect((await call(fulPath, { method: "POST", sub: STAFF_A, body: fulBody })).status).toBe(403);
+    expect((await call(fulPath, { method: "POST", sub: OWNER_A, body: { ...fulBody, physicalReturnConfirmed: false } })).status).toBe(422); // 실물 반입 미확인
+    const fixed = await call(fulPath, { method: "POST", sub: OWNER_A, body: fulBody });
+    expect(fixed.status).toBe(201);
+    expect(fixed.json.data).toMatchObject({ quantity: 1, correctedBy: OWNER_A, fulfillmentId: fulfillment.json.data.id });
+    expect((await call(fulPath, { method: "POST", sub: OWNER_A, body: { ...fulBody, quantity: 2, restorations: [{ ...fulBody.restorations[0], quantity: 2 }] } })).status).toBe(422); // 남은 1권 초과
+  });
+});
+
 describe("HTTP 서버: 입력 방어", () => {
   it("Idempotency-Key 누락·공백·128자 초과는 400이다", async () => {
     const body = { lines: lines() };

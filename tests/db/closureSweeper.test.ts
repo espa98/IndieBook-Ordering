@@ -7,6 +7,7 @@ import { createPgPaymentApi } from "../../src/db/pgPaymentApi";
 import { createPgProcurementApi } from "../../src/db/pgProcurementApi";
 import { createPgReceivingApi } from "../../src/db/pgReceivingApi";
 import { createPgStockApi } from "../../src/db/pgStockApi";
+import { AppError } from "../../src/errors/AppError";
 import type { IsolatedPostgres } from "../helpers/isolatedPostgres";
 import { startMigratedPostgres } from "../helpers/migratedPostgres";
 
@@ -65,16 +66,17 @@ async function order(book: number, options: { deliver?: boolean; close?: boolean
   const pay = createPgPaymentApi({ pool: db.pool() });
   const payment = await pay.recordPayment(staff, { tenantId: T_A, orderId: confirmed.id, method: "BANK_TRANSFER", amountKrw: "15000", externalReference: `SW-${key()}`, paidAt: "2026-03-04T06:00:00.000Z", idempotencyKey: key() });
   await pay.confirmPayment(staff, { tenantId: T_A, paymentId: payment.id, evidence: "입금 확인", confirmedAt: "2026-03-04T06:30:00.000Z", idempotencyKey: key() });
+  let fulfillmentId: string | undefined;
   if (options.deliver) {
-    await createPgFulfillmentApi({ pool: db.pool() }).postFulfillment(staff, {
+    fulfillmentId = (await createPgFulfillmentApi({ pool: db.pool() }).postFulfillment(staff, {
       tenantId: T_A, orderId: confirmed.id, orderLineId: lineId, sources: [{ kind: "STOCK_RESERVATION", sourceId: reservation.id, quantity: 1 }], receivedAt: "2026-03-04T06:50:00.000Z", idempotencyKey: key(),
-    });
+    })).id;
   }
   let closureRequestId: string | undefined;
   if (options.close) {
     closureRequestId = (await createPgCancellationApi({ pool: db.pool() }).requestOrderClosure(staff, { tenantId: T_A, orderId: confirmed.id, expectedVersion: 2, requestedAt: "2026-03-04T06:58:00.000Z", idempotencyKey: key() })).id;
   }
-  return { orderId: confirmed.id, closureRequestId };
+  return { orderId: confirmed.id, lineId, reservationId: reservation.id, fulfillmentId, closureRequestId };
 };
 const closedAt = async (orderId: string) => (await rows("select closed_at from public.ordering_orders where id = $1", [orderId]))[0].closed_at as Date | null;
 
@@ -163,5 +165,45 @@ describe("종결 스위퍼: 단일 실행과 장애 격리", () => {
     expect(errors).toHaveLength(1);
     expect(await poStatus(good)).toBe("CLOSED");
     expect(await poStatus(bad)).toBe("SENT"); // 실패한 건은 그대로 남고 다음 실행에서 다시 시도한다
+  });
+});
+
+describe("종결 스위퍼: 주문 재개", () => {
+  it("종결 뒤에 기록된 정정으로 종결 조건이 깨진 주문을 재개하고, 이미 근거로 쓰인 정정은 다시 보지 않으며, 재개할 수 없는 정정은 변경 없음으로 센다", async () => {
+    const target = await order(9, { deliver: true, close: true });
+    expect((await sweeper().runOnce()).orders.closed).toBeGreaterThanOrEqual(1);
+    expect(await closedAt(target.orderId)).not.toBeNull();
+    await createPgFulfillmentApi({ pool: db.pool() }).correctFulfillment(owner, {
+      tenantId: T_A, orderId: target.orderId, fulfillmentId: target.fulfillmentId!, quantity: 1,
+      restorations: [{ kind: "STOCK_RESERVATION", sourceId: target.reservationId, quantity: 1 }],
+      reason: "수령 오기록", evidence: "매장 반입 확인", physicalReturnConfirmed: true, correctedAt: "2026-03-04T07:30:00.000Z", idempotencyKey: key(),
+    });
+
+    const reopened = await sweeper().runOnce();
+
+    expect(reopened.reopenings).toMatchObject({ reopened: 1, unchanged: 0, failed: 0 });
+    expect(await closedAt(target.orderId)).toBeNull();
+    expect((await rows("select trigger_kind, executed_by from public.ordering_order_reopenings where order_id = $1", [target.orderId]))[0]).toEqual({ trigger_kind: "FULFILLMENT_CORRECTION", executed_by: "SYSTEM" });
+    expect((await sweeper().runOnce()).reopenings).toMatchObject({ attempted: 0, reopened: 0 }); // 이미 근거로 쓰인 정정은 후보가 아니다
+
+    // 종결 조건이 그대로 충족되어 재개할 수 없는 경우는 변경 없음으로 센다
+    const stuck = await order(10, { deliver: true, close: true });
+    await sweeper().runOnce();
+    await createPgFulfillmentApi({ pool: db.pool() }).correctFulfillment(owner, {
+      tenantId: T_A, orderId: stuck.orderId, fulfillmentId: stuck.fulfillmentId!, quantity: 1,
+      restorations: [{ kind: "STOCK_RESERVATION", sourceId: stuck.reservationId, quantity: 1 }],
+      reason: "수령 오기록", evidence: "매장 반입 확인", physicalReturnConfirmed: true, correctedAt: "2026-03-04T07:30:00.000Z", idempotencyKey: key(),
+    });
+    const real = createPgCancellationApi({ pool: db.pool() });
+    const unchanged = await sweeper({
+      cancellations: {
+        executeOrderClosure: (request) => real.executeOrderClosure(request),
+        executeOrderReopening: async () => {
+          throw new AppError("BUSINESS_INVARIANT", "closure conditions are still satisfied");
+        },
+      },
+    }).runOnce();
+    expect(unchanged.reopenings).toMatchObject({ reopened: 0, unchanged: 1, failed: 0 });
+    expect(await closedAt(stuck.orderId)).not.toBeNull();
   });
 });

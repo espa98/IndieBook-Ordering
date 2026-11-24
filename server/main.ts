@@ -43,8 +43,8 @@ const sweepLoop = startSweepLoop({
   intervalMs: config.closureSweepIntervalSeconds * 1000,
   run: async () => {
     const result = await sweeper.runOnce();
-    if (!result.skipped && (result.orders.closed > 0 || result.purchaseOrders.closed > 0 || result.orders.failed > 0 || result.purchaseOrders.failed > 0)) {
-      console.log(`closure sweep: orders closed=${result.orders.closed} blocked=${result.orders.blocked} failed=${result.orders.failed}, purchaseOrders closed=${result.purchaseOrders.closed} blocked=${result.purchaseOrders.blocked} failed=${result.purchaseOrders.failed}`);
+    if (!result.skipped && (result.orders.closed > 0 || result.purchaseOrders.closed > 0 || result.reopenings.reopened > 0 || result.orders.failed > 0 || result.purchaseOrders.failed > 0 || result.reopenings.failed > 0)) {
+      console.log(`closure sweep: orders closed=${result.orders.closed} blocked=${result.orders.blocked} failed=${result.orders.failed}, reopened=${result.reopenings.reopened} failed=${result.reopenings.failed}, purchaseOrders closed=${result.purchaseOrders.closed} blocked=${result.purchaseOrders.blocked} failed=${result.purchaseOrders.failed}`);
     }
   },
   logError: (error) => console.error("closure sweep error:", error instanceof Error ? error.message : "unknown error"),

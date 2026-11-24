@@ -120,6 +120,16 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
       fields: ["orderLineId", "sources", "receivedAt"],
       run: (c) => fulfillments.postFulfillment(actor(c), merge(c, { tenantId: t(c), orderId: c.params.orderId!, idempotencyKey: c.idempotencyKey })),
     }),
+    route("POST", "/orders/(?<orderId>[^/]+)/fulfillments/(?<fulfillmentId>[^/]+)/corrections", {
+      success: 201,
+      fields: ["quantity", "restorations", "reason", "evidence", "physicalReturnConfirmed", "correctedAt"],
+      run: (c) => fulfillments.correctFulfillment(actor(c), merge(c, { tenantId: t(c), orderId: c.params.orderId!, fulfillmentId: c.params.fulfillmentId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/payments/(?<paymentId>[^/]+)/corrections", {
+      success: 201,
+      fields: ["reducedKrw", "reason", "evidence", "correctedAt"],
+      run: (c) => payments.correctPayment(actor(c), merge(c, { tenantId: t(c), paymentId: c.params.paymentId!, idempotencyKey: c.idempotencyKey })),
+    }),
     route("POST", "/orders/(?<orderId>[^/]+)/cancellation-requests", {
       success: 201,
       fields: ["orderLineId", "quantity", "reason", "expectedVersion", "requestedAt"],

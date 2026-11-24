@@ -1,6 +1,7 @@
 import type { PoolClient } from "pg";
 import { authorizedActions } from "../auth/authorizedActions";
 import { AppError } from "../errors/AppError";
+import type { CorrectFulfillmentRequest, FulfillmentCorrection } from "../fulfillment/correctFulfillment";
 import type { Fulfillment, PostFulfillmentRequest } from "../fulfillment/postFulfillment";
 import type { StockReservationDelivery } from "../inventory/deliverStockReservation";
 import type { StockMovement } from "../inventory/registerInitialStock";
@@ -35,6 +36,7 @@ type Actor = { userId: string };
 const iso = (value: Date) => value.toISOString();
 
 export type PostFulfillmentBody = Omit<PostFulfillmentRequest, "receivedBy">;
+export type CorrectFulfillmentBody = Omit<CorrectFulfillmentRequest, "actorRole" | "correctedBy">;
 export type RequestOrderCancellationBody = Omit<RequestOrderCancellationRequest, "requestedBy">;
 
 export async function loadFulfillments(client: PoolClient, tenantId: string, orderId: string): Promise<Fulfillment[]> {
@@ -285,6 +287,108 @@ export function createPgFulfillmentApi(deps: { pool: PoolLike }) {
     });
   }
 
+  /** 수령 정정(Owner): 원 수령은 두고 음수 수령 행과 출처별 복원(예약 인도 취소·재고 복원 또는 배분 인도 취소)을 더한다 (ST-F02) */
+  async function correctOnce(actor: Actor, request: CorrectFulfillmentBody): Promise<FulfillmentCorrection> {
+    return inTransaction(deps.pool, "service_role", actor.userId, async (client) => {
+      const principal = principalFor(await loadMembership(client, actor.userId, request.tenantId), actor.userId, request.tenantId);
+      const restorations = Array.isArray(request.restorations) ? request.restorations : [];
+      const [order] = await loadOrders(client, request.tenantId, { orderId: request.orderId, lock: "share" });
+      let reservations: StockReservationRecord[] = [];
+      let deliveries: StockReservationDelivery[] = [];
+      let movements: StockMovement[] = [];
+      let fulfillments: Fulfillment[] = [];
+      let allocations: ReceiptAllocation[] = [];
+      let allocationDeliveries: AllocationDelivery[] = [];
+      if (order) {
+        // 락 순서: 주문 인도 락 → 책 락(정렬 순) → 발주 품목 락(정렬 순), 수령과 같다
+        await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`ful:${order.tenantId}:${order.id}`]);
+        const sourceIds = restorations.map((r) => r?.sourceId).filter(isUuid);
+        const bookKeys = (
+          sourceIds.length === 0 ? [] : (await client.query("select distinct book_key from public.ordering_stock_reservations where tenant_id = $1 and id = any($2::uuid[])", [order.tenantId, sourceIds])).rows
+        )
+          .map((r) => r.book_key as string)
+          .sort();
+        for (const book of bookKeys) await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`${order.tenantId}:${book}`]);
+        for (const book of bookKeys) {
+          const ledger = await loadBookLedger(client, order.tenantId, book);
+          reservations = reservations.concat(ledger.reservations);
+          deliveries = deliveries.concat(ledger.deliveries);
+          movements = movements.concat(ledger.movements);
+        }
+        const allocationIds = restorations.filter((r) => r?.kind === "RECEIPT_ALLOCATION").map((r) => r.sourceId).filter(isUuid);
+        if (allocationIds.length > 0) {
+          const lines = (
+            await client.query(
+              `select distinct g.po_line_id from public.ordering_receipt_allocations a
+                 join public.ordering_goods_receipts g on g.tenant_id = a.tenant_id and g.id = a.receipt_id
+                where a.tenant_id = $1 and a.id = any($2::uuid[])`,
+              [order.tenantId, allocationIds],
+            )
+          ).rows.map((r) => r.po_line_id as string);
+          for (const line of lines.sort()) await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [polLockKey(order.tenantId, line)]);
+          ({ allocations, deliveries: allocationDeliveries } = await loadAllocationLedger(client, order.tenantId, allocationIds));
+        }
+        fulfillments = await loadFulfillments(client, order.tenantId, order.id);
+      }
+      const idempotency = await loadCommands(client, request.tenantId, request.idempotencyKey);
+      const known = new Set(idempotency.keys());
+      const newDeliveries: StockReservationDelivery[] = [];
+      const newMovements: StockMovement[] = [];
+      const newAllocationDeliveries: AllocationDelivery[] = [];
+      const newFulfillments: Fulfillment[] = [];
+      const newCorrections: FulfillmentCorrection[] = [];
+      const forbidden = () => {
+        throw new Error("this command must not write this ledger");
+      };
+      const { tenantId: _t, ...rest } = request;
+      void _t;
+      const result = authorizedActions.correctFulfillment(
+        {
+          orders: { get: (t, id) => (order && order.tenantId === t && order.id === id ? order : undefined), list: () => (order ? [order] : []), save: forbidden },
+          fulfillments: { list: () => fulfillments, save: (f) => void newFulfillments.push(f) },
+          fulfillmentCorrections: { list: () => [], save: (c) => void newCorrections.push(c) },
+          stockReservations: { get: (_t2, id) => reservations.find((r) => r.id === id), list: (_t2, bookId) => reservations.filter((r) => r.bookId === bookId), save: forbidden },
+          stockReservationDeliveries: { list: (_t2, id) => deliveries.filter((d) => d.reservationId === id), save: (d) => void newDeliveries.push(d) },
+          stockMovements: { list: (_t2, bookId) => movements.filter((m) => m.bookId === bookId), save: (m) => void newMovements.push(m) },
+          receiptAllocations: { get: (_t2, id) => allocations.find((a) => a.id === id) },
+          allocationDeliveries: { list: (_t2, id) => allocationDeliveries.filter((d) => d.allocationId === id), save: (d) => void newAllocationDeliveries.push(d) },
+          idempotency,
+        },
+        principal,
+        rest,
+      );
+      for (const d of newDeliveries) {
+        await client.query("insert into public.ordering_stock_reservation_deliveries (id, tenant_id, reservation_id, quantity, delivered_by, delivered_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7)", [d.id, d.tenantId, d.reservationId, d.quantity, d.deliveredBy, d.deliveredAt, d.recordedAt]);
+      }
+      for (const m of newMovements) {
+        await client.query(
+          "insert into public.ordering_stock_movements (id, tenant_id, book_key, kind, direction, quantity, reason, reservation_id, cancellation_id, acted_by, acted_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+          [m.id, m.tenantId, m.bookId, m.kind, m.direction, m.quantity, m.reason, m.reservationId ?? null, m.cancellationId ?? null, m.actedBy, m.actedAt, m.recordedAt],
+        );
+      }
+      for (const d of newAllocationDeliveries) {
+        await client.query(
+          "insert into public.ordering_allocation_deliveries (id, tenant_id, allocation_id, receipt_id, order_id, order_line_id, quantity, delivered_by, delivered_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+          [d.id, d.tenantId, d.allocationId, d.receiptId, d.orderId, d.orderLineId, d.quantity, d.deliveredBy, d.deliveredAt, d.recordedAt],
+        );
+      }
+      for (const f of newFulfillments) {
+        await client.query(
+          "insert into public.ordering_fulfillments (id, tenant_id, order_id, order_line_id, quantity, unit_price_krw, amount_krw, sources, received_by, received_at, recorded_at, corrects_fulfillment_id) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+          [f.id, f.tenantId, f.orderId, f.orderLineId, f.quantity, f.unitPriceKrw, f.amountKrw, JSON.stringify(f.sources), f.receivedBy, f.receivedAt, f.recordedAt, f.correctsFulfillmentId ?? null],
+        );
+      }
+      for (const c of newCorrections) {
+        await client.query(
+          "insert into public.ordering_fulfillment_corrections (id, tenant_id, order_id, fulfillment_id, reversal_fulfillment_id, quantity, restorations, reason, evidence, corrected_by, corrected_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+          [c.id, c.tenantId, c.orderId, c.fulfillmentId, c.reversalFulfillmentId, c.quantity, JSON.stringify(c.restorations), c.reason, c.evidence, c.correctedBy, c.correctedAt, c.recordedAt],
+        );
+      }
+      await saveNewCommands(client, idempotency, known);
+      return result;
+    });
+  }
+
   async function withRetry<T>(run: () => Promise<T>): Promise<T> {
     // 같은 멱등 키가 동시에 들어오면 한쪽의 저장이 유일 제약에 걸린다. 한 번 다시 시도하면 먼저 저장된 결과를 본다
     for (let attempt = 0; ; attempt++) {
@@ -303,6 +407,7 @@ export function createPgFulfillmentApi(deps: { pool: PoolLike }) {
 
   return {
     postFulfillment: (actor: Actor, request: PostFulfillmentBody) => withRetry(() => postOnce(actor, request)),
+    correctFulfillment: (actor: Actor, request: CorrectFulfillmentBody) => withRetry(() => correctOnce(actor, request)),
     requestOrderCancellation: (actor: Actor, request: RequestOrderCancellationBody) => withRetry(() => cancelOnce(actor, request)),
   };
 }
