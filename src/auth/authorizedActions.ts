@@ -58,6 +58,9 @@ import { markPurchaseOrderReady } from "../procurement/markPurchaseOrderReady";
 import { recordSupplierReply } from "../procurement/recordSupplierReply";
 import { respondToCancellationRequest } from "../procurement/respondToCancellationRequest";
 import { registerBook } from "../catalog/registerBook";
+import { registerSupplier } from "../catalog/registerSupplier";
+import { setSupplierActive } from "../catalog/setSupplierActive";
+import { updateSupplier } from "../catalog/updateSupplier";
 import { updateBook } from "../catalog/updateBook";
 import { bindActor } from "./bindActor";
 import { inviteStaff } from "./inviteStaff";
@@ -132,6 +135,10 @@ export const authorizedActions = {
   // 도서 관리(ST-B01~B03): Owner·Staff 공용
   registerBook: bindActor(registerBook, { nameField: "registeredBy", allow: BOTH }),
   updateBook: bindActor(updateBook, { nameField: "changedBy", allow: BOTH }),
+  // 공급처 관리(ST-B04): Owner 또는 점주가 위임한 직원(도메인 함수가 위임을 검사한다)
+  registerSupplier: bindActor(registerSupplier, { roleField: "actorRole", nameField: "registeredBy", allow: BOTH }),
+  updateSupplier: bindActor(updateSupplier, { roleField: "actorRole", nameField: "changedBy", allow: BOTH }),
+  setSupplierActive: bindActor(setSupplierActive, { roleField: "actorRole", nameField: "changedBy", allow: BOTH }),
   // 행위자 필드가 없는 명령: 테넌트만 주체에서 주입한다
   confirmOrderService: bindActor(confirmOrderService, { allow: BOTH }),
   createOrderService: bindActor(createOrderService, { allow: BOTH }),

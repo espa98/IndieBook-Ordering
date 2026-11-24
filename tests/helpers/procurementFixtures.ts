@@ -30,6 +30,12 @@ export function createInMemorySupplierRepository(initial: Supplier[] = []) {
     get(tenantId: string, code: string): Supplier | undefined {
       return suppliers.get(`${tenantId}:${code}`);
     },
+    list(tenantId: string): Supplier[] {
+      return [...suppliers.values()].filter((x) => x.tenantId === tenantId);
+    },
+    save(supplier: Supplier): void {
+      suppliers.set(`${supplier.tenantId}:${supplier.code}`, supplier);
+    },
   };
 }
 

@@ -8,10 +8,16 @@ import type { OrderRepository } from "../order/confirmOrderService";
 import type { DuplicateRiskApprovalRepository } from "./approveDuplicateRisk";
 import { openSupplierObligations, type SupplierObligationDeps } from "./supplierObligations";
 
+export type OrderChannel = "WEB" | "EMAIL" | "PHONE" | "MESSENGER" | "FILE" | "API";
+
 export type Supplier = {
   tenantId: string;
   code: string;
   active: boolean;
+  /** 공급처 관리(ST-B04)로 등록된 경우에만 있다 */
+  name?: string;
+  orderChannel?: OrderChannel;
+  version?: number;
 };
 
 export type SupplierRepository = {
