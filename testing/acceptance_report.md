@@ -8,7 +8,7 @@
 
 | 영역 | 판정 | 한 줄 근거 |
 |---|---|---|
-| 도메인 단위·통합(메모리 저장소) | **PASS** | `npx vitest run` 105 files / 1064 tests 통과, 실패 0 |
+| 도메인 단위·통합(메모리 저장소) | **PASS** | `npx vitest run` 109 files / 1086 tests 통과, 실패 0 (DB 테스트 22개 포함) |
 | 타입 검사 | **PASS** | `npx tsc --noEmit` 출력 없음 |
 | OpenAPI 스키마·계약 | **PARTIAL** | 주문 API(05단계)만 명세가 있고 26개 통과. 나머지 영역은 명세·구현 없음 |
 | HTTP | **PARTIAL** | 핸들러 단위 41개 통과. 실제 서버·라우터·JWT 없음 |
@@ -25,7 +25,7 @@
 
 | 명령 | 결과 |
 |---|---|
-| `npx vitest run` | files 105, tests 1064, passed 1064, failed 0 (ST-A01/A02 추가 후 재실행. 디렉터리별 표도 이 실행의 JSON 집계) |
+| `npx vitest run` | files 109, tests 1086, passed 1086, failed 0 (격리 DB 스키마·RLS 추가 후 재실행. 디렉터리별 표도 이 실행의 JSON 집계) |
 | `npx tsc --noEmit` | 출력 없음(오류 0) |
 | 정적 점검: `git ls-files` 파일명(.env·secret·credential·pem·key) | 해당 없음 |
 | 정적 점검: `src tests openapi implementation package.json`에서 JWT·키 패턴, `ordering-dev`·`testBookshare` 프로젝트 ID, `service_role` grep | 해당 없음 |
@@ -50,7 +50,8 @@
 | closure | 4 | 15 |
 | cancellation | 5 | 25 |
 | reopening | 1 | 6 |
-| **합계** | **105** | **1064** |
+| db | 4 | 22 |
+| **합계** | **109** | **1086** |
 
 (`tests/helpers`는 테스트 파일이 없는 공용 픽스처다.)
 
@@ -260,4 +261,24 @@
 - 계정 저장소는 사용자 ID와 이메일 유일성을 가정한다. 이메일 변경은 없다.
 - `AccountPrincipal`을 받는 명령(`openStore`, `acceptInvitationAsAccount`)은 `authorizedActions`(테넌트 주체용) 대상이 아니다. 진입점이 `resolveAccountPrincipal`로 주체를 만들어 전달해야 한다.
 - 서점 중지·해지(ST-A06/A07)는 P1 정책 승인 전이라 구현하지 않았다. 개인정보 접근·내보내기(UC-25)도 마찬가지다.
+
+## 15. 격리 DB 스키마·RLS 첫 증분 (E1 승인 후)
+
+테스트 22개(`tests/db`). 격리 로컬 Postgres 17.12에서만 실행했다. `ordering-dev`·`testBookshare`에는 접속하지 않았고 접속 정보가 코드에 없다.
+
+| 구성 | 내용 |
+|---|---|
+| `src/db/migrate.ts` | `db/migrations/*.sql`을 파일명 순서로 1회 적용, 파일마다 트랜잭션(실패 시 롤백·미기록), 적용 후 내용 변경 거부, 체크섬은 줄바꿈(CRLF/LF) 정규화 |
+| `db/test-support/supabase_shim.sql` | 테스트 전용. `anon`·`authenticated`·`service_role` 역할과 `auth.uid()`(요청 JWT 클레임 `sub`)를 흉내 낸다. 실제 Supabase에는 적용하지 않는다 |
+| `001_foundation.sql` | `ordering_tenants`·`ordering_members`, `private.is_ordering_member`(SECURITY DEFINER, `search_path` 빈 값 고정, anon 실행 불가), 클라이언트에 SELECT만 허용하는 RLS(Owner는 구성원 전체·Staff는 본인 활성 행), **마지막 활성 Owner 보호 트리거**(행 잠금으로 두 세션의 동시 비활성화 중 하나만 통과) |
+| `002_orders.sql` | `ordering_orders`·`ordering_order_lines`: 복합 FK `(tenant_id, order_id)`, 확정 주문만 표시번호·합계(CHECK), 서점별 표시번호 유일, 갱신 시 `version`이 정확히 +1(낙관적 잠금 DB 강제), CONFIRMED→DRAFT 금지, 품목은 초안에만 추가·수량 감소만 허용, 읽기 RLS, 쓰기는 `service_role`만 |
+
+**검증된 것:** anon 42501, 비멤버·타 서점 0행(UUID를 알아도), 비활성 직원 즉시 차단, JWT에 OWNER 역할 클레임을 넣어도 멤버십만 신뢰(RLS-07), 직접 DML 차단, 교차 서점 FK 거부(23503), 두 독립 세션의 실제 경쟁 3건(유일 제약, 마지막 Owner 동시 비활성화, 같은 version 동시 확정에서 한쪽은 0행).
+
+**한계**
+- **범위:** 테넌트·멤버십·주문·품목뿐이다. 재고·예약·배분·발주·입고·결제·환급·안내·감사 스키마와 원장 append-only 트리거는 없다.
+- **shim:** 실제 Supabase의 `auth` 스키마(`auth.users`)·JWT 검증·PostgREST·역할 상속 설정과 다를 수 있다. 실제 Supabase 프로젝트에서 같은 마이그레이션을 재검증하지 않았다. `owner_user_id`·`user_id`는 `auth.users` FK 없이 uuid다.
+- **도메인 코드와 DB가 아직 연결되지 않았다.** 도메인 함수는 모두 동기식이고 저장소 인터페이스도 동기식인데 Postgres 드라이버는 비동기다. 이 간극을 메우는 영속화 방식은 사용자 결정이 필요하다(`release/approval_items.md` E7). 그래서 "기존 도메인 테스트가 DB에서도 통과"하는 검증과 도메인 수준 동시성(마지막 1권 등)은 아직 없다.
+- **쓰기 경로:** 백엔드가 `service_role`로 쓰면 RLS를 우회하므로 권한은 `authorizedActions`가 책임진다. 백엔드가 요청마다 `authenticated` 역할과 JWT 클레임으로 전환해 RLS를 방어선으로 쓰는 구성도 가능하며, 이 선택(E7과 함께 결정)은 아직 하지 않았다.
+- 조회 전용 `security_invoker` 뷰·민감 테이블 최소 필드 조회·RPC EXECUTE 점검은 해당 테이블이 없어 하지 않았다.
 

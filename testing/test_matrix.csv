@@ -1,25 +1,25 @@
 id,category,item,layer,status,evidence,notes
 G0,gate,문서/계약 차이 확정,document,PARTIAL,implementation/05~09 결과 보고서의 충돌·미결정 목록,OPDS·STBR 충돌과 해석을 단계별 보고서에 기록했으나 API V2.2·RLS V2.2와의 대조는 하지 않음
-G1,gate,격리 DB 복제 및 신규 DDL/FK/RLS 실행,db,PARTIAL,tests/db/isolatedPostgres 2 tests passed(로컬 Postgres 17.12 기동·DDL·두 독립 연결),E1 승인(2026-11-24). 인프라만 준비됨. 스키마·FK·RLS·JWT 클레임 테스트는 미작성. ordering-dev·testBookshare에는 접속하지 않음
+G1,gate,격리 DB 복제 및 신규 DDL/FK/RLS 실행,db,PARTIAL,"tests/db 4 files / 22 tests passed(로컬 Postgres 17.12): 마이그레이션 001·002, 복합 FK, RLS, 트리거",E1 승인(2026-11-24). 테넌트·멤버십·주문·품목만. 재고·결제·발주 등 나머지 스키마와 실제 Supabase 환경 검증은 미수행. ordering-dev·testBookshare에는 접속하지 않음
 G2,gate,실제 Owner/Staff JWT·비활성·교차 tenant,jwt-http,BLOCKED,저장소에 인증 서버·JWT 검증 없음. tests/auth 8 files / 44 tests는 순수 함수 단위 테스트(주체 도출·행위자 주입),JWT 서명 검증·서버 없음. resolvePrincipal은 검증이 끝난 신원을 입력으로 받음
-G3,gate,주문/발주 생성·확정·PO 전송·입고·수량,domain,PARTIAL,vitest 105 files / 1064 tests passed (메모리 저장소),도메인 로직만. DB 트랜잭션·제약 없음
+G3,gate,주문/발주 생성·확정·PO 전송·입고·수량,domain,PARTIAL,vitest 109 files / 1086 tests passed (메모리 저장소),도메인 로직만. DB 트랜잭션·제약 없음
 G4,gate,재고/인도 예약·배분·해제·인도 원장 대사,domain,PARTIAL,tests/inventory 26 files / 244 tests passed,도메인 로직만. 원장 대사(DB) 없음
 G5,gate,결제/환급 수동 사실 확인·원장 반영·외부 환급 증빙,domain,PARTIAL,tests/payment 11 files / 59 tests passed,도메인 로직만. PG 연동 없음(P2)
 G6,gate,원자적 종결 검사 및 Staff 요청 분리,domain,PARTIAL,tests/closure 4 files / 15 tests passed,원자성은 검증 후 연속 저장이며 DB 트랜잭션 아님
 G7,gate,기존 19개 테스트+2세션 경쟁+배포 승인,regression,BLOCKED,"기존 19개 테스트는 ordering-dev DB 측 테스트로 이 저장소에 없음, 2세션 경쟁은 DB 필요",배포 승인 없음
-TEST-UNIT,test-layer,단위/도메인 테스트,unit,PASS,npx vitest run → 105 files 1064 tests passed 0 failed,Node v24.18.0 / vitest 5.1.1 / base commit ac366ed + 인증 계층 변경
+TEST-UNIT,test-layer,단위/도메인 테스트,unit,PASS,npx vitest run → 109 files 1086 tests passed 0 failed,Node v24.18.0 / vitest 5.1.1 / base commit ac366ed + 인증 계층 변경
 TEST-TYPE,test-layer,타입 검사,static,PASS,npx tsc --noEmit → 출력 0줄(오류 없음),TypeScript 7.0.2
 TEST-OPENAPI,test-layer,OpenAPI 스키마 검사,contract,PARTIAL,tests/openapi 2 files / 26 tests passed,openapi/ordering.yaml은 05단계 주문 API만 다룸. 조달·입고·재고·결제·안내·종결 API는 명세·구현 없음
 TEST-HTTP,test-layer,HTTP 핸들러 테스트,http-handler,PARTIAL,tests/http 3 files / 41 tests passed,핸들러 함수 단위. 실제 서버·라우터·JWT 없음
 TEST-INTEGRATION,test-layer,통합 테스트(여러 모듈 결합),integration,PARTIAL,tests/fulfillment·notification·closure·cancellation·reopening·procurement(공급처 의무) 장면이 inventory/payment/order를 결합,메모리 저장소 기반 결합이며 실제 DB 통합 아님
-TEST-DB,test-layer,DB 테스트(제약·트리거·원장),db,PARTIAL,격리 로컬 Postgres 유일 제약 경쟁 1건(tests/db/isolatedPostgres),도메인 스키마 없음
-TEST-RLS,test-layer,RLS 정책 테스트,rls,BLOCKED,격리 DB와 실제 JWT 없음,
+TEST-DB,test-layer,DB 테스트(제약·트리거·원장),db,PARTIAL,tests/db/orderSchema·foundationRls: CHECK·UNIQUE·복합 FK·불변식 트리거,주문·품목·멤버십 범위. 원장(재고·결제·환급)·append-only 트리거 없음
+TEST-RLS,test-layer,RLS 정책 테스트,rls,PARTIAL,"tests/db/foundationRls·orderSchema: anon 42501, 타 서점 0행, 비활성·가짜 역할 클레임, 직접 DML 차단",테넌트·멤버십·주문·품목만. 실제 Supabase JWT가 아니라 shim의 request.jwt.claims로 재현. 민감 테이블(결제·증빙·고객)·뷰·RPC EXECUTE 점검 미수행
 TEST-JWT-HTTP,test-layer,실제 JWT+HTTP 테스트,jwt-http,BLOCKED,서버·인증 없음,
-TEST-CONCURRENCY,test-layer,두 독립 세션 동시성,concurrency,PARTIAL,기법 검증만: 격리 DB에서 두 독립 연결의 유일 제약 경쟁 재현,"도메인 동시성(마지막 1권 예약·인도, 환급 한도, 취소 잠금)은 아직 같은 프로세스의 순차 경쟁뿐"
+TEST-CONCURRENCY,test-layer,두 독립 세션 동시성,concurrency,PARTIAL,"tests/db 3건: 유일 제약 경쟁, 마지막 Owner 동시 비활성화, 같은 version 동시 확정","도메인 동시성(마지막 1권 예약·인도, 환급 한도, 취소 잠금)은 재고·결제 스키마와 영속화 계층이 필요해 아직 순차 경쟁뿐"
 TEST-REGRESSION19,test-layer,기존 19개 회귀 테스트,regression,BLOCKED,저장소에 해당 테스트 없음(DB 측),
 SEC-ADVISOR,security,Supabase Security Advisor,db,BLOCKED,미실행: 이 세션은 ordering-dev에 연결하지 않았고 변경·접속은 사전 승인 필요,
 SEC-EXECUTE-GRANT,security,함수 EXECUTE/GRANT 확대 점검,db,BLOCKED,미실행(읽기 전용 조회도 하지 않음),구현현황표 B절의 has_function_privilege 기록은 2026-11-22 문서 값이며 이번에 재확인하지 않음
-SEC-RLS-POLICY,security,RLS 정책 확대 여부,db,BLOCKED,미실행,
+SEC-RLS-POLICY,security,RLS 정책 확대 여부,db,PARTIAL,격리 DB에서 신규 정책만 존재(기존 정책 없음)와 PERMISSIVE OR 확대 없음 확인,ordering-dev의 기존 정책·GRANT 전수 점검은 미수행(접속하지 않음)
 SEC-SECRET-SCAN,security,저장소 시크릿·프로젝트 ID 정적 점검,static,PASS,"git ls-files에 .env/secret/key 파일명 없음, src·tests·openapi·implementation에서 JWT·키·ordering-dev/testBookshare 프로젝트 ID·service_role 패턴 없음",정규식 정적 점검이며 완전한 시크릿 스캐너가 아님
 SEC-NETWORK,security,도메인 코드의 외부 호출·환경변수 사용,static,PASS,src에서 process.env·fetch(·http(s):// grep 결과 없음,PG 승인·환불·알림 발송을 호출하지 않음
 SEC-FORBIDDEN-DB,security,testBookshare 접근 금지 준수,process,PASS,이 세션에서 testBookshare·ordering-dev에 접속하지 않음,

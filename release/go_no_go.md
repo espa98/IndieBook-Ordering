@@ -10,9 +10,9 @@
 
 | # | 조건 | 상태 | 증거 |
 |---|---|---|---|
-| T1 | 격리 테스트 DB에서 DDL·FK·RLS 실행(G1) | **부분** | E1 승인(2026-11-24)으로 로컬 Postgres 17 격리 DB 인프라 준비·두 독립 연결 경쟁 재현 확인(`tests/db/isolatedPostgres.test.ts`). DDL·FK·RLS는 아직 작성·실행 전 |
+| T1 | 격리 테스트 DB에서 DDL·FK·RLS 실행(G1) | **부분** | E1 승인(2026-11-24)으로 로컬 Postgres 17 격리 DB에서 마이그레이션 001·002(테넌트·멤버십·주문·품목)의 DDL·복합 FK·RLS·트리거를 실행·검증(테스트 22개). 나머지 스키마·실제 Supabase 재검증 전(`testing/acceptance_report.md` §15) |
 | T2 | 실제 Owner·Staff JWT, 비활성 계정, 교차 tenant HTTP 테스트(G2) | BLOCKED | 인증·서버 없음 |
-| T3 | 두 독립 세션 동시성: 마지막 1권 동시 배분, 동시 환급, 동시 취소/인도 | BLOCKED | 순차 경쟁으로만 검증 |
+| T3 | 두 독립 세션 동시성: 마지막 1권 동시 배분, 동시 환급, 동시 취소/인도 | **부분** | 순차 경쟁으로만 검증 |
 | T4 | 감사/원장 원자 롤백 | BLOCKED | 영속 계층·트랜잭션 없음 |
 | T5 | 기존 19개 회귀 테스트 재실행(G7) | BLOCKED | DB 측 테스트로 이 저장소에 없음 |
 | T6 | Security Advisor, 함수 EXECUTE/GRANT, RLS 정책 확대 점검 | BLOCKED | 미실행 |
