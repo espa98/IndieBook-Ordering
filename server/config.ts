@@ -5,6 +5,8 @@ export type ServerConfig = {
   databaseUrl: string;
   port: number;
   maxBodyBytes: number;
+  /** 종결 스위퍼 실행 간격(초). 0이면 끈다 */
+  closureSweepIntervalSeconds: number;
   jwt: JwtVerifyOptions;
 };
 
@@ -56,6 +58,7 @@ export function loadConfig(env: Record<string, string | undefined>): ServerConfi
     databaseUrl,
     port: integer(env, "PORT", 8080, 1, 65535),
     maxBodyBytes: integer(env, "MAX_BODY_BYTES", 1024 * 1024, 1, 64 * 1024 * 1024),
+    closureSweepIntervalSeconds: integer(env, "CLOSURE_SWEEP_INTERVAL_SECONDS", 300, 0, 86_400),
     jwt: { keys, audience: "authenticated", ...(env.SUPABASE_JWT_ISSUER ? { issuer: env.SUPABASE_JWT_ISSUER } : {}) },
   };
 }

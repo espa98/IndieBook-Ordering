@@ -47,3 +47,14 @@ describe("loadConfig: 서버 설정 해석 (비밀은 환경에서만)", () => {
     }
   });
 });
+
+describe("loadConfig: 종결 스위퍼 주기", () => {
+  it("기본은 300초이고 0이면 끄며, 정수가 아니거나 범위(0~86400)를 벗어나면 시작을 거부한다", () => {
+    expect(loadConfig(base).closureSweepIntervalSeconds).toBe(300);
+    expect(loadConfig({ ...base, CLOSURE_SWEEP_INTERVAL_SECONDS: "60" }).closureSweepIntervalSeconds).toBe(60);
+    expect(loadConfig({ ...base, CLOSURE_SWEEP_INTERVAL_SECONDS: "0" }).closureSweepIntervalSeconds).toBe(0);
+    for (const bad of ["-1", "1.5", "abc", "86401"]) {
+      expect(() => loadConfig({ ...base, CLOSURE_SWEEP_INTERVAL_SECONDS: bad }), bad).toThrow(/CLOSURE_SWEEP_INTERVAL_SECONDS/);
+    }
+  });
+});
