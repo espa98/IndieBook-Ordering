@@ -12,7 +12,7 @@ import type { GoodsReceiptRepository } from "../inventory/receiveGoods";
 import type { CancellationRepository } from "./createCancellationRequest";
 import type { PurchaseOrder } from "./createPurchaseOrder";
 import { cancellationRequestState } from "./cancellationRequestState";
-import { poLineState } from "./poLineState";
+import { poLineOpenQuantity } from "./poLineOpenQuantity";
 import type { PoReplyRepository } from "./recordSupplierReply";
 
 export type PurchaseOrderClosureBlocker = "OPEN_QUANTITY" | "EXCESS_UNDECIDED" | "DISPOSITION_OPEN" | "CANCELLATION_REQUEST_OPEN";
@@ -50,22 +50,9 @@ export function evaluatePurchaseOrderClosure(
   const replies = deps.replies.list(tenantId, po.id);
   const responses = deps.cancellations.listResponses(tenantId, po.id);
   const receipts = deps.receipts.list(tenantId, po.id);
-  const openQuantity = po.lines.some((line) => {
-    const { qvalid } = poLineState(
-      line.quantity,
-      replies.filter((r) => r.poLineId === line.poLineId),
-      responses
-        .filter((r) => r.poLineId === line.poLineId)
-        .reduce((sum, r) => sum + r.acceptedQuantity, 0),
-    );
-    const lineReceipts = receipts.filter((r) => r.poLineId === line.poLineId);
-    const received =
-      lineReceipts.reduce((sum, r) => sum + r.normalQuantity, 0) -
-      lineReceipts
-        .flatMap((r) => deps.receiptCorrections.list(tenantId, r.id))
-        .reduce((sum, c) => sum + c.quantity, 0);
-    return qvalid - received > 0;
-  });
+  const openQuantity = po.lines.some(
+    (line) => poLineOpenQuantity(deps, tenantId, line, replies, responses, receipts) > 0,
+  );
   if (openQuantity) blockers.push("OPEN_QUANTITY");
   // 초과입고는 승인·거절 결정으로 모두 처리되어야 한다 (BR-P06, D30)
   const excessUndecided = receipts.some(

@@ -5,6 +5,8 @@ import {
   type IdempotencyStore,
 } from "../idempotency/executeIdempotent";
 import type { OrderRepository } from "../order/confirmOrderService";
+import type { DuplicateRiskApprovalRepository } from "./approveDuplicateRisk";
+import { openSupplierObligations, type SupplierObligationDeps } from "./supplierObligations";
 
 export type Supplier = {
   tenantId: string;
@@ -37,6 +39,10 @@ export type AllocateSourcingDeps = {
   orders: OrderRepository;
   suppliers: SupplierRepository;
   allocations: SourcingAllocationRepository;
+  /** 연결하면, 이전 공급처 의무가 남은 품목의 재조달은 중복 위험 승인을 요구한다 (BR-P05) */
+  supplierObligations?: SupplierObligationDeps & {
+    duplicateRiskApprovals?: Pick<DuplicateRiskApprovalRepository, "list">;
+  };
   idempotency: IdempotencyStore;
 };
 
@@ -91,6 +97,30 @@ export function allocateSourcing(
       }
       if (!supplier.active) {
         throw new AppError("BUSINESS_INVARIANT", "supplier is not active");
+      }
+      if (deps.supplierObligations) {
+        const approvals =
+          deps.supplierObligations.duplicateRiskApprovals?.list(request.tenantId, order.id) ?? [];
+        const unapproved = openSupplierObligations(
+          deps.supplierObligations,
+          request.tenantId,
+          order.id,
+          line.lineId,
+        ).filter(
+          (o) =>
+            !approvals.some(
+              (a) =>
+                a.lineId === line.lineId &&
+                a.purchaseOrderId === o.purchaseOrderId &&
+                a.poLineId === o.poLineId,
+            ),
+        );
+        if (unapproved.length > 0) {
+          throw new AppError(
+            "BUSINESS_INVARIANT",
+            "a duplicate-risk approval is required to re-source a line with an open supplier obligation",
+          );
+        }
       }
       const alreadyAllocated = deps.allocations
         .list(request.tenantId)

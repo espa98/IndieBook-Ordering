@@ -15,6 +15,7 @@ import { paymentSummary } from "../payment/paymentSummary";
 import { refundTaskState } from "../payment/refundTaskState";
 import type { PaymentRepository } from "../payment/recordPayment";
 import type { PaymentVoidRepository } from "../payment/voidPayment";
+import { openSupplierObligations, type SupplierObligationDeps } from "../procurement/supplierObligations";
 import type { Order } from "./createDraftOrder";
 
 export type ClosureBlocker =
@@ -23,7 +24,8 @@ export type ClosureBlocker =
   | "PAYMENT_PENDING_VERIFICATION"
   | "REFUND_REQUIRED"
   | "REFUND_OPEN"
-  | "DISPOSITION_OPEN";
+  | "DISPOSITION_OPEN"
+  | "EXTERNAL_OBLIGATION_OPEN";
 
 export type OrderClosureEvaluation = {
   closable: boolean;
@@ -45,6 +47,8 @@ export type EvaluateOrderClosureDeps = {
   returnCompletions: Pick<ReturnCompletionRepository, "list">;
   returnExceptions: Pick<ReturnExceptionRepository, "list">;
   returnExceptionResolutions: Pick<ReturnExceptionResolutionRepository, "list">;
+  /** 배정을 풀고도 공급처 의무가 남은 주문의 종결 차단(BR-P05). 연결하지 않으면 이 검사는 하지 않는다 */
+  supplierObligations?: SupplierObligationDeps;
 };
 
 /**
@@ -93,6 +97,14 @@ export function evaluateOrderClosure(
     .flatMap((a) => deps.allocationCancellations.list(tenantId, a.id))
     .some((c) => cancellationOpenQuantity(deps, tenantId, c) > 0);
   if (dispositionOpen) blockers.push("DISPOSITION_OPEN");
+
+  // 공급처에 외부 구매 의무가 남아 있으면 고객 주문이 끝났어도 종결할 수 없다 (BR-P05)
+  if (
+    deps.supplierObligations &&
+    openSupplierObligations(deps.supplierObligations, tenantId, order.id).length > 0
+  ) {
+    blockers.push("EXTERNAL_OBLIGATION_OPEN");
+  }
 
   return { closable: blockers.length === 0, blockers };
 }
