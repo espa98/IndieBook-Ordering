@@ -159,4 +159,36 @@ describe("applyOrderCancellation: 승인된 취소 요청 적용 (ST-O05, BR-O05
     expect(order.version).toBe(orderD.version + 1);
     expect(deps.stockReservationReleases.list("tenant-a", reservation.id)).toHaveLength(1);
   });
+
+  it("모든 품목의 유효 수량이 0이 되도록 적용하면 전량 취소로 주문에 cancelledAt이 기록되고(CANCELLING), 일부만 취소하면 기록되지 않는다 (BR-O07)", () => {
+    const partial = applyScene(); // 2권 주문에서 1권만 취소
+    applyOrderCancellation(partial.deps, partial.applyRequest());
+    expect(partial.deps.orders.get("tenant-a", partial.orderD.id)!.cancelledAt).toBeUndefined();
+
+    const full = cancellationRequestScene();
+    const request = requestOrderCancellation(full.deps, full.cancelOrderRequest({ quantity: 2, idempotencyKey: "ocr-full" }));
+    decideOrderCancellation(full.deps, {
+      tenantId: "tenant-a",
+      requestId: request.id,
+      decision: "APPROVED",
+      actorRole: "OWNER",
+      decidedBy: "점주",
+      decidedAt: "2026-03-04T06:40:00.000Z",
+      idempotencyKey: "ocd-full",
+    });
+
+    applyOrderCancellation(full.deps, {
+      tenantId: "tenant-a",
+      requestId: request.id,
+      actorRole: "OWNER",
+      appliedBy: "점주",
+      appliedAt: "2026-03-04T06:45:00.000Z",
+      idempotencyKey: "oca-full",
+    });
+
+    const order = full.deps.orders.get("tenant-a", full.orderD.id)!;
+    expect(order.lines[0]!.quantity).toBe(0);
+    expect(order).toMatchObject({ totalKrw: "0", cancelledAt: "2026-03-04T06:45:00.000Z" });
+    expect(order.closedAt).toBeUndefined(); // 취소 종결은 후속 업무가 끝난 뒤 서버가 한다
+  });
 });

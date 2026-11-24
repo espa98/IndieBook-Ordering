@@ -21,6 +21,8 @@ export type Order = {
   displayNumber?: number;
   /** 종결 시각. 종결된 주문에는 신규 중요 거래를 추가할 수 없다 (BR-O08) */
   closedAt?: string;
+  /** 전량 취소가 확정된 시각(CANCELLING). 후속 물량·금전 업무가 끝나면 종결(CANCELLED)한다 (ST-O06, BR-O07) */
+  cancelledAt?: string;
 };
 
 export function createDraftOrder(input: {

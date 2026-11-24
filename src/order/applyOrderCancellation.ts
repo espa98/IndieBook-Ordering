@@ -173,6 +173,8 @@ export function applyOrderCancellation(
         lines,
         totalKrw: totalOf(lines),
         version: order.version + 1,
+        // 모든 품목의 유효 수량이 0이면 전량 취소(CANCELLING)다. 일부 취소는 CONFIRMED를 유지한다 (BR-O07)
+        ...(lines.every((l) => l.quantity === 0) ? { cancelledAt: request.appliedAt } : {}),
       };
       deps.orders.save(updated);
       // 이미 확인된 결제가 줄어든 총액을 넘으면 물량과 독립인 환급 필요 업무를 연다 (ST-O05, ST-Y05)

@@ -1,4 +1,5 @@
 import type { ApplyOrderCancellationRequest } from "../../src/order/applyOrderCancellation";
+import { applyOrderCancellation } from "../../src/order/applyOrderCancellation";
 import { decideOrderCancellation } from "../../src/order/decideOrderCancellation";
 import type { DecideOrderCancellationRequest } from "../../src/order/decideOrderCancellation";
 import { requestOrderCancellation } from "../../src/order/requestOrderCancellation";
@@ -68,4 +69,32 @@ export function applyScene() {
     ...extra,
   });
   return { ...s, applyRequest };
+}
+
+/** 주문 D(2권)를 전량 취소 적용해 CANCELLING(cancelledAt)으로 만든 세계. 결제 전이다. */
+export function fullyCancelledScene() {
+  const s = cancellationRequestScene();
+  const request = requestOrderCancellation(
+    s.deps,
+    s.cancelOrderRequest({ quantity: 2, idempotencyKey: "ocr-fc" }),
+  );
+  decideOrderCancellation(s.deps, {
+    tenantId: "tenant-a",
+    requestId: request.id,
+    decision: "APPROVED",
+    actorRole: "OWNER",
+    decidedBy: "점주",
+    decidedAt: "2026-03-04T06:40:00.000Z",
+    idempotencyKey: "ocd-fc",
+  });
+  const apply = () =>
+    applyOrderCancellation(s.deps, {
+      tenantId: "tenant-a",
+      requestId: request.id,
+      actorRole: "OWNER",
+      appliedBy: "점주",
+      appliedAt: "2026-03-04T06:45:00.000Z",
+      idempotencyKey: "oca-fc",
+    });
+  return { ...s, cancellationRequestRecord: request, applyFullCancellation: apply };
 }
