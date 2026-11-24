@@ -1,92 +1,20 @@
-import type { Pool, PoolClient } from "pg";
-import type { Membership } from "../auth/authorizeTenantAccess";
+import type { PoolClient } from "pg";
 import type { Book } from "../catalog/registerBook";
 import { AppError } from "../errors/AppError";
-import type { IdempotencyStore } from "../idempotency/executeIdempotent";
-import type { Order, OrderLine } from "../order/createDraftOrder";
+import type { Order } from "../order/createDraftOrder";
 import { createOrderApi } from "../order/orderApi";
+import {
+  inTransaction,
+  isCommandKeyConflict,
+  isUuid,
+  loadCommands,
+  loadMembership,
+  loadOrders,
+  saveNewCommands,
+  type PoolLike,
+} from "./pgSupport";
 
-/** 풀에서 연결을 빌려 쓰는 최소 인터페이스 (pg.Pool과 호환) */
-export type PoolLike = Pick<Pool, "connect">;
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const isUuid = (value: unknown): value is string => typeof value === "string" && UUID.test(value);
-
-type OrderRow = {
-  id: string;
-  tenant_id: string;
-  status: "DRAFT" | "CONFIRMED";
-  version: string;
-  display_number: string | null;
-  total_krw: string | null;
-  created_at: Date;
-  closed_at: Date | null;
-  cancelled_at: Date | null;
-};
-type LineRow = {
-  id: string;
-  order_id: string;
-  book_key: string;
-  quantity: number;
-  unit_price_krw: string;
-  book_title: string | null;
-  book_isbn: string | null;
-  list_price_krw: string | null;
-};
-
-function toOrder(row: OrderRow, lines: LineRow[]): Order {
-  return {
-    id: row.id,
-    tenantId: row.tenant_id,
-    status: row.status,
-    version: Number(row.version),
-    createdAt: row.created_at.toISOString(),
-    lines: lines.map(
-      (l): OrderLine => ({
-        lineId: l.id,
-        bookId: l.book_key,
-        quantity: l.quantity,
-        unitPriceKrw: l.unit_price_krw,
-        ...(l.book_title === null ? {} : { bookTitle: l.book_title }),
-        ...(l.book_isbn === null ? {} : { bookIsbn: l.book_isbn }),
-        ...(l.list_price_krw === null ? {} : { listPriceKrw: l.list_price_krw }),
-      }),
-    ),
-    ...(row.total_krw === null ? {} : { totalKrw: row.total_krw }),
-    ...(row.display_number === null ? {} : { displayNumber: Number(row.display_number) }),
-    ...(row.closed_at === null ? {} : { closedAt: row.closed_at.toISOString() }),
-    ...(row.cancelled_at === null ? {} : { cancelledAt: row.cancelled_at.toISOString() }),
-  };
-}
-
-async function loadOrders(
-  client: PoolClient,
-  tenantId: string,
-  options: { orderId?: string; lock?: boolean },
-): Promise<Order[]> {
-  if (!isUuid(tenantId) || (options.orderId !== undefined && !isUuid(options.orderId))) return [];
-  const orders = (
-    await client.query<OrderRow>(
-      `select * from public.ordering_orders where tenant_id = $1 ${options.orderId === undefined ? "" : "and id = $2"} ${
-        options.lock ? "for update" : ""
-      }`,
-      options.orderId === undefined ? [tenantId] : [tenantId, options.orderId],
-    )
-  ).rows;
-  if (orders.length === 0) return [];
-  const lines = (
-    await client.query<LineRow>(
-      "select * from public.ordering_order_lines where tenant_id = $1 and order_id = any($2::uuid[]) order by order_id, position",
-      [tenantId, orders.map((o) => o.id)],
-    )
-  ).rows;
-  return orders.map((o) =>
-    toOrder(
-      o,
-      lines.filter((l) => l.order_id === o.id),
-    ),
-  );
-}
+export type { PoolLike } from "./pgSupport";
 
 async function loadBooks(client: PoolClient, tenantId: string, bookIds: string[]): Promise<Book[]> {
   if (!isUuid(tenantId) || bookIds.length === 0) return [];
@@ -115,39 +43,6 @@ async function loadBooks(client: PoolClient, tenantId: string, bookIds: string[]
       recordedAt: b.recorded_at.toISOString(),
     }),
   );
-}
-
-async function loadMembership(client: PoolClient, userId: string, tenantId: string): Promise<Membership[]> {
-  if (!isUuid(userId) || !isUuid(tenantId)) return [];
-  const rows = (
-    await client.query("select user_id, tenant_id, role, active from public.ordering_members where user_id = $1 and tenant_id = $2", [
-      userId,
-      tenantId,
-    ])
-  ).rows;
-  return rows.map((r) => ({
-    userId: r.user_id,
-    tenantId: r.tenant_id,
-    role: r.role,
-    status: r.active ? "ACTIVE" : "INACTIVE",
-  }));
-}
-
-const commandKey = (tenantId: string, operation: string, key: string) => JSON.stringify([tenantId, operation, key]);
-
-async function loadCommands(client: PoolClient, tenantId: string, key: unknown): Promise<IdempotencyStore> {
-  const store: IdempotencyStore = new Map();
-  if (!isUuid(tenantId) || typeof key !== "string" || key.trim() === "") return store;
-  const rows = (
-    await client.query("select operation, command_key, payload_hash, result from public.ordering_commands where tenant_id = $1 and command_key = $2", [
-      tenantId,
-      key,
-    ])
-  ).rows;
-  for (const r of rows) {
-    store.set(commandKey(tenantId, r.operation, r.command_key), { payloadHash: r.payload_hash, result: r.result });
-  }
-  return store;
 }
 
 async function saveOrder(client: PoolClient, order: Order, before: Order | undefined): Promise<void> {
@@ -193,31 +88,6 @@ type Actor = { userId: string };
  * 호출자는 풀이 승인된 DB를 가리키는지 책임진다.
  */
 export function createPgOrderApi(deps: { pool: PoolLike }) {
-  async function inTransaction<T>(role: "service_role" | "authenticated", userId: string, run: (client: PoolClient) => Promise<T>): Promise<T> {
-    const client = await deps.pool.connect();
-    try {
-      await client.query("begin");
-      try {
-        await client.query(`set local role ${role}`);
-        if (role === "authenticated") {
-          await client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: userId })]);
-        }
-        const result = await run(client);
-        await client.query("commit");
-        return result;
-      } catch (error) {
-        await client.query("rollback").catch(() => undefined);
-        throw error;
-      }
-    } finally {
-      client.release();
-    }
-  }
-
-  const isCommandKeyConflict = (error: unknown) =>
-    (error as { code?: string; constraint?: string }).code === "23505" &&
-    (error as { constraint?: string }).constraint === "ordering_commands_pkey";
-
   async function write<T>(
     actor: Actor,
     request: { tenantId: string; idempotencyKey?: unknown; orderId?: string; lines?: { bookId?: unknown }[] },
@@ -227,11 +97,11 @@ export function createPgOrderApi(deps: { pool: PoolLike }) {
     // 같은 멱등 키가 동시에 들어오면 한쪽의 저장이 유일 제약에 걸린다. 한 번 다시 시도하면 먼저 저장된 결과를 본다
     for (let attempt = 0; ; attempt++) {
       try {
-        return await inTransaction("service_role", actor.userId, async (client) => {
+        return await inTransaction(deps.pool, "service_role", actor.userId, async (client) => {
           const memberships = await loadMembership(client, actor.userId, request.tenantId);
           const idempotency = await loadCommands(client, request.tenantId, request.idempotencyKey);
           const knownCommands = new Set(idempotency.keys());
-          const loaded = await loadOrders(client, request.tenantId, { orderId: request.orderId, lock: options.confirm });
+          const loaded = await loadOrders(client, request.tenantId, { orderId: request.orderId, lock: options.confirm ? "update" : undefined });
           const bookIds = (Array.isArray(request.lines) ? request.lines : [])
             .map((l) => (l && typeof l === "object" ? l.bookId : undefined))
             .filter((id): id is string => typeof id === "string");
@@ -265,14 +135,7 @@ export function createPgOrderApi(deps: { pool: PoolLike }) {
           if (counter !== counterStart && options.confirm) {
             await client.query("update public.ordering_counters set order_number = $2 where tenant_id = $1", [request.tenantId, counter]);
           }
-          for (const [storeKey, entry] of idempotency) {
-            if (knownCommands.has(storeKey)) continue;
-            const [tenantId, operation, key] = JSON.parse(storeKey) as [string, string, string];
-            await client.query(
-              "insert into public.ordering_commands (tenant_id, operation, command_key, payload_hash, result) values ($1, $2, $3, $4, $5::jsonb)",
-              [tenantId, operation, key, entry.payloadHash, JSON.stringify(entry.result)],
-            );
-          }
+          await saveNewCommands(client, idempotency, knownCommands);
           return result;
         });
       } catch (error) {
@@ -289,7 +152,7 @@ export function createPgOrderApi(deps: { pool: PoolLike }) {
   ): Promise<T> {
     // 읽기는 authenticated 역할로 실행해 RLS가 서점·활성 멤버십을 한 번 더 걸러 준다
     const userId = isUuid(actor.userId) ? actor.userId : "";
-    return inTransaction(userId === "" ? "service_role" : "authenticated", userId, async (client) => {
+    return inTransaction(deps.pool, userId === "" ? "service_role" : "authenticated", userId, async (client) => {
       const memberships = userId === "" ? [] : await loadMembership(client, userId, request.tenantId);
       const loaded = userId === "" ? [] : await loadOrders(client, request.tenantId, { orderId: request.orderId });
       const api = createOrderApi({

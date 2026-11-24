@@ -163,7 +163,8 @@ describe("authorizedActions: 신원 필드를 주체에서 주입한 명령 모�
       for (const name of Object.keys(authorizedActions)) {
         // import한 도메인 함수를 맨 이름으로 부르는 것만 직접 호출로 본다. `authorizedActions.x(`·`api.x(` 같은
         // 멤버 호출은 모음이나 모음을 거친 API 객체의 호출이라 제외한다
-        const direct = new RegExp(String.raw`(?<![\w.])` + name + String.raw`\(`);
+        // 메서드·함수 선언(`async x(`·`function x(`)도 호출이 아니라서 제외한다
+        const direct = new RegExp(String.raw`(?<![\w.])(?<!async )(?<!function )` + name + String.raw`\(`);
         expect(direct.test(text), `${path} calls ${name}() directly`).toBe(false);
       }
     }
