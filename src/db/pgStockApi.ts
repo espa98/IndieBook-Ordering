@@ -24,7 +24,7 @@ export type ReserveStockBody = Omit<ReserveStockRequest, "reservedBy">;
 
 const iso = (value: Date) => value.toISOString();
 
-async function loadBookLedger(client: PoolClient, tenantId: string, bookKey: string) {
+export async function loadBookLedger(client: PoolClient, tenantId: string, bookKey: string) {
   const movements = (
     await client.query(
       "select * from public.ordering_stock_movements where tenant_id = $1 and book_key = $2 order by recorded_at, id",

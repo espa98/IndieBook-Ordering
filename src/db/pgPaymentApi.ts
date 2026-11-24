@@ -30,7 +30,7 @@ const iso = (value: Date) => value.toISOString();
 const money = (value: string | number) => String(value);
 
 /** 한 주문의 결제·환급 원장 전체. 모든 결제 명령은 이 집합을 적재해 실행한다. */
-type PaymentLedger = {
+export type PaymentLedger = {
   order: Order;
   payments: Payment[];
   confirmations: PaymentConfirmation[];
@@ -44,7 +44,7 @@ type PaymentLedger = {
   resolutions: RefundAttemptResolution[];
 };
 
-async function loadLedger(client: PoolClient, order: Order): Promise<PaymentLedger> {
+export async function loadLedger(client: PoolClient, order: Order): Promise<PaymentLedger> {
   const t = order.tenantId;
   const q = async (table: string, extra = "") =>
     (await client.query(`select * from public.${table} where tenant_id = $1 ${extra}`, [t, order.id])).rows;
