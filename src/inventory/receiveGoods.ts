@@ -28,6 +28,7 @@ export type GoodsReceipt = {
 };
 
 export type GoodsReceiptRepository = {
+  get(tenantId: string, id: string): GoodsReceipt | undefined;
   list(tenantId: string, purchaseOrderId: string): GoodsReceipt[];
   save(receipt: GoodsReceipt): void;
 };
