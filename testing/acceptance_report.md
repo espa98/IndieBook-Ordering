@@ -838,3 +838,20 @@
 | **같은 버전을 두 세션이 동시에 수정 → 하나만 성공, 이력 1건**, 수정으로 ISBN이 겹치면 확인 필요 | 통과 |
 
 **한계:** YES24 검색 연동(ST-B01, DEC-17 이용권한 검증)은 없다. 서버는 호출자가 보낸 YES24 결과를 검증 없이 신뢰하므로 외부 연동 전에는 수기 등록을 기본으로 한다. 도서 삭제·비활성화는 도메인에 없다. 서점 단위 락이라 같은 서점의 도서 쓰기는 동시에 한 건씩 처리된다(도서 등록은 드물어 허용).
+
+## 39. 환급 시도 실패·UNKNOWN 영속화 (`src/db/pgPaymentApi.ts`)
+
+테스트 3개 추가(`pgPaymentApi.test.ts` 2, HTTP 서버 테스트 1). `reportRefundAttempt`·`resolveRefundAttempt`(ST-Y07, BR-Y07/Y12)를 닫는다. 스키마(005)와 한도 예약 트리거는 이미 있었고 마이그레이션 추가는 없다. Owner·직원 모두 호출한다.
+
+- `reportRefundAttempt`: 외부 환급 시도의 `FAILED`/`UNKNOWN`을 추가 전용으로 기록한다. 미해소 `UNKNOWN`만 해당 금액을 환급 한도에서 예약한다(`FAILED`는 예약하지 않는다).
+- `resolveRefundAttempt`: 미해소 `UNKNOWN`만 조회 증빙으로 `FAILED`/`CONFIRMED`로 해소한다(시도당 한 번). **`CONFIRMED`여도 환급 원장은 만들지 않는다**(원장은 요청·Owner 승인 경로에서만, DEC-09).
+- 두 명령 모두 기존 `(서점, 주문)` 락 아래에서 실행되어 환급 요청과 직렬화된다.
+- HTTP: `POST /refund-tasks/:id/refund-attempts`, `POST /refund-attempts/:id/resolution`.
+
+| 검증한 것 | 결과 |
+|---|---|
+| 비멤버 403, 금액 0·없는 업무 거부, 행위자 기록, FAILED는 한도 비예약, UNKNOWN은 한도 예약(재요청 거부) | 통과 |
+| 해소: FAILED 시도·없는 시도 거부, **동시 해소 → 하나만 기록**, 재해소 거부, 해소 뒤 예약 해제, CONFIRMED여도 원장 0건 | 통과 |
+| HTTP: 행위자 위조 400, 예약 중 요청 422, 잘못된 outcome 400, 해소 후 요청 201, 재해소 422 | 통과 |
+
+**한계:** 시도 금액이 업무 필요액·결제 가용액을 넘는지는 도메인이 검사하지 않는다(기록은 사실의 보고이므로). 환급 원장 확정은 `confirmRefund` 승인 경로뿐이라, `CONFIRMED`로 해소된 UNKNOWN은 원장 없이 예약만 풀린다 — 운영자가 실제 환급분을 별도 요청·승인으로 기록해야 하며, 이 절차의 승인이 필요하다.

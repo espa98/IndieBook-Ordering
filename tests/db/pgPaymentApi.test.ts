@@ -161,6 +161,50 @@ describe("createPgPaymentApi: 결제·환급을 Postgres 영속화로 실행", (
   });
 });
 
+describe("환급 시도 실패·UNKNOWN 기록 (Postgres 영속화)", () => {
+  const report = (api: ReturnType<typeof createPgPaymentApi>, refundTaskId: string, paymentId: string, amountKrw: string, result: "FAILED" | "UNKNOWN", actor = staff) =>
+    api.reportRefundAttempt(actor, { tenantId: T_A, refundTaskId, paymentId, amountKrw, result, reason: "카드사 응답 시간 초과", reportedAt: "2026-03-04T06:50:00.000Z", idempotencyKey: key() });
+
+  it("직원이 시도 실패·UNKNOWN을 기록하고, UNKNOWN만 한도를 예약하며, 비멤버·잘못된 값·없는 업무는 거부된다", async () => {
+    const { api, payment, task } = await overpaidScene();
+    expect(await codeOf(() => report(api, task.id, payment.id, "3000", "UNKNOWN", { userId: STRANGER }))).toBe("FORBIDDEN");
+    expect(await codeOf(() => report(api, task.id, payment.id, "0", "UNKNOWN"))).toBe("VALIDATION_ERROR");
+    expect(await codeOf(() => report(api, "0a000000-0000-4000-8000-00000000ffff", payment.id, "3000", "FAILED"))).toBe("NOT_FOUND");
+
+    const failed = await report(api, task.id, payment.id, "4000", "FAILED");
+    expect(failed).toMatchObject({ refundTaskId: task.id, orderId: task.orderId, paymentId: payment.id, amountKrw: "4000", result: "FAILED", reportedBy: STAFF_A });
+    expect((await requestRefund(api, task.id, payment.id, "5000")).amountKrw).toBe("5000"); // 실패는 한도를 예약하지 않는다
+
+    const scene = await overpaidScene();
+    const unknown = await report(scene.api, scene.task.id, scene.payment.id, "3000", "UNKNOWN");
+    expect(await count("select count(*)::int as n from public.ordering_refund_attempts where id = $1 and result = 'UNKNOWN' and reported_by = $2", [unknown.id, STAFF_A])).toBe(1);
+    expect(await codeOf(() => requestRefund(scene.api, scene.task.id, scene.payment.id, "3000"))).toBe("BUSINESS_INVARIANT"); // 5,000 - 예약 3,000
+  });
+
+  it("UNKNOWN 시도는 한 번만 해소되고(FAILED면 한도가 풀린다), FAILED 시도·없는 시도는 해소할 수 없으며, 동시에 해소해도 하나만 기록된다", async () => {
+    const { api, payment, task } = await overpaidScene();
+    const resolve = (attemptId: string, outcome: "FAILED" | "CONFIRMED", actor = staff) =>
+      api.resolveRefundAttempt(actor, { tenantId: T_A, attemptId, outcome, evidence: "카드사 조회 결과", resolvedAt: "2026-03-04T06:55:00.000Z", idempotencyKey: key() });
+    const unknown = await report(api, task.id, payment.id, "3000", "UNKNOWN");
+    const failed = await report(api, task.id, payment.id, "1000", "FAILED");
+
+    expect(await codeOf(() => resolve(unknown.id, "FAILED", { userId: STRANGER }))).toBe("FORBIDDEN");
+    expect(await codeOf(() => resolve("0a000000-0000-4000-8000-00000000ffff", "FAILED"))).toBe("NOT_FOUND");
+    expect(await codeOf(() => resolve(failed.id, "FAILED"))).toBe("BUSINESS_INVARIANT"); // UNKNOWN만 해소된다
+    expect(await codeOf(() => requestRefund(api, task.id, payment.id, "3000"))).toBe("BUSINESS_INVARIANT"); // 아직 예약 중
+
+    const results = await Promise.allSettled([resolve(unknown.id, "FAILED"), resolve(unknown.id, "CONFIRMED", owner)]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(await count("select count(*)::int as n from public.ordering_refund_attempt_resolutions where attempt_id = $1", [unknown.id])).toBe(1);
+    const outcome = (await rows("select outcome, resolved_by from public.ordering_refund_attempt_resolutions where attempt_id = $1", [unknown.id]))[0];
+    expect(["FAILED", "CONFIRMED"]).toContain(outcome.outcome);
+    expect(await codeOf(() => resolve(unknown.id, "FAILED"))).toBe("BUSINESS_INVARIANT"); // 이미 해소됨
+    // 해소되면 예약이 풀려 요청할 수 있다(CONFIRMED여도 원장은 기록하지 않는다)
+    expect((await requestRefund(api, task.id, payment.id, "3000")).amountKrw).toBe("3000");
+    expect(await count("select count(*)::int as n from public.ordering_refund_confirmations where refund_task_id = $1", [task.id])).toBe(0);
+  });
+});
+
 describe("환급의 실제 동시성 (두 독립 세션)", () => {
   it("같은 업무에 두 세션이 동시에 3,000원씩 환급을 요청하면 하나만 접수되어 요청 합계가 필요액(5,000원)을 넘지 않는다", async () => {
     const { api, payment, task } = await overpaidScene();

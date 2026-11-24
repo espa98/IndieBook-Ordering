@@ -196,6 +196,31 @@ describe("HTTP 서버: 업무 흐름 (주문 → 예약 → 결제 → 인도 �
     expect((await call(decisionPath, { method: "POST", sub: OWNER_A, body: { decision: "REJECTED", decidedAt: "2026-03-04T06:53:00.000Z" } })).status).toBe(422);
   });
 
+  it("환급 시도: Staff가 UNKNOWN을 기록하면 한도가 예약되고, 해소하면 풀리며, 행위자 위조는 400이다", async () => {
+    const o = await confirmedOrder(2, 2);
+    const pay = await call(`${orders()}/${o.orderId}/payments`, { method: "POST", sub: STAFF_A, body: { method: "CARD", amountKrw: "35000", externalReference: `HTTP-REF-${++seq}`, paidAt: "2026-03-04T06:00:00.000Z" } });
+    await call(`/v1/tenants/${T_A}/payments/${pay.json.data.id}/confirmation`, { method: "POST", sub: STAFF_A, body: { evidence: "카드 승인 내역", confirmedAt: "2026-03-04T06:30:00.000Z" } });
+    const task = await call(`${orders()}/${o.orderId}/refund-tasks`, { method: "POST", sub: OWNER_A, body: { openedAt: "2026-03-04T06:40:00.000Z" } });
+    const attempts = `/v1/tenants/${T_A}/refund-tasks/${task.json.data.id}/refund-attempts`;
+    const body = { paymentId: pay.json.data.id, amountKrw: "3000", result: "UNKNOWN", reason: "카드사 응답 시간 초과", reportedAt: "2026-03-04T06:45:00.000Z" };
+    expect((await call(attempts, { method: "POST", sub: STAFF_A, body: { ...body, reportedBy: OWNER_A } })).status).toBe(400);
+    const reported = await call(attempts, { method: "POST", sub: STAFF_A, body });
+    expect(reported.status).toBe(201);
+    expect(reported.json.data).toMatchObject({ result: "UNKNOWN", amountKrw: "3000", reportedBy: STAFF_A });
+
+    const requestPath = `/v1/tenants/${T_A}/refund-tasks/${task.json.data.id}/refund-requests`;
+    const requestBody = { paymentId: pay.json.data.id, amountKrw: "3000", evidence: "카드사 부분 취소 승인 내역", requestedAt: "2026-03-04T06:48:00.000Z" };
+    expect((await call(requestPath, { method: "POST", sub: STAFF_A, body: requestBody })).status).toBe(422); // 예약 중
+
+    const resolutionPath = `/v1/tenants/${T_A}/refund-attempts/${reported.json.data.id}/resolution`;
+    expect((await call(resolutionPath, { method: "POST", sub: OWNER_A, body: { outcome: "MAYBE", evidence: "조회", resolvedAt: "2026-03-04T06:50:00.000Z" } })).status).toBe(400);
+    const resolved = await call(resolutionPath, { method: "POST", sub: STAFF_A, body: { outcome: "FAILED", evidence: "카드사 조회: 취소 실패", resolvedAt: "2026-03-04T06:50:00.000Z" } });
+    expect(resolved.status).toBe(201);
+    expect(resolved.json.data).toMatchObject({ outcome: "FAILED", resolvedBy: STAFF_A });
+    expect((await call(resolutionPath, { method: "POST", sub: STAFF_A, body: { outcome: "FAILED", evidence: "again", resolvedAt: "2026-03-04T06:51:00.000Z" } })).status).toBe(422);
+    expect((await call(requestPath, { method: "POST", sub: STAFF_A, body: requestBody })).status).toBe(201);
+  });
+
   it("취소 요청이 HTTP로 접수되고 다른 서점·없는 리소스 ID는 같은 404이다", async () => {
     await seedStock(3, 2);
     const o = await confirmedOrder(3, 2);

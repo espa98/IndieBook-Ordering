@@ -234,6 +234,16 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
       fields: ["paymentId", "amountKrw", "evidence", "requestedAt"],
       run: (c) => payments.requestRefund(actor(c), merge(c, { tenantId: t(c), refundTaskId: c.params.taskId!, idempotencyKey: c.idempotencyKey })),
     }),
+    route("POST", "/refund-tasks/(?<taskId>[^/]+)/refund-attempts", {
+      success: 201,
+      fields: ["paymentId", "amountKrw", "result", "reason", "reportedAt"],
+      run: (c) => payments.reportRefundAttempt(actor(c), merge(c, { tenantId: t(c), refundTaskId: c.params.taskId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/refund-attempts/(?<attemptId>[^/]+)/resolution", {
+      success: 201,
+      fields: ["outcome", "evidence", "resolvedAt"],
+      run: (c) => payments.resolveRefundAttempt(actor(c), merge(c, { tenantId: t(c), attemptId: c.params.attemptId!, idempotencyKey: c.idempotencyKey })),
+    }),
     route("POST", "/books", {
       success: 201,
       fields: ["source", "title", "authors", "isbn", "listPriceKrw", "externalId", "fetchedAt", "reason", "acknowledgeDuplicateOf", "registeredAt"],

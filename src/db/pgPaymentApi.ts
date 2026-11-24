@@ -9,9 +9,9 @@ import type { RefundConfirmation } from "../payment/confirmRefund";
 import type { DecideRefundRequestRequest, DecideRefundRequestResult } from "../payment/decideRefundRequest";
 import type { OpenRefundTaskRequest, RefundTask } from "../payment/openRefundTask";
 import type { Payment, RecordPaymentRequest } from "../payment/recordPayment";
-import type { RefundAttempt } from "../payment/reportRefundAttempt";
+import type { RefundAttempt, ReportRefundAttemptRequest } from "../payment/reportRefundAttempt";
 import type { RefundRequest, RefundRequestDecision, RequestRefundRequest } from "../payment/requestRefund";
-import type { RefundAttemptResolution } from "../payment/resolveRefundAttempt";
+import type { RefundAttemptResolution, ResolveRefundAttemptRequest } from "../payment/resolveRefundAttempt";
 import {
   inTransaction,
   isCommandKeyConflict,
@@ -192,7 +192,7 @@ export async function loadLedger(client: PoolClient, order: Order): Promise<Paym
 async function resolveOrderId(
   client: PoolClient,
   tenantId: string,
-  target: { table: "ordering_payments" | "ordering_refund_tasks" | "ordering_refund_requests"; id: unknown } | { orderId: unknown },
+  target: { table: "ordering_payments" | "ordering_refund_tasks" | "ordering_refund_requests" | "ordering_refund_attempts"; id: unknown } | { orderId: unknown },
 ): Promise<string | undefined> {
   if (!isUuid(tenantId)) return undefined;
   if ("orderId" in target) return isUuid(target.orderId) ? target.orderId : undefined;
@@ -205,6 +205,8 @@ export type RecordPaymentBody = Omit<RecordPaymentRequest, "recordedBy">;
 export type ConfirmPaymentBody = Omit<ConfirmPaymentRequest, "confirmedBy">;
 export type OpenRefundTaskBody = Omit<OpenRefundTaskRequest, "openedBy">;
 export type RequestRefundBody = Omit<RequestRefundRequest, "requestedBy">;
+export type ReportRefundAttemptBody = Omit<ReportRefundAttemptRequest, "reportedBy">;
+export type ResolveRefundAttemptBody = Omit<ResolveRefundAttemptRequest, "resolvedBy">;
 export type VoidPaymentBody = Omit<VoidPaymentRequest, "voidedBy">;
 export type CorrectPaymentBody = Omit<CorrectPaymentRequest, "actorRole" | "correctedBy">;
 export type DecideRefundRequestBody = Omit<DecideRefundRequestRequest, "actorRole" | "decidedBy">;
@@ -331,8 +333,15 @@ export function createPgPaymentApi(deps: { pool: PoolLike }) {
         list: (_t: string, requestId: string) => (l?.decisions ?? []).filter((d) => d.requestId === requestId),
         save: (d: RefundRequestDecision) => void s.decisions.push(d),
       },
-      refundAttempts: { list: (_t: string, taskId: string) => (l?.attempts ?? []).filter((a) => a.refundTaskId === taskId) },
-      refundAttemptResolutions: { list: (_t: string, attemptId: string) => (l?.resolutions ?? []).filter((r) => r.attemptId === attemptId) },
+      refundAttempts: {
+        get: (_t: string, id: string) => l?.attempts.find((a) => a.id === id),
+        list: (_t: string, taskId: string) => (l?.attempts ?? []).filter((a) => a.refundTaskId === taskId),
+        save: (a: RefundAttempt) => void s.attempts.push(a),
+      },
+      refundAttemptResolutions: {
+        list: (_t: string, attemptId: string) => (l?.resolutions ?? []).filter((r) => r.attemptId === attemptId),
+        save: (r: RefundAttemptResolution) => void s.resolutions.push(r),
+      },
       idempotency: ctx.idempotency,
     };
   }
@@ -349,6 +358,18 @@ export function createPgPaymentApi(deps: { pool: PoolLike }) {
         const { tenantId: _t, ...rest } = request;
         void _t;
         return authorizedActions.confirmPayment(repos(ctx), ctx.principal, rest);
+      }),
+    reportRefundAttempt: (actor: Actor, request: ReportRefundAttemptBody): Promise<RefundAttempt> =>
+      execute(actor, request, { table: "ordering_refund_tasks", id: request.refundTaskId }, {}, (ctx) => {
+        const { tenantId: _t, ...rest } = request;
+        void _t;
+        return authorizedActions.reportRefundAttempt(repos(ctx), ctx.principal, rest);
+      }),
+    resolveRefundAttempt: (actor: Actor, request: ResolveRefundAttemptBody): Promise<RefundAttemptResolution> =>
+      execute(actor, request, { table: "ordering_refund_attempts", id: request.attemptId }, {}, (ctx) => {
+        const { tenantId: _t, ...rest } = request;
+        void _t;
+        return authorizedActions.resolveRefundAttempt(repos(ctx), ctx.principal, rest);
       }),
     voidPayment: (actor: Actor, request: VoidPaymentBody): Promise<PaymentVoid> =>
       execute(actor, request, { table: "ordering_payments", id: request.paymentId }, {}, (ctx) => {
@@ -393,8 +414,10 @@ type Sink = {
   refunds: RefundConfirmation[];
   corrections: PaymentCorrection[];
   voids: PaymentVoid[];
+  attempts: RefundAttempt[];
+  resolutions: RefundAttemptResolution[];
 };
-const newSink = (sameReference: Payment[]): Sink => ({ sameReference, payments: [], confirmations: [], tasks: [], requests: [], decisions: [], refunds: [], corrections: [], voids: [] });
+const newSink = (sameReference: Payment[]): Sink => ({ sameReference, payments: [], confirmations: [], tasks: [], requests: [], decisions: [], refunds: [], corrections: [], voids: [], attempts: [], resolutions: [] });
 
 /** 도메인이 새로 만든 기록을 저장한다. 같은 요청에서 결정 → 원장 순서가 지켜지도록 참조되는 쪽을 먼저 넣는다 */
 async function flush(client: PoolClient, s: Sink): Promise<void> {
@@ -436,6 +459,18 @@ async function flush(client: PoolClient, s: Sink): Promise<void> {
     await client.query(
       "insert into public.ordering_refund_confirmations (id, tenant_id, refund_task_id, order_id, payment_id, amount_krw, evidence, confirmed_by, confirmed_at, refund_request_id, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
       [r.id, r.tenantId, r.refundTaskId, r.orderId, r.paymentId, r.amountKrw, r.evidence, r.confirmedBy, r.confirmedAt, r.refundRequestId ?? null, r.recordedAt],
+    );
+  }
+  for (const a of s.attempts) {
+    await client.query(
+      "insert into public.ordering_refund_attempts (id, tenant_id, refund_task_id, order_id, payment_id, amount_krw, result, reason, reported_by, reported_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+      [a.id, a.tenantId, a.refundTaskId, a.orderId, a.paymentId, a.amountKrw, a.result, a.reason, a.reportedBy, a.reportedAt, a.recordedAt],
+    );
+  }
+  for (const x of s.resolutions) {
+    await client.query(
+      "insert into public.ordering_refund_attempt_resolutions (id, tenant_id, attempt_id, outcome, evidence, resolved_by, resolved_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8)",
+      [x.id, x.tenantId, x.attemptId, x.outcome, x.evidence, x.resolvedBy, x.resolvedAt, x.recordedAt],
     );
   }
   for (const d of s.decisions) {
