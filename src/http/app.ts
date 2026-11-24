@@ -146,6 +146,36 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
       fields: ["quantity", "requestedAt"],
       run: (c) => dispositions.requestReturn(actor(c), merge(c, { tenantId: t(c), cancellationId: c.params.cancellationId!, idempotencyKey: c.idempotencyKey })),
     }),
+    route("POST", "/return-requests/(?<requestId>[^/]+)/replies", {
+      success: 201,
+      fields: ["acceptedQuantity", "rejectedQuantity", "evidence", "repliedAt"],
+      run: (c) => dispositions.recordReturnReply(actor(c), merge(c, { tenantId: t(c), returnRequestId: c.params.requestId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/return-requests/(?<requestId>[^/]+)/dispatches", {
+      success: 201,
+      fields: ["quantity", "dispatchedAt", "referenceNumber"],
+      run: (c) => dispositions.dispatchReturn(actor(c), merge(c, { tenantId: t(c), returnRequestId: c.params.requestId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/return-requests/(?<requestId>[^/]+)/completions", {
+      success: 201,
+      fields: ["quantity", "evidence", "confirmedAt"],
+      run: (c) => dispositions.completeReturn(actor(c), merge(c, { tenantId: t(c), returnRequestId: c.params.requestId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/return-requests/(?<requestId>[^/]+)/exceptions", {
+      success: 201,
+      fields: ["quantity", "kind", "evidence", "reportedAt"],
+      run: (c) => dispositions.reportReturnException(actor(c), merge(c, { tenantId: t(c), returnRequestId: c.params.requestId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/return-requests/(?<requestId>[^/]+)/renegotiations", {
+      success: 201,
+      fields: ["quantity", "retryReason", "requestedAt"],
+      run: (c) => dispositions.renegotiateReturn(actor(c), merge(c, { tenantId: t(c), originalRequestId: c.params.requestId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/return-exceptions/(?<exceptionId>[^/]+)/resolutions", {
+      success: 201,
+      fields: ["outcome", "quantity", "evidence", "resolvedAt"],
+      run: (c) => dispositions.resolveReturnException(actor(c), merge(c, { tenantId: t(c), returnExceptionId: c.params.exceptionId!, idempotencyKey: c.idempotencyKey })),
+    }),
     route("POST", "/orders/(?<orderId>[^/]+)/payments", {
       success: 201,
       fields: ["method", "amountKrw", "externalReference", "paidAt"],

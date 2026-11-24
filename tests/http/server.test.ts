@@ -329,6 +329,23 @@ describe("HTTP 서버: 취소 물량 처분 (재고 편입·반품 요청)", () 
     expect(requested.status).toBe(201);
     expect(requested.json.data).toMatchObject({ quantity: 1, supplierCode: "sup-a", requestedBy: OWNER_A });
     expect((await call(returnPath, { method: "POST", sub: OWNER_A, body: returnBody })).status).toBe(422); // 처분 대기가 없다
+
+    // 반품 후속은 Staff도 기록한다: 회신 → 출고 → 예외 → 해소, 행위자는 토큰의 사용자
+    const returns = `/v1/tenants/${T_A}/return-requests/${requested.json.data.id}`;
+    const replied = await call(`${returns}/replies`, { method: "POST", sub: STAFF_A, body: { acceptedQuantity: 1, rejectedQuantity: 0, evidence: "공급처 회신 메일", repliedAt: "2026-03-04T07:00:00.000Z" } });
+    expect(replied.status).toBe(201);
+    expect(replied.json.data).toMatchObject({ acceptedQuantity: 1, repliedBy: STAFF_A });
+    const dispatched = await call(`${returns}/dispatches`, { method: "POST", sub: STAFF_A, body: { quantity: 1, dispatchedAt: "2026-03-04T07:10:00.000Z", referenceNumber: "TRK-1" } });
+    expect(dispatched.status).toBe(201);
+    const excepted = await call(`${returns}/exceptions`, { method: "POST", sub: STAFF_A, body: { quantity: 1, kind: "LOST", evidence: "택배사 분실 확인서", reportedAt: "2026-03-04T07:30:00.000Z" } });
+    expect(excepted.status).toBe(201);
+    const completionBody = { quantity: 1, evidence: "공급처 수령 확인서", confirmedAt: "2026-03-04T07:20:00.000Z" };
+    expect((await call(`${returns}/completions`, { method: "POST", sub: STAFF_A, body: completionBody })).status).toBe(422); // 신고된 수량은 완료할 수 없다
+    expect((await call(`${returns}/completions`, { method: "POST", sub: STAFF_A, body: { ...completionBody, confirmedBy: OWNER_A } })).status).toBe(400); // 행위자 위조
+    const resolved = await call(`/v1/tenants/${T_A}/return-exceptions/${excepted.json.data.id}/resolutions`, { method: "POST", sub: STAFF_A, body: { outcome: "RETURNED", quantity: 1, evidence: "공급처 최종 확인", resolvedAt: "2026-03-04T07:40:00.000Z" } });
+    expect(resolved.status).toBe(201);
+    expect(resolved.json.data).toMatchObject({ outcome: "RETURNED", resolvedBy: STAFF_A });
+    expect((await call(`${returns}/renegotiations`, { method: "POST", sub: STAFF_A, body: { quantity: 1, retryReason: "재협의", requestedAt: "2026-03-04T07:50:00.000Z" } })).status).toBe(422); // 거절된 수량이 없다
   });
 });
 
