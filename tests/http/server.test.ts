@@ -349,6 +349,42 @@ describe("HTTP 서버: 취소 물량 처분 (재고 편입·반품 요청)", () 
   });
 });
 
+describe("HTTP 서버: 발주 (생성 → 전달 준비 → 전달 기록 → 공급처 회신 → 입고)", () => {
+  it("배정으로 발주를 만들고 전달·회신·입고까지 HTTP로 이어지며 입력 오류·낡은 version·비멤버는 거부된다", async () => {
+    const o = await confirmedOrder(11, 2);
+    const c = await db.connect();
+    await c.query(`insert into public.ordering_suppliers (tenant_id, code, active, name, order_channel, version) values ($1, 'sup-http', true, 'HTTP 공급처', 'EMAIL', 1) on conflict do nothing`, [T_A]);
+    const allocationId = (await c.query(`insert into public.ordering_sourcing_allocations (tenant_id, order_id, order_line_id, supplier_code, quantity) values ($1, $2, $3, 'sup-http', 2) returning id`, [T_A, o.orderId, o.lineId])).rows[0].id as string;
+    await c.end();
+    const pos = `/v1/tenants/${T_A}/purchase-orders`;
+
+    expect((await call(pos, { method: "POST", sub: STRANGER, body: { supplierCode: "sup-http", allocationIds: [allocationId] } })).status).toBe(403);
+    expect((await call(pos, { method: "POST", sub: STAFF_A, body: { supplierCode: "sup-http", allocationIds: [] } })).status).toBe(400);
+    const created = await call(pos, { method: "POST", sub: STAFF_A, body: { supplierCode: "sup-http", allocationIds: [allocationId] } });
+    expect(created.status).toBe(201);
+    expect(created.json.data).toMatchObject({ status: "DRAFT", version: 1 });
+    const poId = created.json.data.id as string;
+    const poLineId = created.json.data.lines[0].poLineId as string;
+    expect((await call(pos, { method: "POST", sub: STAFF_A, body: { supplierCode: "sup-http", allocationIds: [allocationId] } })).status).toBe(422); // 이미 연결된 배정
+
+    expect((await call(`${pos}/${poId}/ready`, { method: "POST", sub: STAFF_A, body: { expectedVersion: 9 } })).status).toBe(409);
+    const readied = await call(`${pos}/${poId}/ready`, { method: "POST", sub: STAFF_A, body: { expectedVersion: 1 } });
+    expect(readied.status).toBe(200);
+    expect(readied.json.data).toMatchObject({ status: "READY", version: 2 });
+    const delivered = await call(`${pos}/${poId}/delivery`, { method: "POST", sub: STAFF_A, body: { expectedVersion: 2, method: "EMAIL", deliveredAt: "2026-03-04T06:10:00.000Z", referenceNumber: "MAIL-9" } });
+    expect(delivered.status).toBe(200);
+    expect(delivered.json.data).toMatchObject({ status: "SENT", version: 3 });
+    expect(delivered.json.data.delivery).toMatchObject({ deliveredBy: STAFF_A });
+    expect((await call(`${pos}/${poId}/delivery`, { method: "POST", sub: STAFF_A, body: { expectedVersion: 2, method: "EMAIL", deliveredAt: "2026-03-04T06:10:00.000Z", deliveredBy: OWNER_A } })).status).toBe(400); // 행위자 위조
+
+    const reply = await call(`${pos}/${poId}/supplier-replies`, { method: "POST", sub: STAFF_A, body: { poLineId, kind: "CONFIRM", quantity: 2, evidence: "공급처 확정 메일", repliedAt: "2026-03-04T06:20:00.000Z" } });
+    expect(reply.status).toBe(201);
+    expect(reply.json.data).toMatchObject({ kind: "CONFIRM", quantity: 2 });
+    const receipt = await call(`${pos}/${poId}/receipts`, { method: "POST", sub: STAFF_A, body: { poLineId, normalQuantity: 2, damagedQuantity: 0, misdeliveredQuantity: 0, receivedAt: "2026-03-04T06:35:00.000Z" } });
+    expect(receipt.status).toBe(201);
+  });
+});
+
 describe("HTTP 서버: 입력 방어", () => {
   it("Idempotency-Key 누락·공백·128자 초과는 400이다", async () => {
     const body = { lines: lines() };

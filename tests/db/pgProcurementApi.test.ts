@@ -1,0 +1,199 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createPgOrderApi } from "../../src/db/pgOrderApi";
+import { createPgProcurementApi } from "../../src/db/pgProcurementApi";
+import { createPgReceivingApi } from "../../src/db/pgReceivingApi";
+import { AppError } from "../../src/errors/AppError";
+import type { IsolatedPostgres } from "../helpers/isolatedPostgres";
+import { sqlState, startMigratedPostgres } from "../helpers/migratedPostgres";
+
+const T_A = "aaaaaaaa-0000-4000-8000-000000000001";
+const OWNER_A = "11111111-0000-4000-8000-000000000001";
+const STAFF_A = "11111111-0000-4000-8000-000000000002";
+const EX_STAFF_A = "11111111-0000-4000-8000-000000000003";
+const STRANGER = "33333333-0000-4000-8000-000000000001";
+const BOOK = (n: number) => `b0000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+
+let db: IsolatedPostgres;
+beforeAll(async () => {
+  db = await startMigratedPostgres();
+  const c = await db.connect();
+  await c.query(`insert into public.ordering_tenants (id, name, owner_user_id) values ($1, '서점 A', $2)`, [T_A, OWNER_A]);
+  await c.query(`insert into public.ordering_members (tenant_id, user_id, role, active) values ($1, $2, 'OWNER', true), ($1, $3, 'STAFF', true), ($1, $4, 'STAFF', false)`, [T_A, OWNER_A, STAFF_A, EX_STAFF_A]);
+  await c.query(
+    `insert into public.ordering_suppliers (tenant_id, code, active, name, order_channel, version) values ($1, 'sup-a', true, '공급처 A', 'EMAIL', 1), ($1, 'sup-b', true, '공급처 B', 'EMAIL', 1), ($1, 'sup-off', false, '중단 공급처', 'EMAIL', 1)`,
+    [T_A],
+  );
+  for (let n = 1; n <= 20; n++) {
+    await c.query(
+      `insert into public.ordering_books (id, tenant_id, title, list_price_krw, source, manual_reason, created_by, created_at) values ($1, $2, $3, 10000, 'MANUAL', '시험', 'seed', now())`,
+      [BOOK(n), T_A, `책 ${n}`],
+    );
+  }
+  await c.end();
+}, 180_000);
+afterAll(async () => {
+  await db?.stop();
+}, 60_000);
+
+const owner = { userId: OWNER_A };
+const staff = { userId: STAFF_A };
+let seq = 0;
+const key = () => `p-${++seq}`;
+const codeOf = async (run: () => Promise<unknown>) => {
+  try {
+    await run();
+  } catch (error) {
+    return error instanceof AppError ? error.code : `NON_APP_ERROR:${(error as Error).message}`;
+  }
+};
+const rows = async (sql: string, params: unknown[] = []) => {
+  const c = await db.connect();
+  try {
+    return (await c.query(sql, params)).rows;
+  } finally {
+    await c.end();
+  }
+};
+
+/** 확정 주문(품목 1개)과 그 품목에 대한 조달 배정(ACTIVE)을 만든다 */
+async function sourced(book: number, quantity: number, supplier = "sup-a") {
+  const orders = createPgOrderApi({ pool: db.pool() });
+  const draft = await orders.createOrder(owner, { tenantId: T_A, idempotencyKey: key(), lines: [{ bookId: BOOK(book), quantity, unitPriceKrw: "15000" }] });
+  const order = await orders.confirmOrder(owner, { tenantId: T_A, orderId: draft.id, expectedVersion: 1, idempotencyKey: key() });
+  const lineId = order.lines[0]!.lineId;
+  const allocationId = (
+    await rows(`insert into public.ordering_sourcing_allocations (tenant_id, order_id, order_line_id, supplier_code, quantity) values ($1, $2, $3, $4, $5) returning id`, [T_A, order.id, lineId, supplier, quantity])
+  )[0].id as string;
+  return { orderId: order.id, lineId, allocationId };
+}
+const create = (api: ReturnType<typeof createPgProcurementApi>, supplierCode: string, allocationIds: string[], actor = staff) =>
+  api.createPurchaseOrder(actor, { tenantId: T_A, supplierCode, allocationIds, idempotencyKey: key() });
+
+describe("발주 생성 (Postgres 영속화)", () => {
+  it("배정 수량으로 발주 초안(품목·주문 연결 포함)을 저장하고, 중복 연결·다른 공급처·중단·없는 공급처·비멤버는 거부된다", async () => {
+    const api = createPgProcurementApi({ pool: db.pool() });
+    const a = await sourced(1, 2);
+    const b = await sourced(1, 3); // 같은 도서의 다른 주문: 발주 품목 하나로 합산된다
+
+    const po = await create(api, "sup-a", [a.allocationId, b.allocationId]);
+
+    expect(po).toMatchObject({ status: "DRAFT", version: 1, supplierCode: "sup-a" });
+    expect(po.lines).toHaveLength(1);
+    expect(po.lines[0]).toMatchObject({ bookId: BOOK(1), quantity: 5 });
+    expect(po.lines[0]!.links.map((l) => l.allocationId).sort()).toEqual([a.allocationId, b.allocationId].sort());
+    expect((await rows("select status, version::int as version from public.ordering_purchase_orders where id = $1", [po.id]))[0]).toEqual({ status: "DRAFT", version: 1 });
+    expect((await rows("select quantity::int as n from public.ordering_po_lines where purchase_order_id = $1", [po.id]))[0].n).toBe(5);
+    expect((await rows("select count(*)::int as n from public.ordering_po_links where po_line_id = $1", [po.lines[0]!.poLineId]))[0].n).toBe(2);
+
+    expect(await codeOf(() => create(api, "sup-a", [a.allocationId]))).toBe("BUSINESS_INVARIANT"); // 이미 발주에 연결됨
+    const other = await sourced(2, 1, "sup-b");
+    expect(await codeOf(() => create(api, "sup-a", [other.allocationId]))).toBe("BUSINESS_INVARIANT"); // 다른 공급처 배정
+    const off = await sourced(3, 1, "sup-off");
+    expect(await codeOf(() => create(api, "sup-off", [off.allocationId]))).toBe("BUSINESS_INVARIANT"); // 중단된 공급처
+    expect(await codeOf(() => create(api, "sup-none", [other.allocationId]))).toBe("NOT_FOUND");
+    expect(await codeOf(() => create(api, "sup-b", ["0a000000-0000-4000-8000-00000000ffff"]))).toBe("NOT_FOUND");
+    expect(await codeOf(() => create(api, "sup-b", [other.allocationId], { userId: STRANGER }))).toBe("FORBIDDEN");
+    expect(await codeOf(() => create(api, "sup-b", [other.allocationId], { userId: EX_STAFF_A }))).toBe("FORBIDDEN");
+    expect((await create(api, "sup-b", [other.allocationId])).status).toBe("DRAFT"); // 거부된 시도는 배정을 소비하지 않았다
+  });
+});
+
+type Api = ReturnType<typeof createPgProcurementApi>;
+const ready = (api: Api, purchaseOrderId: string, expectedVersion: number, actor = staff) => api.markPurchaseOrderReady(actor, { tenantId: T_A, purchaseOrderId, expectedVersion, idempotencyKey: key() });
+const deliver = (api: Api, purchaseOrderId: string, expectedVersion: number, actor = staff) =>
+  api.recordPurchaseOrderDelivery(actor, { tenantId: T_A, purchaseOrderId, expectedVersion, method: "EMAIL", deliveredAt: "2026-03-04T06:10:00.000Z", referenceNumber: "MAIL-1", idempotencyKey: key() });
+const supplierReply = (api: Api, purchaseOrderId: string, poLineId: string, kind: "CONFIRM" | "OUT_OF_STOCK" | "DELAY", quantity: number, extra: { eta?: string } = {}) =>
+  api.recordSupplierReply(staff, { tenantId: T_A, purchaseOrderId, poLineId, kind, quantity, evidence: "공급처 회신 메일", repliedAt: "2026-03-04T06:20:00.000Z", ...extra, idempotencyKey: key() });
+const poRow = async (id: string) => (await rows("select status, version::int as version, delivery from public.ordering_purchase_orders where id = $1", [id]))[0];
+
+describe("발주 전달 준비·전달 기록·공급처 회신 (Postgres 영속화)", () => {
+  it("초안 → 전달 준비 → 전달 기록(SENT) → 첫 회신(ACKNOWLEDGED)으로 이어지고, 낡은 version·상태 위반·수량 초과·없는 품목은 거부되며, 이후 입고가 이어진다", async () => {
+    const api = createPgProcurementApi({ pool: db.pool() });
+    const a = await sourced(4, 2);
+    const po = await create(api, "sup-a", [a.allocationId]);
+    const poLineId = po.lines[0]!.poLineId;
+
+    expect(await codeOf(() => deliver(api, po.id, 1))).toBe("BUSINESS_INVARIANT"); // 아직 DRAFT
+    expect(await codeOf(() => supplierReply(api, po.id, poLineId, "CONFIRM", 1))).toBe("BUSINESS_INVARIANT"); // 아직 전달 전
+    expect(await codeOf(() => ready(api, po.id, 9))).toBe("VERSION_CONFLICT");
+    expect(await codeOf(() => ready(api, po.id, 1, { userId: STRANGER }))).toBe("FORBIDDEN");
+    expect(await codeOf(() => ready(api, "0a000000-0000-4000-8000-00000000ffff", 1))).toBe("NOT_FOUND");
+    expect(await ready(api, po.id, 1)).toMatchObject({ status: "READY", version: 2 });
+    expect(await codeOf(() => ready(api, po.id, 2))).toBe("BUSINESS_INVARIANT"); // 이미 READY
+
+    expect(await codeOf(() => deliver(api, po.id, 1))).toBe("VERSION_CONFLICT");
+    const sent = await deliver(api, po.id, 2);
+    expect(sent).toMatchObject({ status: "SENT", version: 3 });
+    expect(sent.delivery).toMatchObject({ method: "EMAIL", deliveredBy: STAFF_A, referenceNumber: "MAIL-1", poVersion: 2 });
+    expect(await poRow(po.id)).toMatchObject({ status: "SENT", version: 3 });
+    expect((await poRow(po.id)).delivery).toMatchObject({ deliveredBy: STAFF_A });
+
+    expect(await codeOf(() => supplierReply(api, po.id, "0a000000-0000-4000-8000-00000000ffff", "CONFIRM", 1))).toBe("NOT_FOUND");
+    expect(await codeOf(() => supplierReply(api, po.id, poLineId, "CONFIRM", 3))).toBe("BUSINESS_INVARIANT"); // 발주 2권 초과
+    const confirm = await supplierReply(api, po.id, poLineId, "CONFIRM", 2);
+    expect(confirm).toMatchObject({ kind: "CONFIRM", quantity: 2 });
+    expect(await poRow(po.id)).toMatchObject({ status: "ACKNOWLEDGED", version: 4 });
+    expect((await rows("select count(*)::int as n from public.ordering_po_replies where purchase_order_id = $1", [po.id]))[0].n).toBe(1);
+
+    // 영속화한 발주 위에서 입고·배분이 그대로 이어진다
+    const receiving = createPgReceivingApi({ pool: db.pool() });
+    const receipt = await receiving.receiveGoods(staff, { tenantId: T_A, purchaseOrderId: po.id, poLineId, normalQuantity: 2, damagedQuantity: 0, misdeliveredQuantity: 0, receivedAt: "2026-03-04T06:35:00.000Z", idempotencyKey: key() });
+    const allocation = await receiving.allocateReceipt(staff, { tenantId: T_A, receiptId: receipt.id, orderId: a.orderId, orderLineId: a.lineId, quantity: 2, allocatedAt: "2026-03-04T06:40:00.000Z", idempotencyKey: key() });
+    expect(allocation.quantity).toBe(2);
+  });
+});
+
+const outcomes = (results: PromiseSettledResult<unknown>[]) => results.map((r) => (r.status === "fulfilled" ? "OK" : (r.reason as AppError).code)).sort();
+
+describe("발주의 실제 동시성과 DB 방어 (두 독립 세션)", () => {
+  it("같은 배정으로 두 세션이 동시에 발주를 만들면 하나만 성공하고, 같은 발주를 동시에 전달 준비해도 한 번만 전이한다", async () => {
+    const a = await sourced(5, 2);
+    const created = await Promise.allSettled([create(createPgProcurementApi({ pool: db.pool() }), "sup-a", [a.allocationId]), create(createPgProcurementApi({ pool: db.pool() }), "sup-a", [a.allocationId])]);
+    expect(outcomes(created)).toEqual(["BUSINESS_INVARIANT", "OK"]);
+    expect((await rows("select count(*)::int as n from public.ordering_po_links where allocation_id = $1", [a.allocationId]))[0].n).toBe(1);
+
+    const po = (created.find((r) => r.status === "fulfilled") as PromiseFulfilledResult<{ id: string }>).value;
+    const readied = await Promise.allSettled([ready(createPgProcurementApi({ pool: db.pool() }), po.id, 1), ready(createPgProcurementApi({ pool: db.pool() }), po.id, 1)]);
+    expect(outcomes(readied)).toEqual(["BUSINESS_INVARIANT", "OK"]);
+    expect((await poRow(po.id)).version).toBe(2);
+  });
+
+  it("발주 3권에 두 세션이 동시에 2권씩 확정 회신해도 발주량을 넘기지 못한다", async () => {
+    const a = await sourced(6, 3);
+    const api = createPgProcurementApi({ pool: db.pool() });
+    const po = await create(api, "sup-a", [a.allocationId]);
+    await ready(api, po.id, 1);
+    await deliver(api, po.id, 2);
+
+    const results = await Promise.allSettled([
+      supplierReply(createPgProcurementApi({ pool: db.pool() }), po.id, po.lines[0]!.poLineId, "CONFIRM", 2),
+      supplierReply(createPgProcurementApi({ pool: db.pool() }), po.id, po.lines[0]!.poLineId, "CONFIRM", 2),
+    ]);
+
+    expect(outcomes(results)).toEqual(["BUSINESS_INVARIANT", "OK"]);
+    expect((await rows("select coalesce(sum(quantity), 0)::int as n from public.ordering_po_replies where purchase_order_id = $1", [po.id]))[0].n).toBe(2);
+    expect((await poRow(po.id)).version).toBe(4); // 첫 회신만 SENT를 ACKNOWLEDGED로 바꾼다
+  });
+
+  it("직접 SQL로도 발주 상태를 건너뛰거나 version을 건너뛰거나 공급처를 바꾸거나 전달 전 발주에 회신을 넣을 수 없다", async () => {
+    const a = await sourced(7, 2);
+    const api = createPgProcurementApi({ pool: db.pool() });
+    const po = await create(api, "sup-a", [a.allocationId]);
+    const poLineId = po.lines[0]!.poLineId;
+    const c = await db.connect();
+    const q = (sql: string) => () => c.query(sql);
+    try {
+      expect(await sqlState(q(`update public.ordering_purchase_orders set status = 'SENT', version = 2 where id = '${po.id}'`))).toBe("P0001"); // DRAFT -> SENT 건너뜀
+      expect(await sqlState(q(`update public.ordering_purchase_orders set status = 'READY', version = 3 where id = '${po.id}'`))).toBe("P0001"); // version 건너뜀
+      expect(await sqlState(q(`update public.ordering_purchase_orders set supplier_code = 'sup-b' where id = '${po.id}'`))).toBe("P0001");
+      expect(await sqlState(q(`insert into public.ordering_po_replies (tenant_id, purchase_order_id, po_line_id, kind, quantity, evidence, replied_at) values ('${T_A}', '${po.id}', '${poLineId}', 'CONFIRM', 1, '근거', now())`))).toBe("P0001"); // 전달 전
+      expect(await sqlState(q(`update public.ordering_po_lines set quantity = 9 where id = '${poLineId}'`))).toBe("P0001"); // 추가 전용
+      await c.query(`update public.ordering_purchase_orders set status = 'READY', version = 2 where id = '${po.id}'`); // 정상 전이는 가능
+    } finally {
+      await c.end();
+    }
+  });
+});
+
+void createPgReceivingApi;
+void sqlState;

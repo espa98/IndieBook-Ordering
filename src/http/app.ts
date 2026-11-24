@@ -4,6 +4,7 @@ import { createPgDispositionApi } from "../db/pgDispositionApi";
 import { createPgFulfillmentApi } from "../db/pgFulfillmentApi";
 import { createPgOrderApi } from "../db/pgOrderApi";
 import { createPgPaymentApi } from "../db/pgPaymentApi";
+import { createPgProcurementApi } from "../db/pgProcurementApi";
 import { createPgReceivingApi } from "../db/pgReceivingApi";
 import { createPgStockApi } from "../db/pgStockApi";
 import type { PoolLike } from "../db/pgSupport";
@@ -64,6 +65,7 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
   const payments = createPgPaymentApi({ pool: deps.pool });
   const fulfillments = createPgFulfillmentApi({ pool: deps.pool });
   const receiving = createPgReceivingApi({ pool: deps.pool });
+  const procurement = createPgProcurementApi({ pool: deps.pool });
   const cancellations = createPgCancellationApi({ pool: deps.pool });
   const dispositions = createPgDispositionApi({ pool: deps.pool });
   const actor = (c: Ctx) => ({ userId: c.userId });
@@ -195,6 +197,26 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
       success: 201,
       fields: ["paymentId", "amountKrw", "evidence", "requestedAt"],
       run: (c) => payments.requestRefund(actor(c), merge(c, { tenantId: t(c), refundTaskId: c.params.taskId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/purchase-orders", {
+      success: 201,
+      fields: ["supplierCode", "allocationIds"],
+      run: (c) => procurement.createPurchaseOrder(actor(c), merge(c, { tenantId: t(c), idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/purchase-orders/(?<purchaseOrderId>[^/]+)/ready", {
+      success: 200,
+      fields: ["expectedVersion"],
+      run: (c) => procurement.markPurchaseOrderReady(actor(c), merge(c, { tenantId: t(c), purchaseOrderId: c.params.purchaseOrderId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/purchase-orders/(?<purchaseOrderId>[^/]+)/delivery", {
+      success: 200,
+      fields: ["expectedVersion", "method", "deliveredAt", "referenceNumber", "fileVersion"],
+      run: (c) => procurement.recordPurchaseOrderDelivery(actor(c), merge(c, { tenantId: t(c), purchaseOrderId: c.params.purchaseOrderId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/purchase-orders/(?<purchaseOrderId>[^/]+)/supplier-replies", {
+      success: 201,
+      fields: ["poLineId", "kind", "quantity", "source", "eta", "evidence", "repliedAt"],
+      run: (c) => procurement.recordSupplierReply(actor(c), merge(c, { tenantId: t(c), purchaseOrderId: c.params.purchaseOrderId!, idempotencyKey: c.idempotencyKey })),
     }),
     route("POST", "/purchase-orders/(?<purchaseOrderId>[^/]+)/receipts", {
       success: 201,
