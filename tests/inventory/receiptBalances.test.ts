@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { completeReturn } from "../../src/inventory/completeReturn";
+import { recordReturnReply } from "../../src/inventory/recordReturnReply";
 import { transferCancelledToStock } from "../../src/inventory/transferCancelledToStock";
 import { cancelAllocation } from "../../src/inventory/cancelAllocation";
 import { correctReceipt } from "../../src/inventory/correctReceipt";
@@ -6,7 +8,7 @@ import { deliverAllocation } from "../../src/inventory/deliverAllocation";
 import { allocateReceipt } from "../../src/inventory/allocateReceipt";
 import { receiptBalances } from "../../src/inventory/receiptBalances";
 import { releaseAllocation } from "../../src/inventory/releaseAllocation";
-import { allocationScene, cancellationScene, intakeScene, correctionScene, deliveryScene, releaseScene } from "../helpers/inventoryFixtures";
+import { allocationScene, cancellationScene, completionScene, intakeScene, correctionScene, deliveryScene, releaseScene } from "../helpers/inventoryFixtures";
 
 describe("receiptBalances: 입고 기록과 배분 기록에서 버킷 잔량 산출 (BR-Q14, BR-Q17)", () => {
   it("배분하지 않으면 정상 입고량 전부가 UNALLOCATED이고, 배분하면 그만큼 ALLOCATED_OPEN으로 옮겨진다", () => {
@@ -120,5 +122,42 @@ describe("receiptBalances: 입고 기록과 배분 기록에서 버킷 잔량 �
 
     expect(balances).toMatchObject({ DISPOSITION_PENDING: 1, STOCK_TRANSFERRED: 1 });
     expect(Object.values(balances).reduce((a, b) => a + b, 0)).toBe(4);
+  });
+
+  it("반품 요청·출고·완료·거절이 각각 RETURN_HELD·RETURN_DISPATCHED·RETURNED_FINAL·DISPOSITION_PENDING으로 옮기고 합계는 보존된다", () => {
+    const { deps, completeRequest, replyRequest, receipt, cancellation, returnRequestRecord } =
+      completionScene(); // 처분 대기 2 -> 반품 요청 2, 수락 1, 출고 1
+    const balancesOf = () =>
+      receiptBalances(
+        receipt,
+        deps.receiptAllocations.list("tenant-a", receipt.id),
+        [],
+        [],
+        [],
+        deps.allocationCancellations.list("tenant-a", cancellation.allocationId),
+        deps.stockIntakes.list("tenant-a", cancellation.id),
+        {
+          requests: deps.returnRequests.list("tenant-a", cancellation.id),
+          replies: deps.returnReplies.list("tenant-a", returnRequestRecord.id),
+          dispatches: deps.returnDispatches.list("tenant-a", returnRequestRecord.id),
+          completions: deps.returnCompletions.list("tenant-a", returnRequestRecord.id),
+        },
+      );
+    const total = (b: Record<string, number>) => Object.values(b).reduce((x, y) => x + y, 0);
+
+    expect(balancesOf()).toMatchObject({
+      DISPOSITION_PENDING: 0,
+      RETURN_HELD: 1, // 출고 전 1 (수락 대기 포함)
+      RETURN_DISPATCHED: 1,
+      RETURNED_FINAL: 0,
+    });
+    expect(total(balancesOf())).toBe(4);
+
+    completeReturn(deps, completeRequest({ quantity: 1 }));
+    expect(balancesOf()).toMatchObject({ RETURN_DISPATCHED: 0, RETURNED_FINAL: 1 });
+
+    recordReturnReply(deps, replyRequest({ acceptedQuantity: 0, rejectedQuantity: 1, idempotencyKey: "rep-rej" }));
+    expect(balancesOf()).toMatchObject({ RETURN_HELD: 0, DISPOSITION_PENDING: 1 }); // 거절은 처분 대기로 복귀
+    expect(total(balancesOf())).toBe(4);
   });
 });

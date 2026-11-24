@@ -4,6 +4,9 @@ import {
   type IdempotencyStore,
 } from "../idempotency/executeIdempotent";
 import { invalid, isNonEmptyString, parseUtcTimestamp } from "../procurement/validation";
+import { cancellationPending } from "./cancellationPending";
+import type { ReturnReplyRepository } from "./recordReturnReply";
+import type { ReturnRequestRepository } from "./requestReturn";
 import type { AllocationCancellationRepository } from "./cancelAllocation";
 import type { StockMovement, StockMovementRepository } from "./registerInitialStock";
 
@@ -30,6 +33,8 @@ export type StockIntakeRepository = {
 export type TransferCancelledToStockDeps = {
   allocationCancellations: Pick<AllocationCancellationRepository, "get">;
   stockIntakes: StockIntakeRepository;
+  returnRequests: Pick<ReturnRequestRepository, "list">;
+  returnReplies: Pick<ReturnReplyRepository, "list">;
   stockMovements: StockMovementRepository;
   idempotency: IdempotencyStore;
   now?: () => Date;
@@ -84,11 +89,9 @@ export function transferCancelledToStock(
       if (!cancellation) {
         throw new AppError("NOT_FOUND");
       }
-      const intaken = deps.stockIntakes
-        .list(request.tenantId, cancellation.id)
-        .reduce((sum, i) => sum + i.quantity, 0);
-      // 같은 취소 물량은 한 번만 편입한다 (BR-Q15, ST-C06 "원장 1회 증가")
-      if (request.quantity > cancellation.quantity - intaken) {
+      const pending = cancellationPending(deps, request.tenantId, cancellation);
+      // 같은 취소 물량은 한 번만 처분한다: 반품 요청 중인 수량은 편입할 수 없다 (BR-Q15, ST-C06)
+      if (request.quantity > pending) {
         throw new AppError(
           "BUSINESS_INVARIANT",
           "intake quantity must not exceed the cancellation's pending quantity",

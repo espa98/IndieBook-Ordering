@@ -24,9 +24,28 @@ import type {
   CancelAllocationRequest,
 } from "../../src/inventory/cancelAllocation";
 import type {
+  CompleteReturnRequest,
+  ReturnCompletion,
+} from "../../src/inventory/completeReturn";
+import type {
+  DispatchReturnRequest,
+  ReturnDispatch,
+} from "../../src/inventory/dispatchReturn";
+import type {
+  RecordReturnReplyRequest,
+  ReturnReply,
+} from "../../src/inventory/recordReturnReply";
+import type {
+  RequestReturnRequest,
+  ReturnRequest,
+} from "../../src/inventory/requestReturn";
+import type {
   StockIntake,
   TransferCancelledToStockRequest,
 } from "../../src/inventory/transferCancelledToStock";
+import { dispatchReturn } from "../../src/inventory/dispatchReturn";
+import { recordReturnReply } from "../../src/inventory/recordReturnReply";
+import { requestReturn } from "../../src/inventory/requestReturn";
 import { registerInitialStock } from "../../src/inventory/registerInitialStock";
 import { cancelAllocation } from "../../src/inventory/cancelAllocation";
 import type { ReallocateAllocationRequest } from "../../src/inventory/reallocateAllocation";
@@ -362,7 +381,9 @@ export function intakeScene() {
     },
   };
   const stockIntakes = createInMemoryStockIntakeRepository();
-  const deps = { ...s.deps, stockMovements, stockIntakes };
+  const returnRequests = createInMemoryReturnRequestRepository();
+  const returnReplies = createInMemoryReturnReplyRepository();
+  const deps = { ...s.deps, stockMovements, stockIntakes, returnRequests, returnReplies };
   registerInitialStock(deps, {
     tenantId: "tenant-a",
     bookId: "book-1",
@@ -386,5 +407,143 @@ export function intakeScene() {
     idempotencyKey: `int-${++seq}`,
     ...extra,
   });
-  return { ...s, deps, cancellation, stockMovements, stockIntakes, intakeRequest };
+  return { ...s, deps, cancellation, stockMovements, stockIntakes, returnRequests, returnReplies, intakeRequest };
+}
+
+export function createInMemoryReturnRequestRepository() {
+  const all: ReturnRequest[] = [];
+  return {
+    get(tenantId: string, id: string): ReturnRequest | undefined {
+      return all.find((r) => r.tenantId === tenantId && r.id === id);
+    },
+    list(tenantId: string, cancellationId: string): ReturnRequest[] {
+      return all.filter((r) => r.tenantId === tenantId && r.cancellationId === cancellationId);
+    },
+    save(request: ReturnRequest): void {
+      all.push(request);
+    },
+  };
+}
+
+/** intakeScene(처분 대기 2권)에서 공급처 반품을 선택하는 세계 */
+export function returnScene() {
+  const s = intakeScene();
+  const { returnRequests } = s;
+  const deps = s.deps;
+  let seq = 0;
+  const returnRequest = (
+    extra: Partial<RequestReturnRequest> = {},
+  ): RequestReturnRequest => ({
+    tenantId: "tenant-a",
+    cancellationId: s.cancellation.id,
+    quantity: 2,
+    actorRole: "OWNER",
+    requestedBy: "점주",
+    requestedAt: "2026-03-04T06:59:00.000Z",
+    idempotencyKey: `ret-${++seq}`,
+    ...extra,
+  });
+  return { ...s, deps, returnRequests, returnRequest, transferRequest: s.intakeRequest };
+}
+
+export function createInMemoryReturnReplyRepository() {
+  const all: ReturnReply[] = [];
+  return {
+    list(tenantId: string, returnRequestId: string): ReturnReply[] {
+      return all.filter((r) => r.tenantId === tenantId && r.returnRequestId === returnRequestId);
+    },
+    save(reply: ReturnReply): void {
+      all.push(reply);
+    },
+  };
+}
+
+/** returnScene에서 처분 대기 2권 전부를 반품 요청한 세계 */
+export function returnReplyScene() {
+  const s = returnScene();
+  const { returnReplies, deps } = s;
+  const returnRequestRecord = requestReturn(deps, s.returnRequest({ quantity: 2, idempotencyKey: "ret-scene" }));
+  let seq = 0;
+  const replyRequest = (
+    extra: Partial<RecordReturnReplyRequest> = {},
+  ): RecordReturnReplyRequest => ({
+    tenantId: "tenant-a",
+    returnRequestId: returnRequestRecord.id,
+    acceptedQuantity: 1,
+    rejectedQuantity: 0,
+    evidence: "공급처 이메일 2026-03-05 반품 수락 회신",
+    repliedBy: "김직원",
+    repliedAt: "2026-03-04T06:59:30.000Z",
+    idempotencyKey: `rrp-${++seq}`,
+    ...extra,
+  });
+  return { ...s, deps, returnReplies, returnRequestRecord, replyRequest };
+}
+
+export function createInMemoryReturnDispatchRepository() {
+  const all: ReturnDispatch[] = [];
+  return {
+    list(tenantId: string, returnRequestId: string): ReturnDispatch[] {
+      return all.filter((d) => d.tenantId === tenantId && d.returnRequestId === returnRequestId);
+    },
+    save(dispatch: ReturnDispatch): void {
+      all.push(dispatch);
+    },
+  };
+}
+
+/** 반품 요청 2권 중 공급처가 1권을 수락(1권 미응답)한 세계 */
+export function dispatchScene() {
+  const s = returnReplyScene();
+  const returnDispatches = createInMemoryReturnDispatchRepository();
+  const deps = { ...s.deps, returnDispatches };
+  recordReturnReply(deps, s.replyRequest({ acceptedQuantity: 1, rejectedQuantity: 0, idempotencyKey: "rep-scene" }));
+  let seq = 0;
+  const dispatchRequest = (
+    extra: Partial<DispatchReturnRequest> = {},
+  ): DispatchReturnRequest => ({
+    tenantId: "tenant-a",
+    returnRequestId: s.returnRequestRecord.id,
+    quantity: 1,
+    dispatchedBy: "김직원",
+    dispatchedAt: "2026-03-04T06:59:45.000Z",
+    referenceNumber: "TRK-001",
+    idempotencyKey: `dsp-${++seq}`,
+    ...extra,
+  });
+  return { ...s, deps, returnDispatches, dispatchRequest };
+}
+
+export function createInMemoryReturnCompletionRepository() {
+  const all: ReturnCompletion[] = [];
+  return {
+    list(tenantId: string, returnRequestId: string): ReturnCompletion[] {
+      return all.filter((c) => c.tenantId === tenantId && c.returnRequestId === returnRequestId);
+    },
+    save(completion: ReturnCompletion): void {
+      all.push(completion);
+    },
+  };
+}
+
+/** 반품 요청 2권 중 1권 수락·출고된(공급처 최종 확인 전) 세계 */
+export function completionScene() {
+  const s = dispatchScene();
+  const returnCompletions = createInMemoryReturnCompletionRepository();
+  const deps = { ...s.deps, returnCompletions };
+  dispatchReturn(deps, s.dispatchRequest({ quantity: 1, idempotencyKey: "dsp-scene" }));
+  let seq = 0;
+  const completeRequest = (
+    extra: Partial<CompleteReturnRequest> = {},
+  ): CompleteReturnRequest => ({
+    tenantId: "tenant-a",
+    returnRequestId: s.returnRequestRecord.id,
+    quantity: 1,
+    evidence: "공급처 반품 입고 확인서 2026-03-06",
+    confirmedBy: "김직원",
+    confirmedAt: "2026-03-04T06:59:50.000Z",
+    idempotencyKey: `cmp-${++seq}`,
+    ...extra,
+  });
+  return { ...s, deps, returnCompletions, completeRequest };
 }
