@@ -10,7 +10,10 @@
   "devDependencies": {
     "@apidevtools/swagger-parser": "^13.1.0",
     "@types/node": "^26.6.6",
+    "@types/pg": "8.23.1",
     "ajv": "^8.20.0",
+    "embedded-postgres": "17.12.0-beta.19",
+    "pg": "8.23.1",
     "typescript": "^7.0.2",
     "vitest": "^5.1.1",
     "yaml": "^2.9.1"
