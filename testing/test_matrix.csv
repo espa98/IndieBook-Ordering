@@ -2,16 +2,16 @@ id,category,item,layer,status,evidence,notes
 G0,gate,문서/계약 차이 확정,document,PARTIAL,implementation/05~09 결과 보고서의 충돌·미결정 목록,OPDS·STBR 충돌과 해석을 단계별 보고서에 기록했으나 API V2.2·RLS V2.2와의 대조는 하지 않음
 G1,gate,격리 DB 복제 및 신규 DDL/FK/RLS 실행,db,BLOCKED,저장소에 DB 구성(supabase/마이그레이션/컨테이너) 없음,격리 테스트 DB 없음. 신규 생성·비용은 사전 승인 필요
 G2,gate,실제 Owner/Staff JWT·비활성·교차 tenant,jwt-http,BLOCKED,저장소에 인증 서버·JWT 검증 없음. tests/auth 15개는 순수 함수 단위 테스트,authorizeTenantAccess는 요청 값 기반이라 실제 JWT 검증 아님
-G3,gate,주문/발주 생성·확정·PO 전송·입고·수량,domain,PARTIAL,vitest 76 files / 968 tests passed (메모리 저장소),도메인 로직만. DB 트랜잭션·제약 없음
-G4,gate,재고/인도 예약·배분·해제·인도 원장 대사,domain,PARTIAL,tests/inventory 25 files / 241 tests passed,도메인 로직만. 원장 대사(DB) 없음
-G5,gate,결제/환급 수동 사실 확인·원장 반영·외부 환급 증빙,domain,PARTIAL,tests/payment 9 files / 53 tests passed,도메인 로직만. PG 연동 없음(P2)
-G6,gate,원자적 종결 검사 및 Staff 요청 분리,domain,PARTIAL,tests/closure 3 files / 14 tests passed,원자성은 검증 후 연속 저장이며 DB 트랜잭션 아님
+G3,gate,주문/발주 생성·확정·PO 전송·입고·수량,domain,PARTIAL,vitest 88 files / 1005 tests passed (메모리 저장소),도메인 로직만. DB 트랜잭션·제약 없음
+G4,gate,재고/인도 예약·배분·해제·인도 원장 대사,domain,PARTIAL,tests/inventory 26 files / 244 tests passed,도메인 로직만. 원장 대사(DB) 없음
+G5,gate,결제/환급 수동 사실 확인·원장 반영·외부 환급 증빙,domain,PARTIAL,tests/payment 11 files / 59 tests passed,도메인 로직만. PG 연동 없음(P2)
+G6,gate,원자적 종결 검사 및 Staff 요청 분리,domain,PARTIAL,tests/closure 4 files / 15 tests passed,원자성은 검증 후 연속 저장이며 DB 트랜잭션 아님
 G7,gate,기존 19개 테스트+2세션 경쟁+배포 승인,regression,BLOCKED,"기존 19개 테스트는 ordering-dev DB 측 테스트로 이 저장소에 없음, 2세션 경쟁은 DB 필요",배포 승인 없음
-TEST-UNIT,test-layer,단위/도메인 테스트,unit,PASS,npx vitest run → 76 files 968 tests passed 0 failed,Node v24.18.0 / vitest 5.1.1 / commit 4ece379
+TEST-UNIT,test-layer,단위/도메인 테스트,unit,PASS,npx vitest run → 88 files 1005 tests passed 0 failed,Node v24.18.0 / vitest 5.1.1 / commit 21e22e3
 TEST-TYPE,test-layer,타입 검사,static,PASS,npx tsc --noEmit → 출력 0줄(오류 없음),TypeScript 7.0.2
 TEST-OPENAPI,test-layer,OpenAPI 스키마 검사,contract,PARTIAL,tests/openapi 2 files / 26 tests passed,openapi/ordering.yaml은 05단계 주문 API만 다룸. 조달·입고·재고·결제·안내·종결 API는 명세·구현 없음
 TEST-HTTP,test-layer,HTTP 핸들러 테스트,http-handler,PARTIAL,tests/http 3 files / 41 tests passed,핸들러 함수 단위. 실제 서버·라우터·JWT 없음
-TEST-INTEGRATION,test-layer,통합 테스트(여러 모듈 결합),integration,PARTIAL,tests/fulfillment·notification·closure·cancellation·reopening 장면이 inventory/payment/order를 결합,메모리 저장소 기반 결합이며 실제 DB 통합 아님
+TEST-INTEGRATION,test-layer,통합 테스트(여러 모듈 결합),integration,PARTIAL,tests/fulfillment·notification·closure·cancellation·reopening·procurement(공급처 의무) 장면이 inventory/payment/order를 결합,메모리 저장소 기반 결합이며 실제 DB 통합 아님
 TEST-DB,test-layer,DB 테스트(제약·트리거·원장),db,BLOCKED,격리 DB 없음,
 TEST-RLS,test-layer,RLS 정책 테스트,rls,BLOCKED,격리 DB와 실제 JWT 없음,
 TEST-JWT-HTTP,test-layer,실제 JWT+HTTP 테스트,jwt-http,BLOCKED,서버·인증 없음,
@@ -27,14 +27,14 @@ ST-O01,requirement,주문 초안 생성,domain,PASS,tests/order,05단계
 ST-O02,requirement,주문 보류/재개,domain,NOT_IMPLEMENTED,openapi/ordering.yaml이 HELD를 범위 밖으로 명시,
 ST-O03,requirement,주문 확정,domain,PASS,tests/order + tests/http,05단계
 ST-O04,requirement,가격/품목 변경,domain,NOT_IMPLEMENTED,DEC-08 승인 전 비활성,릴리스 차단 조건(미승인 정책)
-ST-O05,requirement,부분 취소(요청·승인·적용),domain,PARTIAL,tests/cancellation 3 files / 21 tests passed,공급처 의무 조정은 BR-P05(supplierObligations)로 부분 구현
-ST-O06,requirement,전량 취소 확정(CANCELLING),domain,PARTIAL,tests/cancellation/cancellingOrder·applyOrderCancellation,공급처 의무 조정은 BR-P05(supplierObligations)로 부분 구현
+ST-O05,requirement,부분 취소(요청·승인·적용),domain,PARTIAL,tests/cancellation 5 files / 25 tests passed,공급처 의무는 BR-P05(supplierObligations)로 종결 차단·재조달 승인만 부분 구현. 미응답·거절 발주 판정과 발주 수량 자동 조정은 없음
+ST-O06,requirement,전량 취소 확정(CANCELLING),domain,PARTIAL,tests/cancellation/cancellingOrder·applyOrderCancellation,공급처 의무는 BR-P05(supplierObligations)로 종결 차단·재조달 승인만 부분 구현. 발주 수량 자동 조정은 없음
 ST-O07,requirement,주문 종결(요청+서버 실행),domain,PARTIAL,tests/closure 4 files / 15 tests passed,공급처 외부 의무(EXTERNAL_OBLIGATION_OPEN)는 supplierObligations 의존성을 연결해야 검사됨
-ST-O08,requirement,취소 종결,domain,PARTIAL,tests/cancellation/closeCancelledOrder 2 tests,기존 종결 판정 재사용·outcome=CANCELLED 기록. 공급처 외부 의무는 차단 사유에 미포함
+ST-O08,requirement,취소 종결,domain,PARTIAL,tests/cancellation/closeCancelledOrder 2 tests,기존 종결 판정 재사용·outcome=CANCELLED 기록. 공급처 외부 의무 차단은 supplierObligations 의존성을 연결해야 동작
 ST-O09,requirement,초안 폐기,domain,NOT_IMPLEMENTED,,
 ST-O10,requirement,종결 후 정정·재개,domain,PARTIAL,tests/reopening 1 file / 6 tests passed,결제 보정·수령 정정을 근거로 인정
 ST-P01,requirement,조달 배정,domain,PASS,tests/procurement,06단계
-ST-P02,requirement,미이행 배정 해제,domain,PARTIAL,tests/procurement/releaseSourcing 4 tests,발주 미연결·전달된 발주 연결 배정 해제와 유지 의무 기록. 입고 배분·수령 이행분 검사와 공급처 의무 조정(BR-P05)은 미구현
+ST-P02,requirement,미이행 배정 해제,domain,PARTIAL,tests/procurement/releaseSourcing 4 tests,발주 미연결·전달된 발주 연결 배정 해제와 유지 의무 기록. 입고 배분·수령 이행분 검사와 공급처 의무는 BR-P05(supplierObligations)로 종결 차단·재조달 승인까지만
 ST-P03,requirement,발주서 생성,domain,PASS,tests/procurement,06단계
 ST-P04,requirement,발주 READY 전환,domain,PASS,tests/procurement,06단계
 ST-P05,requirement,발주 파일 출력(CSV),domain,PASS,tests/procurement,XLSX 미구현
