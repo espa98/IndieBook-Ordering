@@ -4,6 +4,8 @@ import { createSystemPrincipal, type UserPrincipal } from "../auth/principal";
 import { AppError } from "../errors/AppError";
 import type { IdempotencyStore } from "../idempotency/executeIdempotent";
 import type { ReturnCompletion } from "../inventory/completeReturn";
+import type { ExcessDecision } from "../inventory/decideExcessReceipt";
+import type { ReceiptDefectResolution } from "../inventory/resolveReceiptDefect";
 import type { ReturnException } from "../inventory/reportReturnException";
 import type { ReturnRequest } from "../inventory/requestReturn";
 import type { ReturnExceptionResolution } from "../inventory/resolveReturnException";
@@ -374,6 +376,13 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
         const resolutions = (await all("ordering_return_exception_resolutions", "return_exception_id", exceptions.map((e) => e.id))).map(
           (r): ReturnExceptionResolution => ({ id: r.id, tenantId: r.tenant_id, returnExceptionId: r.return_exception_id, returnRequestId: exceptions.find((e) => e.id === r.return_exception_id)?.returnRequestId ?? "", outcome: r.outcome, quantity: r.quantity, evidence: r.evidence, resolvedBy: r.resolved_by, resolvedAt: r.resolved_at.toISOString(), recordedAt: r.recorded_at.toISOString() }),
         );
+        const receiptIds = (state?.receipts ?? []).map((r) => r.id);
+        const defectResolutions = (await all("ordering_receipt_defect_resolutions", "receipt_id", receiptIds)).map(
+          (r): ReceiptDefectResolution => ({ id: r.id, tenantId: r.tenant_id, receiptId: r.receipt_id, purchaseOrderId: r.purchase_order_id, kind: r.kind, quantity: r.quantity, outcome: r.outcome, evidence: r.evidence, resolvedBy: r.resolved_by, resolvedAt: r.resolved_at.toISOString(), recordedAt: r.recorded_at.toISOString() }),
+        );
+        const excessDecisions = (await all("ordering_excess_decisions", "receipt_id", receiptIds)).map(
+          (d): ExcessDecision => ({ id: d.id, tenantId: d.tenant_id, receiptId: d.receipt_id, decision: d.decision, quantity: d.quantity, reason: d.reason, decidedBy: d.decided_by, decidedAt: d.decided_at.toISOString(), recordedAt: d.recorded_at.toISOString() }),
+        );
         const idempotency = await loadCommands(client, request.tenantId, request.idempotencyKey);
         const known = new Set(idempotency.keys());
         const saved: Saved = { po: [], replies: [], cancellationRequests: [], cancellationResponses: [] };
@@ -390,9 +399,8 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
             returnCompletions: { list: (_t2, id) => completions.filter((c) => c.returnRequestId === id) },
             returnExceptions: { list: (_t2, id) => exceptions.filter((e) => e.returnRequestId === id) },
             returnExceptionResolutions: { list: (_t2, id) => resolutions.filter((r) => r.returnExceptionId === id) },
-            // 파손·오배송 해소와 초과입고 결정은 아직 영속화하지 않아 기록이 없다. 그런 입고가 있는 발주는 종결이 차단된다
-            receiptDefectResolutions: { list: () => [] },
-            excessDecisions: { list: () => [] },
+            receiptDefectResolutions: { list: (_t2, receiptId) => defectResolutions.filter((r) => r.receiptId === receiptId) },
+            excessDecisions: { list: (_t2, receiptId) => excessDecisions.filter((d) => d.receiptId === receiptId) },
             receiptCorrections: { list: (_t2, receiptId) => (state?.corrections ?? []).filter((c) => c.receiptId === receiptId) },
             replies: { list: () => state?.replies ?? [] },
             cancellations: { listRequests: () => state?.requests ?? [], listResponses: () => state?.responses ?? [] },

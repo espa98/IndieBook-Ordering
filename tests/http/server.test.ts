@@ -473,6 +473,46 @@ describe("HTTP 서버: 발주 취소", () => {
   });
 });
 
+describe("HTTP 서버: 입고 후속 (파손 해소·초과 결정·입고 정정)", () => {
+  it("파손·오배송 해소(폐기는 Owner만), 초과입고 결정(Owner만), 입고 정정(Owner만)이 HTTP로 이어진다", async () => {
+    const c = await db.connect();
+    await c.query(`insert into public.ordering_suppliers (tenant_id, code, active, name, order_channel, version) values ($1, 'sup-rcpt', true, '입고 공급처', 'EMAIL', 1) on conflict do nothing`, [T_A]);
+    const o = await confirmedOrder(8, 2);
+    const allocationId = (await c.query(`insert into public.ordering_sourcing_allocations (tenant_id, order_id, order_line_id, supplier_code, quantity) values ($1, $2, $3, 'sup-rcpt', 2) returning id`, [T_A, o.orderId, o.lineId])).rows[0].id as string;
+    await c.end();
+    const pos = `/v1/tenants/${T_A}/purchase-orders`;
+    const po = await call(pos, { method: "POST", sub: STAFF_A, body: { supplierCode: "sup-rcpt", allocationIds: [allocationId] } });
+    const poId = po.json.data.id as string;
+    const poLineId = po.json.data.lines[0].poLineId as string;
+    await call(`${pos}/${poId}/ready`, { method: "POST", sub: STAFF_A, body: { expectedVersion: 1 } });
+    await call(`${pos}/${poId}/delivery`, { method: "POST", sub: STAFF_A, body: { expectedVersion: 2, method: "EMAIL", deliveredAt: "2026-03-04T06:10:00.000Z" } });
+    const receipt = await call(`${pos}/${poId}/receipts`, { method: "POST", sub: STAFF_A, body: { poLineId, normalQuantity: 3, damagedQuantity: 1, misdeliveredQuantity: 0, receivedAt: "2026-03-04T06:35:00.000Z" } });
+    expect(receipt.json.data).toMatchObject({ normalQuantity: 2, excessQuantity: 1, damagedQuantity: 1 });
+    const base = `/v1/tenants/${T_A}/receipts/${receipt.json.data.id}`;
+
+    const defect = { kind: "DAMAGED", quantity: 1, outcome: "DISCARDED", evidence: "폐기 확인서", resolvedAt: "2026-03-04T07:00:00.000Z" };
+    expect((await call(`${base}/defect-resolutions`, { method: "POST", sub: STAFF_A, body: defect })).status).toBe(403); // 폐기는 Owner만
+    const resolved = await call(`${base}/defect-resolutions`, { method: "POST", sub: OWNER_A, body: defect });
+    expect(resolved.status).toBe(201);
+    expect(resolved.json.data).toMatchObject({ kind: "DAMAGED", resolvedBy: OWNER_A });
+    expect((await call(`${base}/defect-resolutions`, { method: "POST", sub: OWNER_A, body: defect })).status).toBe(422); // 기록된 1권을 이미 해소
+
+    const decision = { decision: "APPROVED", quantity: 1, reason: "점주 승인", decidedAt: "2026-03-04T07:10:00.000Z" };
+    expect((await call(`${base}/excess-decisions`, { method: "POST", sub: STAFF_A, body: decision })).status).toBe(403);
+    const decided = await call(`${base}/excess-decisions`, { method: "POST", sub: OWNER_A, body: decision });
+    expect(decided.status).toBe(201);
+    expect(decided.json.data).toMatchObject({ decision: "APPROVED", decidedBy: OWNER_A });
+    expect((await call(`${base}/excess-decisions`, { method: "POST", sub: OWNER_A, body: { ...decision, decidedBy: STAFF_A } })).status).toBe(400); // 행위자 위조
+
+    const correction = { quantity: 1, reason: "검수 수량 정정", correctedAt: "2026-03-04T07:20:00.000Z" };
+    expect((await call(`${base}/corrections`, { method: "POST", sub: STAFF_A, body: correction })).status).toBe(403);
+    expect((await call(`${base}/corrections`, { method: "POST", sub: OWNER_A, body: { ...correction, quantity: 3 } })).status).toBe(422); // 정상 2권 초과
+    const corrected = await call(`${base}/corrections`, { method: "POST", sub: OWNER_A, body: correction });
+    expect(corrected.status).toBe(201);
+    expect(corrected.json.data).toMatchObject({ quantity: 1, correctedBy: OWNER_A });
+  });
+});
+
 describe("HTTP 서버: 입력 방어", () => {
   it("Idempotency-Key 누락·공백·128자 초과는 400이다", async () => {
     const body = { lines: lines() };

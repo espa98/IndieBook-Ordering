@@ -55,11 +55,31 @@ async function bootServer(): Promise<{ dir: string; port: number; server: Embedd
     } catch (error) {
       lastError = error;
       await server.stop().catch(() => undefined);
-      rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+      removeBestEffort(dir);
       await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
     }
   }
   throw lastError;
+}
+
+/** 임시 DB 폴더를 지운다. Windows에서 백신·인덱서가 파일을 잡고 있으면 `EBUSY`가 길게 이어질 수 있다.
+ * 정리 실패는 검증 결과와 무관하므로 오래 재시도한 뒤에도 안 되면 OS 임시 폴더에 남기고 넘어간다. */
+function removeBestEffort(dir: string): void {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+  } catch {
+    /* 임시 폴더가 남을 뿐이다 */
+  }
+}
+
+/** 비영속 모드의 `stop()`은 서버를 멈춘 뒤 데이터 폴더를 직접 지운다. 그 삭제가 파일 잠금(`EBUSY` 등)으로 실패해도
+ * 서버는 이미 멈췄으므로 무시하고, 다른 오류는 그대로 던진다. */
+async function stopIgnoringCleanupLock(server: { stop(): Promise<void> }): Promise<void> {
+  try {
+    await server.stop();
+  } catch (error) {
+    if (!/EBUSY|EPERM|ENOTEMPTY/.test(String(error))) throw error;
+  }
 }
 
 export async function startIsolatedPostgres(): Promise<IsolatedPostgres> {
@@ -79,8 +99,8 @@ export async function startIsolatedPostgres(): Promise<IsolatedPostgres> {
     },
     async stop() {
       await Promise.all(pools.map((p) => p.end()));
-      await server.stop();
-      rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+      await stopIgnoringCleanupLock(server);
+      removeBestEffort(dir);
     },
   };
 }

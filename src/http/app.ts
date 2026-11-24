@@ -275,6 +275,21 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
       fields: ["poLineId", "normalQuantity", "damagedQuantity", "misdeliveredQuantity", "receivedAt"],
       run: (c) => receiving.receiveGoods(actor(c), merge(c, { tenantId: t(c), purchaseOrderId: c.params.purchaseOrderId!, idempotencyKey: c.idempotencyKey })),
     }),
+    route("POST", "/receipts/(?<receiptId>[^/]+)/defect-resolutions", {
+      success: 201,
+      fields: ["kind", "quantity", "outcome", "evidence", "resolvedAt"],
+      run: (c) => receiving.resolveReceiptDefect(actor(c), merge(c, { tenantId: t(c), receiptId: c.params.receiptId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/receipts/(?<receiptId>[^/]+)/excess-decisions", {
+      success: 201,
+      fields: ["decision", "quantity", "reason", "decidedAt"],
+      run: (c) => receiving.decideExcessReceipt(actor(c), merge(c, { tenantId: t(c), receiptId: c.params.receiptId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/receipts/(?<receiptId>[^/]+)/corrections", {
+      success: 201,
+      fields: ["quantity", "reason", "correctedAt"],
+      run: (c) => receiving.correctReceipt(actor(c), merge(c, { tenantId: t(c), receiptId: c.params.receiptId!, idempotencyKey: c.idempotencyKey })),
+    }),
     route("POST", "/receipts/(?<receiptId>[^/]+)/allocations", {
       success: 201,
       fields: ["orderId", "orderLineId", "quantity", "allocatedAt"],

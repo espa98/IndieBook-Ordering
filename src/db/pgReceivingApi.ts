@@ -1,9 +1,11 @@
 import type { PoolClient } from "pg";
 import { authorizedActions } from "../auth/authorizedActions";
+import type { CorrectReceiptRequest, ReceiptCorrection } from "../inventory/correctReceipt";
+import type { DecideExcessReceiptRequest, ExcessDecision } from "../inventory/decideExcessReceipt";
+import type { ReceiptDefectResolution, ResolveReceiptDefectRequest } from "../inventory/resolveReceiptDefect";
 import { AppError } from "../errors/AppError";
 import type { ReceiptAllocation, AllocateReceiptRequest } from "../inventory/allocateReceipt";
 import type { AllocationCancellation } from "../inventory/cancelAllocation";
-import type { ReceiptCorrection } from "../inventory/correctReceipt";
 import type { AllocationDelivery } from "../inventory/deliverAllocation";
 import type { GoodsReceipt, ReceiveGoodsRequest } from "../inventory/receiveGoods";
 import type { AllocationRelease, ReleaseAllocationRequest } from "../inventory/releaseAllocation";
@@ -28,6 +30,9 @@ export const polLockKey = (tenantId: string, poLineId: string) => `pol:${tenantI
 
 export type ReceiveGoodsBody = Omit<ReceiveGoodsRequest, "inspectedBy">;
 export type AllocateReceiptBody = Omit<AllocateReceiptRequest, "allocatedBy">;
+export type ResolveReceiptDefectBody = Omit<ResolveReceiptDefectRequest, "actorRole" | "resolvedBy">;
+export type DecideExcessReceiptBody = Omit<DecideExcessReceiptRequest, "actorRole" | "decidedBy">;
+export type CorrectReceiptBody = Omit<CorrectReceiptRequest, "actorRole" | "correctedBy">;
 export type ReleaseAllocationBody = Omit<ReleaseAllocationRequest, "releasedBy">;
 
 async function loadPurchaseOrder(client: PoolClient, tenantId: string, poId: string): Promise<PurchaseOrder | undefined> {
@@ -146,6 +151,8 @@ export function createPgReceivingApi(deps: { pool: PoolLike }) {
     find: (client: PoolClient) => Promise<{ poLineId?: string; poId?: string } | undefined>,
     execute: (ctx: { principal: ReturnType<typeof principalFor>; state: PoState | undefined; idempotency: Awaited<ReturnType<typeof loadCommands>> }) => T,
     flush: (client: PoolClient, result: T) => Promise<void>,
+    /** 락을 잡은 뒤 추가로 적재할 기록(입고 후속 기록 등) */
+    load?: (client: PoolClient) => Promise<void>,
   ): Promise<T> {
     return inTransaction(deps.pool, "service_role", actor.userId, async (client) => {
       const principal = principalFor(await loadMembership(client, actor.userId, request.tenantId), actor.userId, request.tenantId);
@@ -155,6 +162,7 @@ export function createPgReceivingApi(deps: { pool: PoolLike }) {
         await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [polLockKey(request.tenantId, found.poLineId)]);
         state = await loadPoState(client, request.tenantId, found.poId);
       }
+      if (found?.poLineId) await load?.(client);
       // 멱등 기록은 락을 잡은 뒤에 읽는다. 같은 키로 먼저 커밋된 요청의 결과를 봐야 재생으로 처리된다
       const idempotency = await loadCommands(client, request.tenantId, request.idempotencyKey);
       const known = new Set(idempotency.keys());
@@ -236,6 +244,108 @@ export function createPgReceivingApi(deps: { pool: PoolLike }) {
           async () => (isUuid(request.poLineId) && isUuid(request.purchaseOrderId) ? { poLineId: request.poLineId, poId: request.purchaseOrderId } : undefined),
           (ctx) => authorizedActions.receiveGoods({ ...receiptRepos(ctx.state, sink), idempotency: ctx.idempotency }, ctx.principal, rest),
           async (client) => void (await Promise.all(sink.receipts.map((r) => insertReceipt(client, r)))),
+        );
+      }),
+    resolveReceiptDefect: (actor: Actor, request: ResolveReceiptDefectBody): Promise<ReceiptDefectResolution> =>
+      withRetry(() => {
+        const sink = { receipts: [] as GoodsReceipt[], allocations: [] as ReceiptAllocation[], releases: [] as AllocationRelease[] };
+        const saved: ReceiptDefectResolution[] = [];
+        let existing: ReceiptDefectResolution[] = [];
+        const { tenantId: _t, ...rest } = request;
+        void _t;
+        return run(
+          actor,
+          request,
+          async (client) => {
+            const r = await lookupReceipt(client, request.tenantId, request.receiptId);
+            return r ? { poLineId: r.po_line_id, poId: r.purchase_order_id } : undefined;
+          },
+          (ctx) =>
+            authorizedActions.resolveReceiptDefect(
+              { receipts: { get: (_t2: string, id: string) => ctx.state?.receipts.find((r) => r.id === id) }, receiptDefectResolutions: { list: () => existing, save: (r) => void saved.push(r) }, idempotency: ctx.idempotency },
+              ctx.principal,
+              rest,
+            ),
+          async (client) => {
+            for (const r of saved) {
+              await client.query(
+                "insert into public.ordering_receipt_defect_resolutions (id, tenant_id, receipt_id, purchase_order_id, kind, quantity, outcome, evidence, resolved_by, resolved_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                [r.id, r.tenantId, r.receiptId, r.purchaseOrderId, r.kind, r.quantity, r.outcome, r.evidence, r.resolvedBy, r.resolvedAt, r.recordedAt],
+              );
+            }
+          },
+          async (client) => {
+            existing = (await client.query("select * from public.ordering_receipt_defect_resolutions where tenant_id = $1 and receipt_id = $2", [request.tenantId, request.receiptId])).rows.map(
+              (r): ReceiptDefectResolution => ({ id: r.id, tenantId: r.tenant_id, receiptId: r.receipt_id, purchaseOrderId: r.purchase_order_id, kind: r.kind, quantity: r.quantity, outcome: r.outcome, evidence: r.evidence, resolvedBy: r.resolved_by, resolvedAt: iso(r.resolved_at), recordedAt: iso(r.recorded_at) }),
+            );
+          },
+        );
+      }),
+    decideExcessReceipt: (actor: Actor, request: DecideExcessReceiptBody): Promise<ExcessDecision> =>
+      withRetry(() => {
+        const sink = { receipts: [] as GoodsReceipt[], allocations: [] as ReceiptAllocation[], releases: [] as AllocationRelease[] };
+        const saved: ExcessDecision[] = [];
+        let existing: ExcessDecision[] = [];
+        const { tenantId: _t, ...rest } = request;
+        void _t;
+        return run(
+          actor,
+          request,
+          async (client) => {
+            const r = await lookupReceipt(client, request.tenantId, request.receiptId);
+            return r ? { poLineId: r.po_line_id, poId: r.purchase_order_id } : undefined;
+          },
+          (ctx) =>
+            authorizedActions.decideExcessReceipt(
+              { receipts: receiptRepos(ctx.state, sink).receipts, excessDecisions: { list: () => existing, save: (d) => void saved.push(d) }, idempotency: ctx.idempotency },
+              ctx.principal,
+              rest,
+            ),
+          async (client) => {
+            for (const d of saved) {
+              await client.query("insert into public.ordering_excess_decisions (id, tenant_id, receipt_id, decision, quantity, reason, decided_by, decided_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)", [d.id, d.tenantId, d.receiptId, d.decision, d.quantity, d.reason, d.decidedBy, d.decidedAt, d.recordedAt]);
+            }
+          },
+          async (client) => {
+            existing = (await client.query("select * from public.ordering_excess_decisions where tenant_id = $1 and receipt_id = $2", [request.tenantId, request.receiptId])).rows.map(
+              (d): ExcessDecision => ({ id: d.id, tenantId: d.tenant_id, receiptId: d.receipt_id, decision: d.decision, quantity: d.quantity, reason: d.reason, decidedBy: d.decided_by, decidedAt: iso(d.decided_at), recordedAt: iso(d.recorded_at) }),
+            );
+          },
+        );
+      }),
+    correctReceipt: (actor: Actor, request: CorrectReceiptBody): Promise<ReceiptCorrection> =>
+      withRetry(() => {
+        const sink = { receipts: [] as GoodsReceipt[], allocations: [] as ReceiptAllocation[], releases: [] as AllocationRelease[] };
+        const saved: ReceiptCorrection[] = [];
+        const { tenantId: _t, ...rest } = request;
+        void _t;
+        return run(
+          actor,
+          request,
+          async (client) => {
+            const r = await lookupReceipt(client, request.tenantId, request.receiptId);
+            return r ? { poLineId: r.po_line_id, poId: r.purchase_order_id } : undefined;
+          },
+          (ctx) => {
+            const repos = receiptRepos(ctx.state, sink);
+            return authorizedActions.correctReceipt(
+              {
+                receipts: repos.receipts,
+                receiptAllocations: repos.receiptAllocations,
+                allocationReleases: repos.allocationReleases,
+                allocationDeliveries: repos.allocationDeliveries,
+                receiptCorrections: { list: repos.receiptCorrections.list, save: (c: ReceiptCorrection) => void saved.push(c) },
+                idempotency: ctx.idempotency,
+              },
+              ctx.principal,
+              rest,
+            );
+          },
+          async (client) => {
+            for (const c of saved) {
+              await client.query("insert into public.ordering_receipt_corrections (id, tenant_id, receipt_id, quantity, reason, corrected_by, corrected_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8)", [c.id, c.tenantId, c.receiptId, c.quantity, c.reason, c.correctedBy, c.correctedAt, c.recordedAt]);
+            }
+          },
         );
       }),
     allocateReceipt: (actor: Actor, request: AllocateReceiptBody): Promise<ReceiptAllocation> =>
