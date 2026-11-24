@@ -15,6 +15,7 @@ import type {
   AllocationDelivery,
   DeliverAllocationRequest,
 } from "../../src/inventory/deliverAllocation";
+import type { ReallocateAllocationRequest } from "../../src/inventory/reallocateAllocation";
 import { allocateReceipt } from "../../src/inventory/allocateReceipt";
 import { receiveGoods } from "../../src/inventory/receiveGoods";
 import { sentScene } from "./procurementWorld";
@@ -224,4 +225,26 @@ export function deliveryScene() {
     request,
     releaseRequest: s.request,
   };
+}
+
+/** deliveryScene(주문 B 3권 배분)에서 주문 A(연결 2권)로 옮기는 재배분 요청을 만드는 세계 */
+export function reallocationScene() {
+  const s = deliveryScene();
+  let seq = 0;
+  const reallocateRequest = (
+    extra: Partial<ReallocateAllocationRequest> = {},
+  ): ReallocateAllocationRequest => ({
+    tenantId: "tenant-a",
+    allocationId: s.allocation.id,
+    toOrderId: s.orders[0]!.id,
+    toOrderLineId: s.orders[0]!.lines[0]!.lineId,
+    quantity: 1,
+    reason: "고객 B가 일부 취소, 고객 A에게 우선 배분",
+    actorRole: "OWNER",
+    actedBy: "점주",
+    actedAt: "2026-03-04T06:58:00.000Z",
+    idempotencyKey: `rea-${++seq}`,
+    ...extra,
+  });
+  return { ...s, reallocateRequest };
 }
