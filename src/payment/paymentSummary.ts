@@ -1,11 +1,13 @@
 import type { Order } from "../order/createDraftOrder";
+import type { RefundConfirmation } from "./confirmRefund";
+import type { PaymentCorrection } from "./correctPayment";
 import type { PaymentConfirmation } from "./confirmPayment";
 import type { Payment } from "./recordPayment";
 import type { PaymentVoid } from "./voidPayment";
 
 export type PaymentSummary = {
   totalKrw: string;
-  /** 직원이 외부 증빙을 확인한 거래의 합계 (제공사 검증이 아님) */
+  /** 직원이 외부 증빙을 확인한 거래의 합계에서 확인된 환급액을 뺀 순액 (제공사 검증이 아님) */
   confirmedKrw: string;
   /** 입력됐지만 아직 확인도 무효도 되지 않은 거래의 합계 */
   pendingKrw: string;
@@ -21,6 +23,8 @@ export function paymentSummary(
   payments: readonly Payment[],
   confirmations: readonly PaymentConfirmation[],
   voids: readonly PaymentVoid[],
+  refunds: readonly RefundConfirmation[] = [],
+  corrections: readonly PaymentCorrection[] = [],
 ): PaymentSummary {
   const total = BigInt(order.totalKrw ?? "0");
   const confirmedIds = new Set(confirmations.map((c) => c.paymentId));
@@ -32,6 +36,10 @@ export function paymentSummary(
     if (confirmedIds.has(p.id)) confirmed += BigInt(p.amountKrw);
     else pending += BigInt(p.amountKrw);
   }
+  // 환급이 확인된 금액은 더 이상 이 주문의 결제로 보지 않는다 (BR-Y08)
+  confirmed -= refunds.reduce((sum, r) => sum + BigInt(r.amountKrw), 0n);
+  // 오기록 보정은 원거래를 보존한 채 확인 금액만 줄인다 (ST-Y04)
+  confirmed -= corrections.reduce((sum, c) => sum + BigInt(c.reducedKrw), 0n);
   const balance = total > confirmed ? total - confirmed : 0n;
   const refundRequired = confirmed > total ? confirmed - total : 0n;
   return {
