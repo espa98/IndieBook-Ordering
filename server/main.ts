@@ -6,7 +6,14 @@ import { createApp } from "../src/http/app";
 import { createHttpServer } from "../src/http/server";
 import { loadConfig } from "./config";
 
-const config = loadConfig(process.env);
+let config: ReturnType<typeof loadConfig>;
+try {
+  config = loadConfig(process.env);
+} catch (error) {
+  // 설정 오류는 메시지만 출력한다(스택·값 비노출). 시작하지 않는다
+  console.error(error instanceof Error ? error.message : "invalid server configuration");
+  process.exit(1);
+}
 const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 10 });
 pool.on("error", (error) => console.error("database pool error:", error.message));
 

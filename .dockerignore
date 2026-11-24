@@ -1,0 +1,10 @@
+node_modules
+dist
+tests
+Docs
+Files_init
+implementation
+testing
+release
+.git
+*.md

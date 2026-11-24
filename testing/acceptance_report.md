@@ -8,7 +8,7 @@
 
 | 영역 | 판정 | 한 줄 근거 |
 |---|---|---|
-| 도메인 단위·통합(메모리 저장소) | **PASS** | `npx vitest run` 116 files / 1153 tests 통과, 실패 0 (DB 테스트 68개, HTTP 서버 테스트 14개 포함) |
+| 도메인 단위·통합(메모리 저장소) | **PASS** | `npx vitest run` 117 files / 1156 tests 통과, 실패 0 (DB 테스트 68개, HTTP 서버 테스트 14개, 번들 실행 테스트 3개 포함) |
 | 타입 검사 | **PASS** | `npx tsc --noEmit` 출력 없음 |
 | OpenAPI 스키마·계약 | **PARTIAL** | 주문 API(05단계)만 명세가 있고 26개 통과. 나머지 영역은 명세·구현 없음 |
 | HTTP | **PARTIAL** | 핸들러 단위 41개 통과. 실제 서버·라우터·JWT 없음 |
@@ -25,7 +25,7 @@
 
 | 명령 | 결과 |
 |---|---|
-| `npx vitest run` | files 116, tests 1153, passed 1153, failed 0 (HTTP 서버 추가 후 재실행. 디렉터리별 표도 이 실행의 JSON 집계) |
+| `npx vitest run` | files 117, tests 1156, passed 1156, failed 0 (서버 번들 추가 후 재실행. 디렉터리별 표도 이 실행의 JSON 집계) |
 | `npx tsc --noEmit` | 출력 없음(오류 0) |
 | 정적 점검: `git ls-files` 파일명(.env·secret·credential·pem·key) | 해당 없음 |
 | 정적 점검: `src tests openapi implementation package.json`에서 JWT·키 패턴, `ordering-dev`·`testBookshare` 프로젝트 ID, `service_role` grep | 해당 없음 |
@@ -51,8 +51,8 @@
 | cancellation | 5 | 25 |
 | reopening | 1 | 6 |
 | db | 8 | 68 |
-| server | 1 | 3 |
-| **합계** | **116** | **1153** |
+| server | 2 | 6 |
+| **합계** | **117** | **1156** |
 
 (`tests/helpers`는 테스트 파일이 없는 공용 픽스처다.)
 
@@ -433,10 +433,20 @@
 **테스트 안정화(발견한 간헐 실패 두 가지):** 전체 실행 부하에서 (1) DB 테스트 하나가 기본 5초 제한을 넘는 시간 초과(논리 오류 아님), (2) 격리 Postgres 기동 단계에서 포트를 고른 뒤 다른 서버와 겹쳐 스위트가 실패. `vitest.config.ts`로 테스트 시간 제한을 30초로 올리고, 시험용 풀의 유휴 연결을 1초 뒤 닫으며, Postgres 기동을 새 포트·새 폴더로 최대 4회 재시도하게 했다. 전체 스위트를 연속 5회 실행해 매번 116 files / 1153 tests가 통과했다.
 
 **한계**
-- **실행 파일이 없다:** `server/main.ts`와 `server/config.ts`는 있으나 빌드 단계(번들·컴파일)가 없어 `node`로 바로 실행할 수 없다(소스가 확장자 없는 import를 쓴다). 배포 방식(번들러·컨테이너)은 사용자 결정이 필요하다(`release/approval_items.md` E8).
+- **실행 파일:** §21에서 esbuild 번들(`npm run build`)로 해결했다. 호스팅·시크릿 관리는 여전히 사용자 결정이다(E8).
 - **OpenAPI 미반영:** 재고 예약·수령·취소 요청·결제·환급 엔드포인트는 서버에 있으나 `openapi/ordering.yaml`에는 주문 4개만 있다. 계약 테스트도 주문 엔드포인트만 검증한다. 서버 허용 필드 목록과 명세의 대조는 수작업이다.
 - **CORS·속도 제한·TLS 종단·요청 로그 구조화는 없다**(브라우저 클라이언트 허용 오리진은 결정이 필요, E9). 한 요청 안의 문자열·품목 수 상한(E4)도 본문 크기 상한 외에는 없다.
 - 실제 Supabase 프로젝트의 JWT(서명 키 형식, `iss`)로 검증하지는 않았다. 구성한 키로 직접 서명한 토큰으로만 시험했다. Supabase의 비대칭 서명 키 사용 여부에 따라 `SUPABASE_JWT_KEYS`(공개 키)로 구성해야 한다.
 - 접근 토큰 폐기(로그아웃 즉시 무효)는 검증하지 않는다. 직원 비활성화는 매 요청 DB 멤버십 재조회로 즉시 반영된다.
 - 읽기 API는 주문 목록·상세뿐이다. 재고·결제·수령 조회 엔드포인트는 없다.
+
+## 21. 서버 빌드·실행 파일 (E8 권고안, `server/build.ts`, `Dockerfile`)
+
+테스트 3개(`tests/server/bundle.test.ts`). "순서대로 진행해 줘"를 E8 권고안(esbuild 번들 + 컨테이너 이미지) 승인으로 보고 구현했다.
+
+- `npm run build`(`node server/build.ts`)는 서버를 의존성까지 포함한 **단일 ESM 파일**(`dist/server.mjs`, 약 448KB)로 묶는다. `npm start`로 실행한다. 실행에는 Node.js만 필요하고 `pg-native`는 제외한다. 소스맵·시험용 값·개발 의존성(`embedded-postgres` 등)은 번들에 들어가지 않는다.
+- 테스트는 번들을 **실제로 빌드해 `node`로 기동**하고, 격리 Postgres에 연결해 `/healthz` 200, 토큰 없는 요청 401, 서명한 JWT의 주문 목록 200을 확인한다. 필수 설정(`DATABASE_URL`)이 없거나 비밀이 32자 미만이면 시작하지 않고 종료 코드 1, 오류에는 메시지만 있고 접속 문자열·비밀을 싣지 않는다.
+- `Dockerfile`(다단계, 비루트 `node` 사용자, `/healthz` 헬스체크, 비밀은 이미지에 넣지 않음)과 `.dockerignore`를 추가했다.
+
+**한계:** 이 PC에 Docker가 없어 **이미지 빌드·실행은 검증하지 못했다**(Dockerfile 상단에도 명시). 번들 단계까지는 검증했다. 호스팅 위치·시크릿 관리·DB 접속 사용자(`service_role`로 `SET LOCAL ROLE` 가능한 사용자) 구성은 배포하는 쪽이 정해야 한다. 번들 크기에는 `pg`와 도메인 전체가 포함되며 종속성 취약점 점검(`npm audit`)과 SBOM은 하지 않았다. SIGTERM 정상 종료는 윈도우에서 시그널이 즉시 종료로 처리되어 "종료한다"만 확인했다.
 
