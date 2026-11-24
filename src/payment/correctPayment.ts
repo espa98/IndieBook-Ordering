@@ -26,6 +26,7 @@ export type PaymentCorrection = {
 };
 
 export type PaymentCorrectionRepository = {
+  get(tenantId: string, id: string): PaymentCorrection | undefined;
   list(tenantId: string, paymentId: string): PaymentCorrection[];
   listByOrder(tenantId: string, orderId: string): PaymentCorrection[];
   save(correction: PaymentCorrection): void;

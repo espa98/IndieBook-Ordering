@@ -272,6 +272,9 @@ export function heavilyOverpaidScene() {
 export function createInMemoryPaymentCorrectionRepository() {
   const all: PaymentCorrection[] = [];
   return {
+    get(tenantId: string, id: string): PaymentCorrection | undefined {
+      return all.find((c) => c.tenantId === tenantId && c.id === id);
+    },
     list(tenantId: string, paymentId: string): PaymentCorrection[] {
       return all.filter((c) => c.tenantId === tenantId && c.paymentId === paymentId);
     },

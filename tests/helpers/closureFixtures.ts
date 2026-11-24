@@ -17,6 +17,12 @@ import type {
   OrderClosureRequest,
   RequestOrderClosureRequest,
 } from "../../src/order/requestOrderClosure";
+import { correctPayment } from "../../src/payment/correctPayment";
+import { executeOrderClosure } from "../../src/order/executeOrderClosure";
+import type {
+  ExecuteOrderReopeningRequest,
+  OrderReopening,
+} from "../../src/order/executeOrderReopening";
 import { postFulfillment } from "../../src/fulfillment/postFulfillment";
 import { fulfillmentScene } from "./fulfillmentFixtures";
 
@@ -127,4 +133,52 @@ export function executionScene() {
     ...extra,
   });
   return { ...s, deps, orderClosures, closureRequestRecord: request, executeRequest };
+}
+
+export function createInMemoryOrderReopeningRepository() {
+  const all: OrderReopening[] = [];
+  return {
+    list(tenantId: string, orderId: string): OrderReopening[] {
+      return all.filter((r) => r.tenantId === tenantId && r.orderId === orderId);
+    },
+    save(reopening: OrderReopening): void {
+      all.push(reopening);
+    },
+  };
+}
+
+/** 주문 D가 결제·인도를 마치고 서버가 종결한 세계. Owner가 결제 오기록을 보정할 수 있다. */
+export function reopeningScene() {
+  const s = executionScene();
+  const orderReopenings = createInMemoryOrderReopeningRepository();
+  const deps = { ...s.deps, orderReopenings };
+  executeOrderClosure(deps, s.executeRequest({ idempotencyKey: "clx-reopen-scene" }));
+  const paymentId = deps.payments.list("tenant-a", s.orderD.id)[0]!.id;
+  /** 확인된 30,000원 결제를 Owner가 reducedKrw만큼 감액 보정하고 그 보정 기록을 돌려준다 */
+  const correctOrderPayment = (reducedKrw: string, key = "pcr-reopen") =>
+    correctPayment(deps, {
+      tenantId: "tenant-a",
+      paymentId,
+      reducedKrw,
+      reason: "입금액 오입력 정정",
+      evidence: "은행 입금 내역 재확인",
+      actorRole: "OWNER",
+      correctedBy: "점주",
+      correctedAt: "2026-03-04T06:59:30.000Z",
+      idempotencyKey: key,
+    });
+  let seq = 0;
+  const reopenRequest = (
+    correctionId: string,
+    extra: Partial<ExecuteOrderReopeningRequest> = {},
+  ): ExecuteOrderReopeningRequest => ({
+    tenantId: "tenant-a",
+    orderId: s.orderD.id,
+    trigger: { kind: "PAYMENT_CORRECTION", id: correctionId },
+    executedBy: "SYSTEM",
+    executedAt: "2026-03-04T06:59:45.000Z",
+    idempotencyKey: `reo-${++seq}`,
+    ...extra,
+  });
+  return { ...s, deps, orderReopenings, paymentId, correctOrderPayment, reopenRequest };
 }
