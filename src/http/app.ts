@@ -1,4 +1,5 @@
 import { verifyJwt, type JwtVerifyOptions } from "../auth/jwt";
+import { createPgCancellationApi } from "../db/pgCancellationApi";
 import { createPgFulfillmentApi } from "../db/pgFulfillmentApi";
 import { createPgOrderApi } from "../db/pgOrderApi";
 import { createPgPaymentApi } from "../db/pgPaymentApi";
@@ -62,6 +63,7 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
   const payments = createPgPaymentApi({ pool: deps.pool });
   const fulfillments = createPgFulfillmentApi({ pool: deps.pool });
   const receiving = createPgReceivingApi({ pool: deps.pool });
+  const cancellations = createPgCancellationApi({ pool: deps.pool });
   const actor = (c: Ctx) => ({ userId: c.userId });
   // 본문은 신뢰할 수 없는 JSON이다. 형식 검증은 도메인이 하므로 여기서는 경계 타입만 맞춘다
   const merge = (c: Ctx, extra: Record<string, unknown>) => ({ ...c.body, ...extra }) as never;
@@ -116,6 +118,21 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
       success: 201,
       fields: ["orderLineId", "quantity", "reason", "expectedVersion", "requestedAt"],
       run: (c) => fulfillments.requestOrderCancellation(actor(c), merge(c, { tenantId: t(c), orderId: c.params.orderId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/order-cancellation-requests/(?<requestId>[^/]+)/decision", {
+      success: 200,
+      fields: ["decision", "decidedAt"],
+      run: (c) => cancellations.decideOrderCancellation(actor(c), merge(c, { tenantId: t(c), requestId: c.params.requestId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/order-cancellation-requests/(?<requestId>[^/]+)/application", {
+      success: 201,
+      fields: ["appliedAt"],
+      run: (c) => cancellations.applyOrderCancellation(actor(c), merge(c, { tenantId: t(c), requestId: c.params.requestId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/orders/(?<orderId>[^/]+)/closure-requests", {
+      success: 201,
+      fields: ["expectedVersion", "requestedAt"],
+      run: (c) => cancellations.requestOrderClosure(actor(c), merge(c, { tenantId: t(c), orderId: c.params.orderId!, idempotencyKey: c.idempotencyKey })),
     }),
     route("POST", "/orders/(?<orderId>[^/]+)/payments", {
       success: 201,

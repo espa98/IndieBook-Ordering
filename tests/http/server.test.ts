@@ -211,6 +211,39 @@ describe("HTTP 서버: 업무 흐름 (주문 → 예약 → 결제 → 인도 �
   });
 });
 
+describe("HTTP 서버: 취소 결정·적용과 종결 요청", () => {
+  it("취소 요청을 Owner만 승인·적용하고(Staff는 403) 적용하면 주문이 줄며, 종결 요청은 Staff도 할 수 있다", async () => {
+    await seedStock(10, 2);
+    const o = await confirmedOrder(10, 2);
+    const cancel = await call(`${orders()}/${o.orderId}/cancellation-requests`, {
+      method: "POST",
+      sub: STAFF_A,
+      body: { orderLineId: o.lineId, quantity: 1, reason: "고객 요청", expectedVersion: 2, requestedAt: "2026-03-04T06:45:00.000Z" },
+    });
+    const requestId = cancel.json.data.id as string;
+    const decisionPath = `/v1/tenants/${T_A}/order-cancellation-requests/${requestId}/decision`;
+
+    expect((await call(decisionPath, { method: "POST", sub: STAFF_A, body: { decision: "APPROVED", decidedAt: "2026-03-04T06:47:00.000Z" } })).status).toBe(403);
+    const approved = await call(decisionPath, { method: "POST", sub: OWNER_A, body: { decision: "APPROVED", decidedAt: "2026-03-04T06:47:00.000Z" } });
+    expect(approved.status).toBe(200);
+    expect(approved.json.data).toMatchObject({ kind: "APPROVED", decidedBy: OWNER_A });
+
+    const applyPath = `/v1/tenants/${T_A}/order-cancellation-requests/${requestId}/application`;
+    const applyBody = { appliedAt: "2026-03-04T06:49:00.000Z" };
+    expect((await call(applyPath, { method: "POST", sub: STAFF_A, body: applyBody })).status).toBe(403);
+    const applied = await call(applyPath, { method: "POST", sub: OWNER_A, body: applyBody });
+    expect(applied.status).toBe(201);
+    expect(applied.json.data).toMatchObject({ kind: "APPLIED" });
+    expect((await call(`${orders()}/${o.orderId}`, { sub: OWNER_A })).json.data).toMatchObject({ version: 3, totalKrw: "15000" });
+
+    const closure = await call(`${orders()}/${o.orderId}/closure-requests`, { method: "POST", sub: STAFF_A, body: { expectedVersion: 3, requestedAt: "2026-03-04T06:58:00.000Z" } });
+    expect(closure.status).toBe(201);
+    expect(closure.json.data).toMatchObject({ orderId: o.orderId, requestedBy: STAFF_A });
+    // 종결 실행은 서버만 한다: 사용자 API로는 열지 않는다
+    expect((await call(`/v1/tenants/${T_A}/order-closure-requests/${closure.json.data.id}/execution`, { method: "POST", sub: OWNER_A, body: {} })).status).toBe(404);
+  });
+});
+
 describe("HTTP 서버: 입고·배분 (발주 → 입고 → 배분 → 인도)", () => {
   it("검수 입고, 고객별 배분, 배분 해제, 배분 물량 인도가 HTTP로 이어지고 검수자·배분자는 토큰의 사용자로 기록된다", async () => {
     const o = await confirmedOrder(9, 2);
