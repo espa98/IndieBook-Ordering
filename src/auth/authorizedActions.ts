@@ -57,6 +57,8 @@ import { createPurchaseOrder } from "../procurement/createPurchaseOrder";
 import { markPurchaseOrderReady } from "../procurement/markPurchaseOrderReady";
 import { recordSupplierReply } from "../procurement/recordSupplierReply";
 import { respondToCancellationRequest } from "../procurement/respondToCancellationRequest";
+import { registerBook } from "../catalog/registerBook";
+import { updateBook } from "../catalog/updateBook";
 import { bindActor } from "./bindActor";
 import { inviteStaff } from "./inviteStaff";
 import { revokeInvitation } from "./revokeInvitation";
@@ -127,6 +129,9 @@ export const authorizedActions = {
   cancelUndeliveredPurchaseOrder: bindActor(cancelUndeliveredPurchaseOrder, { nameField: "cancelledBy", allow: BOTH }),
   recordPurchaseOrderDelivery: bindActor(recordPurchaseOrderDelivery, { nameField: "deliveredBy", allow: BOTH }),
   releaseSourcing: bindActor(releaseSourcing, { nameField: "releasedBy", allow: BOTH }),
+  // 도서 관리(ST-B01~B03): Owner·Staff 공용
+  registerBook: bindActor(registerBook, { nameField: "registeredBy", allow: BOTH }),
+  updateBook: bindActor(updateBook, { nameField: "changedBy", allow: BOTH }),
   // 행위자 필드가 없는 명령: 테넌트만 주체에서 주입한다
   confirmOrderService: bindActor(confirmOrderService, { allow: BOTH }),
   createOrderService: bindActor(createOrderService, { allow: BOTH }),
