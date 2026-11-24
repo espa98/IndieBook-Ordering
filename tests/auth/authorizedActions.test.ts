@@ -19,7 +19,8 @@ function sourceFiles(dir: string): string[] {
 }
 
 // 바인딩 인프라 자체(모음·바인더)만 제외한다. 직원 관리처럼 src/auth 안의 명령은 검사 대상이다
-const INFRASTRUCTURE = ["src/auth/authorizedActions.ts", "src/auth/bindActor.ts"];
+// managementGuard는 위임 검사 헬퍼일 뿐 명령이 아니다
+const INFRASTRUCTURE = ["src/auth/authorizedActions.ts", "src/auth/bindActor.ts", "src/catalog/managementGuard.ts"];
 const isCommandSource = (path: string) => !INFRASTRUCTURE.includes(path.split(sep).join("/"));
 
 describe("authorizedActions: 신원 필드를 주체에서 주입한 명령 모음 (T7)", () => {
