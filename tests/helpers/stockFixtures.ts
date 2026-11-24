@@ -1,3 +1,5 @@
+import type { ReserveStockRequest } from "../../src/inventory/reserveStock";
+import { world } from "./procurementWorld";
 import { createIdempotencyStore } from "../../src/idempotency/executeIdempotent";
 import type { StockReservation } from "../../src/inventory/stockReservation";
 import type { AdjustStockRequest } from "../../src/inventory/adjustStock";
@@ -88,4 +90,26 @@ export function adjustScene() {
     ...extra,
   });
   return { ...s, adjustRequest };
+}
+
+/** book-1 재고 5권이 있고, 고객 주문(book-1 2권, 확정)이 있는 세계 */
+export function reservationScene() {
+  const a = adjustScene();
+  const w = world();
+  const order = w.addOrder([{ bookId: "book-1", quantity: 2, unitPriceKrw: "15000" }]);
+  const deps = { ...a.deps, orders: w.deps.orders, sourcingAllocations: w.deps.allocations };
+  let seq = 0;
+  const reserveRequest = (
+    extra: Partial<ReserveStockRequest> = {},
+  ): ReserveStockRequest => ({
+    tenantId: "tenant-a",
+    orderId: order.id,
+    orderLineId: order.lines[0]!.lineId,
+    quantity: 2,
+    reservedBy: "김직원",
+    reservedAt: "2026-03-04T06:40:00.000Z",
+    idempotencyKey: `res-${++seq}`,
+    ...extra,
+  });
+  return { ...a, w, deps, order, reserveRequest };
 }
