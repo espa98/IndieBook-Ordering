@@ -614,6 +614,42 @@ describe("HTTP 서버: 재고 운영과 결제 무효", () => {
   });
 });
 
+describe("HTTP 서버: 직원 초대·철회·비활성화 (Owner 전용)", () => {
+  it("Owner만 직원을 초대하고(토큰은 응답에만 한 번) 철회하며, 직원을 비활성화하면 그 직원의 다음 요청이 즉시 403이다", async () => {
+    const invitations = `/v1/tenants/${T_A}/staff-invitations`;
+    const expiresAt = new Date(Date.now() + 7 * 86_400_000).toISOString();
+    expect((await call(invitations, { method: "POST", sub: STAFF_A, body: { email: "new@shop.test", expiresAt } })).status).toBe(403);
+    expect((await call(invitations, { method: "POST", sub: OWNER_A, body: { email: "bad", expiresAt } })).status).toBe(400);
+    expect((await call(invitations, { method: "POST", sub: OWNER_A, body: { email: "new@shop.test", expiresAt, invitedBy: STAFF_A } })).status).toBe(400); // 행위자 위조
+    const invited = await call(invitations, { method: "POST", sub: OWNER_A, body: { email: "new@shop.test", expiresAt } });
+    expect(invited.status).toBe(201);
+    expect(invited.json.data.invitation).toMatchObject({ email: "new@shop.test", role: "STAFF", invitedBy: OWNER_A });
+    expect(typeof invited.json.data.token).toBe("string");
+    expect(JSON.stringify(invited.json.data.invitation)).not.toContain(invited.json.data.token); // 토큰 원문은 초대 객체에 없다
+    expect((await call(invitations, { method: "POST", sub: OWNER_A, body: { email: "new@shop.test", expiresAt } })).status).toBe(422); // 중복 초대
+
+    expect((await call(`${invitations}/${invited.json.data.invitation.id}/revocation`, { method: "POST", sub: STAFF_A, body: {} })).status).toBe(403);
+    const revoked = await call(`${invitations}/${invited.json.data.invitation.id}/revocation`, { method: "POST", sub: OWNER_A, body: {} });
+    expect(revoked.status).toBe(201);
+    expect(revoked.json.data).toMatchObject({ kind: "REVOKED", actorId: OWNER_A });
+
+    const STAFF_C = "11111111-0000-4000-8000-0000000000c3";
+    const c = await db.connect();
+    await c.query(`insert into public.ordering_members (tenant_id, user_id, role, active) values ($1, $2, 'STAFF', true)`, [T_A, STAFF_C]);
+    await c.end();
+    expect((await call(orders(), { sub: STAFF_C })).status).toBe(200);
+    const statusPath = `/v1/tenants/${T_A}/members/${STAFF_C}/status`;
+    expect((await call(statusPath, { method: "POST", sub: STAFF_A, body: { status: "INACTIVE" } })).status).toBe(403);
+    const off = await call(statusPath, { method: "POST", sub: OWNER_A, body: { status: "INACTIVE" } });
+    expect(off.status).toBe(200);
+    expect(off.json.data).toMatchObject({ userId: STAFF_C, from: "ACTIVE", to: "INACTIVE", changedBy: OWNER_A });
+    expect((await call(orders(), { sub: STAFF_C })).status).toBe(403); // 비활성화는 즉시 접근을 막는다
+    expect((await call(statusPath, { method: "POST", sub: OWNER_A, body: { status: "INACTIVE" } })).status).toBe(422);
+    expect((await call(statusPath, { method: "POST", sub: OWNER_A, body: { status: "ACTIVE" } })).status).toBe(200);
+    expect((await call(orders(), { sub: STAFF_C })).status).toBe(200);
+  });
+});
+
 describe("HTTP 서버: 입력 방어", () => {
   it("Idempotency-Key 누락·공백·128자 초과는 400이다", async () => {
     const body = { lines: lines() };

@@ -6,6 +6,7 @@ import { createPgOrderApi } from "../db/pgOrderApi";
 import { createPgPaymentApi } from "../db/pgPaymentApi";
 import { createPgProcurementApi } from "../db/pgProcurementApi";
 import { createPgReceivingApi } from "../db/pgReceivingApi";
+import { createPgStaffApi } from "../db/pgStaffApi";
 import { createPgStockApi } from "../db/pgStockApi";
 import { createPgSupplierApi } from "../db/pgSupplierApi";
 import type { PoolLike } from "../db/pgSupport";
@@ -68,6 +69,7 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
   const receiving = createPgReceivingApi({ pool: deps.pool });
   const procurement = createPgProcurementApi({ pool: deps.pool });
   const suppliers = createPgSupplierApi({ pool: deps.pool });
+  const staffAdmin = createPgStaffApi({ pool: deps.pool });
   const cancellations = createPgCancellationApi({ pool: deps.pool });
   const dispositions = createPgDispositionApi({ pool: deps.pool });
   const actor = (c: Ctx) => ({ userId: c.userId });
@@ -229,6 +231,20 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
       success: 201,
       fields: ["paymentId", "amountKrw", "evidence", "requestedAt"],
       run: (c) => payments.requestRefund(actor(c), merge(c, { tenantId: t(c), refundTaskId: c.params.taskId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/staff-invitations", {
+      success: 201,
+      fields: ["email", "expiresAt"],
+      run: (c) => staffAdmin.inviteStaff(actor(c), merge(c, { tenantId: t(c), idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/staff-invitations/(?<invitationId>[^/]+)/revocation", {
+      success: 201,
+      run: (c) => staffAdmin.revokeInvitation(actor(c), { tenantId: t(c), invitationId: c.params.invitationId!, idempotencyKey: c.idempotencyKey }),
+    }),
+    route("POST", "/members/(?<targetUserId>[^/]+)/status", {
+      success: 200,
+      fields: ["status"],
+      run: (c) => staffAdmin.setMembershipStatus(actor(c), merge(c, { tenantId: t(c), targetUserId: c.params.targetUserId!, idempotencyKey: c.idempotencyKey })),
     }),
     route("POST", "/suppliers", {
       success: 201,
