@@ -4,9 +4,10 @@ import type { UserPrincipal } from "../auth/principal";
 import { AppError } from "../errors/AppError";
 import type { IdempotencyStore } from "../idempotency/executeIdempotent";
 import type { Order } from "../order/createDraftOrder";
-import type { SourcingAllocation, Supplier } from "../procurement/allocateSourcing";
+import type { AllocateSourcingRequest, SourcingAllocation, Supplier } from "../procurement/allocateSourcing";
 import type { CreatePurchaseOrderRequest, PurchaseOrder } from "../procurement/createPurchaseOrder";
 import type { MarkPurchaseOrderReadyRequest } from "../procurement/markPurchaseOrderReady";
+import type { ReleaseSourcingRequest, SourcingRelease } from "../procurement/releaseSourcing";
 import type { RecordPurchaseOrderDeliveryRequest } from "../procurement/recordPurchaseOrderDelivery";
 import type { PoReply, RecordSupplierReplyRequest } from "../procurement/recordSupplierReply";
 import { loadPoState, polLockKey } from "./pgReceivingApi";
@@ -31,6 +32,8 @@ export type CreatePurchaseOrderBody = CreatePurchaseOrderRequest;
 export type MarkPurchaseOrderReadyBody = MarkPurchaseOrderReadyRequest;
 export type RecordPurchaseOrderDeliveryBody = Omit<RecordPurchaseOrderDeliveryRequest, "deliveredBy">;
 export type RecordSupplierReplyBody = RecordSupplierReplyRequest;
+export type AllocateSourcingBody = AllocateSourcingRequest;
+export type ReleaseSourcingBody = Omit<ReleaseSourcingRequest, "releasedBy">;
 
 /** 발주 생성·전달 준비·전달 기록·공급처 회신을 Postgres 영속화 위에서 실행한다 (E7 권고안 a).
  * 락 순서: 배정 락('src:', 정렬 순) → 주문 행(공유). 발주 상태 전이는 발주 행을 `FOR UPDATE`로 잡는다. */
@@ -145,6 +148,98 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
     save: (po: PurchaseOrder) => void saved.po.push(po),
   });
 
+  const toSupplier = (row: any): Supplier | undefined =>
+    row ? { tenantId: row.tenant_id, code: row.code, active: row.active, ...(row.name === null ? {} : { name: row.name }), ...(row.order_channel === null ? {} : { orderChannel: row.order_channel }), version: Number(row.version) } : undefined;
+  const toAllocation = (a: any): SourcingAllocation => ({ id: a.id, tenantId: a.tenant_id, orderId: a.order_id, lineId: a.order_line_id, supplierCode: a.supplier_code, quantity: a.quantity, status: a.status });
+
+  const allocateOnce = (actor: Actor, request: AllocateSourcingBody) =>
+    inTransaction(deps.pool, "service_role", actor.userId, async (client) => {
+      const principal = principalFor(await loadMembership(client, actor.userId, request.tenantId), actor.userId, request.tenantId);
+      const [order] = isUuid(request.orderId) ? await loadOrders(client, request.tenantId, { orderId: request.orderId, lock: "share" }) : [];
+      if (order && isUuid(request.lineId)) await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`sline:${request.tenantId}:${request.lineId}`]);
+      const supplier = isUuid(request.tenantId) && typeof request.supplierCode === "string"
+        ? toSupplier((await client.query("select * from public.ordering_suppliers where tenant_id = $1 and code = $2", [request.tenantId, request.supplierCode])).rows[0])
+        : undefined;
+      const existing = order ? (await client.query("select * from public.ordering_sourcing_allocations where tenant_id = $1 and order_id = $2", [order.tenantId, order.id])).rows.map(toAllocation) : [];
+      const idempotency = await loadCommands(client, request.tenantId, request.idempotencyKey);
+      const known = new Set(idempotency.keys());
+      const saved: SourcingAllocation[] = [];
+      const { tenantId: _t, ...rest } = request;
+      void _t;
+      const result = authorizedActions.allocateSourcing(
+        {
+          orders: { get: (t, id) => (order && order.tenantId === t && order.id === id ? order : undefined), list: () => (order ? [order] : []), save: forbidden },
+          suppliers: { get: (_t2, code) => (supplier && supplier.code === code ? supplier : undefined) },
+          allocations: { get: (_t2, id) => existing.find((a) => a.id === id), list: () => existing, save: (a) => void saved.push(a) },
+          idempotency,
+        },
+        principal,
+        rest,
+      );
+      for (const a of saved) {
+        await client.query("insert into public.ordering_sourcing_allocations (id, tenant_id, order_id, order_line_id, supplier_code, quantity, status) values ($1, $2, $3, $4, $5, $6, $7)", [a.id, a.tenantId, a.orderId, a.lineId, a.supplierCode, a.quantity, a.status]);
+      }
+      await saveNewCommands(client, idempotency, known);
+      return result;
+    });
+
+  const releaseOnce = (actor: Actor, request: ReleaseSourcingBody) =>
+    inTransaction(deps.pool, "service_role", actor.userId, async (client) => {
+      const principal = principalFor(await loadMembership(client, actor.userId, request.tenantId), actor.userId, request.tenantId);
+      let allocation: SourcingAllocation | undefined;
+      let linked: PurchaseOrder[] = [];
+      if (isUuid(request.tenantId) && isUuid(request.allocationId)) {
+        await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`src:${request.tenantId}:${request.allocationId}`]);
+        const row = (await client.query("select * from public.ordering_sourcing_allocations where tenant_id = $1 and id = $2 for update", [request.tenantId, request.allocationId])).rows[0];
+        allocation = row ? toAllocation(row) : undefined;
+        if (allocation) {
+          const links = (
+            await client.query(
+              `select p.id as po_id, p.status, p.version, p.supplier_code, k.po_line_id, l.book_key, k.order_id, k.order_line_id, k.quantity
+                 from public.ordering_po_links k
+                 join public.ordering_po_lines l on l.tenant_id = k.tenant_id and l.id = k.po_line_id
+                 join public.ordering_purchase_orders p on p.tenant_id = l.tenant_id and p.id = l.purchase_order_id
+                where k.tenant_id = $1 and k.allocation_id = $2 and p.status <> 'CANCELLED'`,
+              [request.tenantId, request.allocationId],
+            )
+          ).rows;
+          linked = links.map((k) => ({
+            id: k.po_id,
+            tenantId: request.tenantId,
+            supplierCode: k.supplier_code,
+            status: k.status,
+            version: Number(k.version),
+            lines: [{ poLineId: k.po_line_id, bookId: k.book_key, quantity: k.quantity, links: [{ allocationId: request.allocationId, orderId: k.order_id, orderLineId: k.order_line_id, quantity: k.quantity }] }],
+          }));
+        }
+      }
+      const idempotency = await loadCommands(client, request.tenantId, request.idempotencyKey);
+      const known = new Set(idempotency.keys());
+      const savedAllocations: SourcingAllocation[] = [];
+      const savedReleases: SourcingRelease[] = [];
+      const { tenantId: _t, ...rest } = request;
+      void _t;
+      const result = authorizedActions.releaseSourcing(
+        {
+          allocations: { get: (_t2, id) => (allocation && allocation.id === id ? allocation : undefined), list: () => (allocation ? [allocation] : []), save: (a) => void savedAllocations.push(a) },
+          purchaseOrders: { get: forbidden as never, list: () => linked, save: forbidden },
+          sourcingReleases: { list: () => [], save: (r) => void savedReleases.push(r) },
+          idempotency,
+        },
+        principal,
+        rest,
+      );
+      for (const a of savedAllocations) await client.query("update public.ordering_sourcing_allocations set status = $3 where tenant_id = $1 and id = $2", [a.tenantId, a.id, a.status]);
+      for (const r of savedReleases) {
+        await client.query(
+          "insert into public.ordering_sourcing_releases (id, tenant_id, allocation_id, order_id, order_line_id, supplier_code, quantity, reason, retained_obligations, released_by, released_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+          [r.id, r.tenantId, r.allocationId, r.orderId, r.lineId, r.supplierCode, r.quantity, r.reason, JSON.stringify(r.retainedObligations), r.releasedBy, r.releasedAt, r.recordedAt],
+        );
+      }
+      await saveNewCommands(client, idempotency, known);
+      return result;
+    });
+
   async function insertPurchaseOrder(client: PoolClient, po: PurchaseOrder) {
     await client.query("insert into public.ordering_purchase_orders (id, tenant_id, supplier_code, status, version) values ($1, $2, $3, $4, $5)", [po.id, po.tenantId, po.supplierCode, po.status, po.version]);
     for (const line of po.lines) {
@@ -158,6 +253,8 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
   void (undefined as unknown as IdempotencyStore);
   void (undefined as unknown as UserPrincipal);
   return {
+    allocateSourcing: (actor: Actor, request: AllocateSourcingBody) => withRetry(() => allocateOnce(actor, request)),
+    releaseSourcing: (actor: Actor, request: ReleaseSourcingBody) => withRetry(() => releaseOnce(actor, request)),
     createPurchaseOrder: (actor: Actor, request: CreatePurchaseOrderBody) => withRetry(() => createOnce(actor, request)),
     markPurchaseOrderReady: (actor: Actor, body: MarkPurchaseOrderReadyBody) =>
       transition(actor, body, undefined, (state, principal, idempotency, saved, rest) =>

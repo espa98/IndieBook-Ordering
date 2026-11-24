@@ -99,7 +99,9 @@ async function confirmedOrder(book: number, quantity: number) {
 
 describe("HTTP 서버: 인증 (T2)", () => {
   it("토큰이 없거나 위조·만료·aud 불일치이면 401이고, 존재하는 경로·없는 경로 모두 같다 (경로 탐색 방지)", async () => {
-    const forged = token(OWNER_A).replace(/.$/, (c) => (c === "A" ? "B" : "A"));
+    // 서명의 첫 문자(6비트가 모두 의미 있다)를 바꿔 항상 다른 서명이 되게 한다. 마지막 문자는 하위 비트가 쓰이지 않아 같은 서명이 될 수 있다
+    const [header, payload, signature] = token(OWNER_A).split(".");
+    const forged = `${header}.${payload}.${signature![0] === "A" ? "B" : "A"}${signature!.slice(1)}`;
     const cases = [
       { sub: null },
       { sub: null, headers: { authorization: "Bearer garbage" } },
@@ -382,6 +384,43 @@ describe("HTTP 서버: 발주 (생성 → 전달 준비 → 전달 기록 → �
     expect(reply.json.data).toMatchObject({ kind: "CONFIRM", quantity: 2 });
     const receipt = await call(`${pos}/${poId}/receipts`, { method: "POST", sub: STAFF_A, body: { poLineId, normalQuantity: 2, damagedQuantity: 0, misdeliveredQuantity: 0, receivedAt: "2026-03-04T06:35:00.000Z" } });
     expect(receipt.status).toBe(201);
+  });
+});
+
+describe("HTTP 서버: 공급처와 조달 배정", () => {
+  it("공급처 등록·수정·활성 전환(Owner, 위임 없는 직원은 403)과 조달 배정·해제가 HTTP로 이어지고 행위자는 토큰의 사용자로 기록된다", async () => {
+    const sup = `/v1/tenants/${T_A}/suppliers`;
+    const registeredAt = "2026-03-04T06:00:00.000Z";
+    expect((await call(sup, { method: "POST", sub: STAFF_A, body: { code: "http-s", name: "공급처", orderChannel: "EMAIL", registeredAt } })).status).toBe(403); // 위임 없음
+    expect((await call(sup, { method: "POST", sub: OWNER_A, body: { code: "Bad Code", name: "공급처", orderChannel: "EMAIL", registeredAt } })).status).toBe(400);
+    const registered = await call(sup, { method: "POST", sub: OWNER_A, body: { code: "http-s", name: "공급처", orderChannel: "EMAIL", registeredAt } });
+    expect(registered.status).toBe(201);
+    expect(registered.json.data).toMatchObject({ code: "http-s", active: true, version: 1 });
+    expect((await call(`${sup}/http-s/updates`, { method: "POST", sub: OWNER_A, body: { expectedVersion: 9, changes: { name: "새 이름" }, reason: "정정", changedAt: "2026-03-04T06:10:00.000Z" } })).status).toBe(409);
+    const updated = await call(`${sup}/http-s/updates`, { method: "POST", sub: OWNER_A, body: { expectedVersion: 1, changes: { name: "새 이름" }, reason: "정정", changedAt: "2026-03-04T06:10:00.000Z" } });
+    expect(updated.status).toBe(200);
+    expect(updated.json.data).toMatchObject({ name: "새 이름", version: 2 });
+
+    const o = await confirmedOrder(5, 2);
+    const allocations = `${orders()}/${o.orderId}/lines/${o.lineId}/sourcing-allocations`;
+    expect((await call(allocations, { method: "POST", sub: STAFF_A, body: { supplierCode: "http-s", quantity: 3 } })).status).toBe(422); // 품목 수량 초과
+    const allocation = await call(allocations, { method: "POST", sub: STAFF_A, body: { supplierCode: "http-s", quantity: 2 } });
+    expect(allocation.status).toBe(201);
+    expect(allocation.json.data).toMatchObject({ supplierCode: "http-s", quantity: 2, status: "ACTIVE" });
+    const po = await call(`/v1/tenants/${T_A}/purchase-orders`, { method: "POST", sub: STAFF_A, body: { supplierCode: "http-s", allocationIds: [allocation.json.data.id] } });
+    expect(po.status).toBe(201);
+    const releasePath = `/v1/tenants/${T_A}/sourcing-allocations/${allocation.json.data.id}/releases`;
+    expect((await call(releasePath, { method: "POST", sub: STAFF_A, body: { reason: "공급처 변경", releasedAt: "2026-03-04T06:30:00.000Z" } })).status).toBe(422); // 미전달 발주에 연결됨
+    await call(`/v1/tenants/${T_A}/purchase-orders/${po.json.data.id}/ready`, { method: "POST", sub: STAFF_A, body: { expectedVersion: 1 } });
+    await call(`/v1/tenants/${T_A}/purchase-orders/${po.json.data.id}/delivery`, { method: "POST", sub: STAFF_A, body: { expectedVersion: 2, method: "EMAIL", deliveredAt: "2026-03-04T06:10:00.000Z" } });
+    const released = await call(releasePath, { method: "POST", sub: STAFF_A, body: { reason: "공급처 변경", releasedAt: "2026-03-04T06:30:00.000Z" } });
+    expect(released.status).toBe(201);
+    expect(released.json.data).toMatchObject({ releasedBy: STAFF_A, quantity: 2 });
+
+    const off = await call(`${sup}/http-s/activation`, { method: "POST", sub: OWNER_A, body: { active: false, reason: "거래 중단", changedAt: "2026-03-04T06:20:00.000Z" } });
+    expect(off.status).toBe(200);
+    expect(off.json.data).toMatchObject({ active: false, version: 3 });
+    expect((await call(`${sup}/http-s/activation`, { method: "POST", sub: OWNER_A, body: { active: false, reason: "거래 중단", changedAt: "2026-03-04T06:20:00.000Z" } })).status).toBe(422);
   });
 });
 

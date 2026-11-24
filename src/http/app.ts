@@ -7,6 +7,7 @@ import { createPgPaymentApi } from "../db/pgPaymentApi";
 import { createPgProcurementApi } from "../db/pgProcurementApi";
 import { createPgReceivingApi } from "../db/pgReceivingApi";
 import { createPgStockApi } from "../db/pgStockApi";
+import { createPgSupplierApi } from "../db/pgSupplierApi";
 import type { PoolLike } from "../db/pgSupport";
 import { AppError } from "../errors/AppError";
 import { toErrorResponse } from "./toErrorResponse";
@@ -66,6 +67,7 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
   const fulfillments = createPgFulfillmentApi({ pool: deps.pool });
   const receiving = createPgReceivingApi({ pool: deps.pool });
   const procurement = createPgProcurementApi({ pool: deps.pool });
+  const suppliers = createPgSupplierApi({ pool: deps.pool });
   const cancellations = createPgCancellationApi({ pool: deps.pool });
   const dispositions = createPgDispositionApi({ pool: deps.pool });
   const actor = (c: Ctx) => ({ userId: c.userId });
@@ -198,6 +200,31 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
       fields: ["paymentId", "amountKrw", "evidence", "requestedAt"],
       run: (c) => payments.requestRefund(actor(c), merge(c, { tenantId: t(c), refundTaskId: c.params.taskId!, idempotencyKey: c.idempotencyKey })),
     }),
+    route("POST", "/suppliers", {
+      success: 201,
+      fields: ["code", "name", "orderChannel", "registeredAt"],
+      run: (c) => suppliers.registerSupplier(actor(c), merge(c, { tenantId: t(c), idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/suppliers/(?<code>[a-z0-9][a-z0-9-]{0,31})/updates", {
+      success: 200,
+      fields: ["expectedVersion", "changes", "reason", "changedAt"],
+      run: (c) => suppliers.updateSupplier(actor(c), merge(c, { tenantId: t(c), code: c.params.code!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/suppliers/(?<code>[a-z0-9][a-z0-9-]{0,31})/activation", {
+      success: 200,
+      fields: ["active", "reason", "changedAt"],
+      run: (c) => suppliers.setSupplierActive(actor(c), merge(c, { tenantId: t(c), code: c.params.code!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/orders/(?<orderId>[^/]+)/lines/(?<lineId>[^/]+)/sourcing-allocations", {
+      success: 201,
+      fields: ["supplierCode", "quantity"],
+      run: (c) => procurement.allocateSourcing(actor(c), merge(c, { tenantId: t(c), orderId: c.params.orderId!, lineId: c.params.lineId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/sourcing-allocations/(?<allocationId>[^/]+)/releases", {
+      success: 201,
+      fields: ["reason", "releasedAt"],
+      run: (c) => procurement.releaseSourcing(actor(c), merge(c, { tenantId: t(c), allocationId: c.params.allocationId!, idempotencyKey: c.idempotencyKey })),
+    }),
     route("POST", "/purchase-orders", {
       success: 201,
       fields: ["supplierCode", "allocationIds"],
@@ -287,7 +314,8 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
         const allow = [...new Set(matches.map((m) => m.r.method))].join(", ");
         return { status: 405, body: errorBody("METHOD_NOT_ALLOWED", "Method not allowed"), headers: { allow } };
       }
-      if (Object.values(hit.params).some((v) => !UUID.test(v))) throw new AppError("NOT_FOUND");
+      // 경로 식별자는 UUID여야 한다. 공급처 코드(`code`)만 예외이며 라우트 패턴이 코드 형식으로 제한한다
+      if (Object.entries(hit.params).some(([name, v]) => name !== "code" && !UUID.test(v))) throw new AppError("NOT_FOUND");
 
       const query = request.query;
       if ([...query.keys()].some((k) => !(hit.r.queryFields ?? []).includes(k))) {

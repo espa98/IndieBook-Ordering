@@ -55,7 +55,7 @@ async function bootServer(): Promise<{ dir: string; port: number; server: Embedd
     } catch (error) {
       lastError = error;
       await server.stop().catch(() => undefined);
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
       await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
     }
   }
@@ -80,7 +80,7 @@ export async function startIsolatedPostgres(): Promise<IsolatedPostgres> {
     async stop() {
       await Promise.all(pools.map((p) => p.end()));
       await server.stop();
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
     },
   };
 }

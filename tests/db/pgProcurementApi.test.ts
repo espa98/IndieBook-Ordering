@@ -195,5 +195,101 @@ describe("발주의 실제 동시성과 DB 방어 (두 독립 세션)", () => {
   });
 });
 
+async function confirmedLine(book: number, quantity: number) {
+  const orders = createPgOrderApi({ pool: db.pool() });
+  const draft = await orders.createOrder(owner, { tenantId: T_A, idempotencyKey: key(), lines: [{ bookId: BOOK(book), quantity, unitPriceKrw: "15000" }] });
+  const order = await orders.confirmOrder(owner, { tenantId: T_A, orderId: draft.id, expectedVersion: 1, idempotencyKey: key() });
+  return { orderId: order.id, lineId: order.lines[0]!.lineId };
+}
+const allocate = (api: Api, line: { orderId: string; lineId: string }, supplierCode: string, quantity: number, actor = staff) =>
+  api.allocateSourcing(actor, { tenantId: T_A, orderId: line.orderId, lineId: line.lineId, supplierCode, quantity, idempotencyKey: key() });
+const release = (api: Api, allocationId: string, actor = staff) =>
+  api.releaseSourcing(actor, { tenantId: T_A, allocationId, reason: "공급처 변경", releasedAt: "2026-03-04T06:30:00.000Z", idempotencyKey: key() });
+
+describe("조달 배정·해제 (Postgres 영속화)", () => {
+  it("주문 품목 수량 한도 안에서 배정하고, 한도 초과·중단·없는 공급처·없는 주문·종결 주문·비멤버는 거부된다", async () => {
+    const api = createPgProcurementApi({ pool: db.pool() });
+    const line = await confirmedLine(8, 3);
+
+    const first = await allocate(api, line, "sup-a", 2);
+    expect(first).toMatchObject({ orderId: line.orderId, lineId: line.lineId, supplierCode: "sup-a", quantity: 2, status: "ACTIVE" });
+    expect((await rows("select status, quantity::int as quantity from public.ordering_sourcing_allocations where id = $1", [first.id]))[0]).toEqual({ status: "ACTIVE", quantity: 2 });
+    expect(await codeOf(() => allocate(api, line, "sup-b", 2))).toBe("BUSINESS_INVARIANT"); // 활성 배정 2 + 2 > 3
+    expect((await allocate(api, line, "sup-b", 1)).quantity).toBe(1);
+    expect(await codeOf(() => allocate(api, line, "sup-off", 1))).toBe("BUSINESS_INVARIANT"); // 중단된 공급처(한도 이전에 거부)
+    expect(await codeOf(() => allocate(api, line, "sup-none", 1))).toBe("NOT_FOUND");
+    expect(await codeOf(() => allocate(api, { orderId: "0a000000-0000-4000-8000-00000000ffff", lineId: line.lineId }, "sup-a", 1))).toBe("NOT_FOUND");
+    expect(await codeOf(() => allocate(api, line, "sup-a", 1, { userId: STRANGER }))).toBe("FORBIDDEN");
+
+    const closed = await confirmedLine(9, 1);
+    await rows("update public.ordering_orders set closed_at = now(), version = version + 1 where id = $1", [closed.orderId]);
+    expect(await codeOf(() => allocate(api, closed, "sup-a", 1))).toBe("BUSINESS_INVARIANT");
+  });
+
+  it("미전달 발주에 연결된 배정은 해제할 수 없고, 전달된 발주에 연결된 배정은 발주를 바꾸지 않고 남는 의무를 기록하며 해제된다", async () => {
+    const api = createPgProcurementApi({ pool: db.pool() });
+    const line = await confirmedLine(10, 2);
+    const allocation = await allocate(api, line, "sup-a", 2);
+    const po = await create(api, "sup-a", [allocation.id]);
+
+    expect(await codeOf(() => release(api, allocation.id))).toBe("BUSINESS_INVARIANT"); // 미전달 발주를 먼저 취소해야 한다
+    expect(await codeOf(() => release(api, "0a000000-0000-4000-8000-00000000ffff"))).toBe("NOT_FOUND");
+    await ready(api, po.id, 1);
+    await deliver(api, po.id, 2);
+
+    const released = await release(api, allocation.id);
+    expect(released).toMatchObject({ allocationId: allocation.id, quantity: 2, releasedBy: STAFF_A, retainedObligations: [{ purchaseOrderId: po.id, poLineId: po.lines[0]!.poLineId, quantity: 2 }] });
+    expect((await rows("select status from public.ordering_sourcing_allocations where id = $1", [allocation.id]))[0].status).toBe("RELEASED");
+    expect(await poRow(po.id)).toMatchObject({ status: "SENT", version: 3 }); // 이미 전달된 발주는 그대로다
+    expect((await rows("select count(*)::int as n from public.ordering_sourcing_releases where allocation_id = $1", [allocation.id]))[0].n).toBe(1);
+    expect(await codeOf(() => release(api, allocation.id))).toBe("BUSINESS_INVARIANT"); // 이미 해제됨
+    expect((await allocate(api, line, "sup-b", 2)).status).toBe("ACTIVE"); // 해제로 한도가 풀렸다
+
+    const lone = await allocate(api, await confirmedLine(11, 1), "sup-a", 1);
+    expect((await release(api, lone.id)).retainedObligations).toEqual([]); // 발주에 연결되지 않은 배정
+  });
+});
+
+describe("조달 배정의 실제 동시성과 DB 방어 (두 독립 세션)", () => {
+  it("주문 품목 3권에 두 세션이 동시에 2권씩 배정하면 하나만 성공한다", async () => {
+    const line = await confirmedLine(12, 3);
+    const results = await Promise.allSettled([allocate(createPgProcurementApi({ pool: db.pool() }), line, "sup-a", 2), allocate(createPgProcurementApi({ pool: db.pool() }), line, "sup-b", 2)]);
+    expect(outcomes(results)).toEqual(["BUSINESS_INVARIANT", "OK"]);
+    expect((await rows("select coalesce(sum(quantity), 0)::int as n from public.ordering_sourcing_allocations where order_line_id = $1 and status = 'ACTIVE'", [line.lineId]))[0].n).toBe(2);
+  });
+
+  it("같은 배정을 발주에 연결하는 것과 해제하는 것이 동시에 들어오면 하나만 성공한다", async () => {
+    const line = await confirmedLine(13, 2);
+    const allocation = await allocate(createPgProcurementApi({ pool: db.pool() }), line, "sup-a", 2);
+
+    const results = await Promise.allSettled([create(createPgProcurementApi({ pool: db.pool() }), "sup-a", [allocation.id]), release(createPgProcurementApi({ pool: db.pool() }), allocation.id)]);
+
+    expect(outcomes(results)).toEqual(["BUSINESS_INVARIANT", "OK"]);
+    const linkedCount = (await rows("select count(*)::int as n from public.ordering_po_links where allocation_id = $1", [allocation.id]))[0].n as number;
+    const status = (await rows("select status from public.ordering_sourcing_allocations where id = $1", [allocation.id]))[0].status as string;
+    expect(status === "RELEASED" ? linkedCount : 1 - linkedCount).toBe(0); // 해제된 배정은 연결되지 않았고, 연결된 배정은 해제되지 않았다
+  });
+
+  it("직접 SQL로도 주문 품목 수량을 넘겨 배정하거나 종결 주문에 배정하거나 해제된 배정을 되살릴 수 없다", async () => {
+    const line = await confirmedLine(14, 2);
+    const c = await db.connect();
+    const q = (sql: string) => () => c.query(sql);
+    const ins = (orderId: string, lineId: string, quantity: number) => `insert into public.ordering_sourcing_allocations (tenant_id, order_id, order_line_id, supplier_code, quantity) values ('${T_A}', '${orderId}', '${lineId}', 'sup-a', ${quantity}) returning id`;
+    try {
+      expect(await sqlState(q(ins(line.orderId, line.lineId, 3)))).toBe("P0001"); // 품목 2권 초과
+      const id = (await c.query(ins(line.orderId, line.lineId, 2))).rows[0].id as string;
+      expect(await sqlState(q(ins(line.orderId, line.lineId, 1)))).toBe("P0001"); // 이미 2권 배정
+      expect(await sqlState(q(`update public.ordering_sourcing_allocations set quantity = 1 where id = '${id}'`))).toBe("P0001"); // 수량 변경 금지
+      await c.query(`update public.ordering_sourcing_allocations set status = 'RELEASED' where id = '${id}'`);
+      expect(await sqlState(q(`update public.ordering_sourcing_allocations set status = 'ACTIVE' where id = '${id}'`))).toBe("P0001"); // 되살리기 금지
+      const closed = await confirmedLine(15, 1);
+      await c.query(`update public.ordering_orders set closed_at = now(), version = version + 1 where id = '${closed.orderId}'`);
+      expect(await sqlState(q(ins(closed.orderId, closed.lineId, 1)))).toBe("P0001"); // 종결 주문
+    } finally {
+      await c.end();
+    }
+  });
+});
+
 void createPgReceivingApi;
 void sqlState;
