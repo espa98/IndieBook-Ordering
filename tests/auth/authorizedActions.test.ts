@@ -5,7 +5,7 @@ import { AppError } from "../../src/errors/AppError";
 import { authorizedActions } from "../../src/auth/authorizedActions";
 import { createSystemPrincipal, type UserPrincipal } from "../../src/auth/principal";
 import { executionScene } from "../helpers/closureFixtures";
-import { paymentCorrectionScene } from "../helpers/paymentFixtures";
+import { paymentCorrectionScene, paymentScene } from "../helpers/paymentFixtures";
 
 const owner: UserPrincipal = { kind: "USER", userId: "owner-1", tenantId: "tenant-a", role: "OWNER" };
 const staff: UserPrincipal = { kind: "USER", userId: "staff-1", tenantId: "tenant-a", role: "STAFF" };
@@ -70,5 +70,32 @@ describe("authorizedActions: 신원 필드를 주체에서 주입한 명령 모�
     for (const name of needsBinding) {
       expect(Object.keys(authorizedActions), `${name} must be bound`).toContain(name);
     }
+  });
+
+  it("명령 입력에 행위자 이름 필드(...By)가 있는 모든 명령 파일도 이 모음에 바인딩되어 있다 (감사 귀속 위조 방지)", () => {
+    const needsBinding = sourceFiles("src")
+      .filter((path) => !path.split(sep).join("/").startsWith("src/auth/"))
+      .filter((path) => {
+        const text = readFileSync(path, "utf8");
+        // 멱등 키가 있는 요청 타입 = 외부에서 호출되는 명령 입력
+        return [...text.matchAll(/export type \w+ = \{([\s\S]*?)\n\};/g)].some(
+          (m) => /idempotencyKey/.test(m[1]!) && /^\s+\w+By: string/m.test(m[1]!),
+        );
+      })
+      .map((path) => (path.split(sep).join("/").split("/").pop() ?? "").replace(".ts", ""));
+
+    expect(needsBinding.length).toBeGreaterThan(40);
+    const missing = needsBinding.filter((name) => !Object.keys(authorizedActions).includes(name));
+    expect(missing).toEqual([]);
+  });
+
+  it("Staff 주체가 결제를 입력할 때 요청이 다른 사람 이름을 주장해도 기록되는 입력자는 주체의 사용자 ID이다", () => {
+    const { deps, paymentRequest, payments } = paymentScene();
+    const { tenantId: _t, recordedBy: _b, ...rest } = paymentRequest();
+
+    const payment = authorizedActions.recordPayment(deps, staff, { ...rest, recordedBy: "점주" } as never);
+
+    expect(payment.recordedBy).toBe("staff-1");
+    expect(payments.list("tenant-a", payment.orderId)).toEqual([payment]);
   });
 });

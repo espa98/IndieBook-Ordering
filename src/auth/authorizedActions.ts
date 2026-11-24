@@ -17,6 +17,37 @@ import { correctPayment } from "../payment/correctPayment";
 import { decideRefundRequest } from "../payment/decideRefundRequest";
 import { approveDuplicateRisk } from "../procurement/approveDuplicateRisk";
 import { executePurchaseOrderClosure } from "../procurement/executePurchaseOrderClosure";
+import { postFulfillment } from "../fulfillment/postFulfillment";
+import { allocateReceipt } from "../inventory/allocateReceipt";
+import { completeReturn } from "../inventory/completeReturn";
+import { deliverAllocation } from "../inventory/deliverAllocation";
+import { deliverStockReservation } from "../inventory/deliverStockReservation";
+import { dispatchReturn } from "../inventory/dispatchReturn";
+import { receiveGoods } from "../inventory/receiveGoods";
+import { recordReturnReply } from "../inventory/recordReturnReply";
+import { releaseAllocation } from "../inventory/releaseAllocation";
+import { releaseStockReservation } from "../inventory/releaseStockReservation";
+import { renegotiateReturn } from "../inventory/renegotiateReturn";
+import { reportReturnException } from "../inventory/reportReturnException";
+import { reserveStock } from "../inventory/reserveStock";
+import { resolveReturnException } from "../inventory/resolveReturnException";
+import { createNotificationTarget } from "../notification/createNotificationTarget";
+import { recordNotificationAttempt } from "../notification/recordNotificationAttempt";
+import { recordNotificationCopy } from "../notification/recordNotificationCopy";
+import { recordNotificationResult } from "../notification/recordNotificationResult";
+import { renotify } from "../notification/renotify";
+import { requestOrderCancellation } from "../order/requestOrderCancellation";
+import { requestOrderClosure } from "../order/requestOrderClosure";
+import { confirmPayment } from "../payment/confirmPayment";
+import { openRefundTask } from "../payment/openRefundTask";
+import { recordPayment } from "../payment/recordPayment";
+import { reportRefundAttempt } from "../payment/reportRefundAttempt";
+import { requestRefund } from "../payment/requestRefund";
+import { resolveRefundAttempt } from "../payment/resolveRefundAttempt";
+import { voidPayment } from "../payment/voidPayment";
+import { cancelUndeliveredPurchaseOrder } from "../procurement/cancelUndeliveredPurchaseOrder";
+import { recordPurchaseOrderDelivery } from "../procurement/recordPurchaseOrderDelivery";
+import { releaseSourcing } from "../procurement/releaseSourcing";
 import { bindActor } from "./bindActor";
 
 const BOTH = ["OWNER", "STAFF"] as const;
@@ -26,7 +57,7 @@ const SYSTEM = ["SYSTEM"] as const;
 /**
  * 역할·행위자·테넌트를 요청 본문이 아니라 서버가 도출한 주체(Principal)에서 받는 명령 모음.
  * 외부 진입점은 도메인 함수 대신 이 모음을 호출해야 한다.
- * 키는 도메인 함수 이름이다. 새 명령이 `actorRole`·`executedBy`를 받으면 여기에 추가해야 한다(테스트가 확인한다).
+ * 키는 도메인 함수 이름이다. 새 명령이 `actorRole`·`executedBy`나 행위자 이름 필드(`...By`)를 받으면 여기에 추가해야 한다(테스트가 확인한다).
  * 허용 목록이 BOTH인 명령은 도메인 함수가 역할별 세부 규칙(폐기·타 고객 재배분·철회 등)을 다시 검사한다.
  */
 export const authorizedActions = {
@@ -48,6 +79,38 @@ export const authorizedActions = {
   resolveReceiptDefect: bindActor(resolveReceiptDefect, { roleField: "actorRole", nameField: "resolvedBy", allow: BOTH }),
   decideOrderCancellation: bindActor(decideOrderCancellation, { roleField: "actorRole", nameField: "decidedBy", allow: BOTH }),
   decideRefundRequest: bindActor(decideRefundRequest, { roleField: "actorRole", nameField: "decidedBy", allow: BOTH }),
+  // Owner·Staff 모두 호출하는 명령: 행위자 이름과 테넌트만 주체에서 주입한다
+  postFulfillment: bindActor(postFulfillment, { nameField: "receivedBy", allow: BOTH }),
+  allocateReceipt: bindActor(allocateReceipt, { nameField: "allocatedBy", allow: BOTH }),
+  completeReturn: bindActor(completeReturn, { nameField: "confirmedBy", allow: BOTH }),
+  deliverAllocation: bindActor(deliverAllocation, { nameField: "deliveredBy", allow: BOTH }),
+  deliverStockReservation: bindActor(deliverStockReservation, { nameField: "deliveredBy", allow: BOTH }),
+  dispatchReturn: bindActor(dispatchReturn, { nameField: "dispatchedBy", allow: BOTH }),
+  receiveGoods: bindActor(receiveGoods, { nameField: "inspectedBy", allow: BOTH }),
+  recordReturnReply: bindActor(recordReturnReply, { nameField: "repliedBy", allow: BOTH }),
+  releaseAllocation: bindActor(releaseAllocation, { nameField: "releasedBy", allow: BOTH }),
+  releaseStockReservation: bindActor(releaseStockReservation, { nameField: "releasedBy", allow: BOTH }),
+  renegotiateReturn: bindActor(renegotiateReturn, { nameField: "requestedBy", allow: BOTH }),
+  reportReturnException: bindActor(reportReturnException, { nameField: "reportedBy", allow: BOTH }),
+  reserveStock: bindActor(reserveStock, { nameField: "reservedBy", allow: BOTH }),
+  resolveReturnException: bindActor(resolveReturnException, { nameField: "resolvedBy", allow: BOTH }),
+  createNotificationTarget: bindActor(createNotificationTarget, { nameField: "createdBy", allow: BOTH }),
+  recordNotificationAttempt: bindActor(recordNotificationAttempt, { nameField: "attemptedBy", allow: BOTH }),
+  recordNotificationCopy: bindActor(recordNotificationCopy, { nameField: "actedBy", allow: BOTH }),
+  recordNotificationResult: bindActor(recordNotificationResult, { nameField: "recordedBy", allow: BOTH }),
+  renotify: bindActor(renotify, { nameField: "createdBy", allow: BOTH }),
+  requestOrderCancellation: bindActor(requestOrderCancellation, { nameField: "requestedBy", allow: BOTH }),
+  requestOrderClosure: bindActor(requestOrderClosure, { nameField: "requestedBy", allow: BOTH }),
+  confirmPayment: bindActor(confirmPayment, { nameField: "confirmedBy", allow: BOTH }),
+  openRefundTask: bindActor(openRefundTask, { nameField: "openedBy", allow: BOTH }),
+  recordPayment: bindActor(recordPayment, { nameField: "recordedBy", allow: BOTH }),
+  reportRefundAttempt: bindActor(reportRefundAttempt, { nameField: "reportedBy", allow: BOTH }),
+  requestRefund: bindActor(requestRefund, { nameField: "requestedBy", allow: BOTH }),
+  resolveRefundAttempt: bindActor(resolveRefundAttempt, { nameField: "resolvedBy", allow: BOTH }),
+  voidPayment: bindActor(voidPayment, { nameField: "voidedBy", allow: BOTH }),
+  cancelUndeliveredPurchaseOrder: bindActor(cancelUndeliveredPurchaseOrder, { nameField: "cancelledBy", allow: BOTH }),
+  recordPurchaseOrderDelivery: bindActor(recordPurchaseOrderDelivery, { nameField: "deliveredBy", allow: BOTH }),
+  releaseSourcing: bindActor(releaseSourcing, { nameField: "releasedBy", allow: BOTH }),
   // 서버 내부 업무
   executeOrderClosure: bindActor(executeOrderClosure, { systemField: "executedBy", allow: SYSTEM }),
   executeOrderReopening: bindActor(executeOrderReopening, { systemField: "executedBy", allow: SYSTEM }),

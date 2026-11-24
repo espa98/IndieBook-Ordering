@@ -1,13 +1,13 @@
 id,category,item,layer,status,evidence,notes
 G0,gate,문서/계약 차이 확정,document,PARTIAL,implementation/05~09 결과 보고서의 충돌·미결정 목록,OPDS·STBR 충돌과 해석을 단계별 보고서에 기록했으나 API V2.2·RLS V2.2와의 대조는 하지 않음
 G1,gate,격리 DB 복제 및 신규 DDL/FK/RLS 실행,db,BLOCKED,저장소에 DB 구성(supabase/마이그레이션/컨테이너) 없음,격리 테스트 DB 없음. 신규 생성·비용은 사전 승인 필요
-G2,gate,실제 Owner/Staff JWT·비활성·교차 tenant,jwt-http,BLOCKED,저장소에 인증 서버·JWT 검증 없음. tests/auth 4 files / 27 tests는 순수 함수 단위 테스트(주체 도출·행위자 주입),JWT 서명 검증·서버 없음. resolvePrincipal은 검증이 끝난 신원을 입력으로 받음
-G3,gate,주문/발주 생성·확정·PO 전송·입고·수량,domain,PARTIAL,vitest 91 files / 1017 tests passed (메모리 저장소),도메인 로직만. DB 트랜잭션·제약 없음
+G2,gate,실제 Owner/Staff JWT·비활성·교차 tenant,jwt-http,BLOCKED,저장소에 인증 서버·JWT 검증 없음. tests/auth 4 files / 29 tests는 순수 함수 단위 테스트(주체 도출·행위자 주입),JWT 서명 검증·서버 없음. resolvePrincipal은 검증이 끝난 신원을 입력으로 받음
+G3,gate,주문/발주 생성·확정·PO 전송·입고·수량,domain,PARTIAL,vitest 91 files / 1019 tests passed (메모리 저장소),도메인 로직만. DB 트랜잭션·제약 없음
 G4,gate,재고/인도 예약·배분·해제·인도 원장 대사,domain,PARTIAL,tests/inventory 26 files / 244 tests passed,도메인 로직만. 원장 대사(DB) 없음
 G5,gate,결제/환급 수동 사실 확인·원장 반영·외부 환급 증빙,domain,PARTIAL,tests/payment 11 files / 59 tests passed,도메인 로직만. PG 연동 없음(P2)
 G6,gate,원자적 종결 검사 및 Staff 요청 분리,domain,PARTIAL,tests/closure 4 files / 15 tests passed,원자성은 검증 후 연속 저장이며 DB 트랜잭션 아님
 G7,gate,기존 19개 테스트+2세션 경쟁+배포 승인,regression,BLOCKED,"기존 19개 테스트는 ordering-dev DB 측 테스트로 이 저장소에 없음, 2세션 경쟁은 DB 필요",배포 승인 없음
-TEST-UNIT,test-layer,단위/도메인 테스트,unit,PASS,npx vitest run → 91 files 1017 tests passed 0 failed,Node v24.18.0 / vitest 5.1.1 / base commit ac366ed + 인증 계층 변경
+TEST-UNIT,test-layer,단위/도메인 테스트,unit,PASS,npx vitest run → 91 files 1019 tests passed 0 failed,Node v24.18.0 / vitest 5.1.1 / base commit ac366ed + 인증 계층 변경
 TEST-TYPE,test-layer,타입 검사,static,PASS,npx tsc --noEmit → 출력 0줄(오류 없음),TypeScript 7.0.2
 TEST-OPENAPI,test-layer,OpenAPI 스키마 검사,contract,PARTIAL,tests/openapi 2 files / 26 tests passed,openapi/ordering.yaml은 05단계 주문 API만 다룸. 조달·입고·재고·결제·안내·종결 API는 명세·구현 없음
 TEST-HTTP,test-layer,HTTP 핸들러 테스트,http-handler,PARTIAL,tests/http 3 files / 41 tests passed,핸들러 함수 단위. 실제 서버·라우터·JWT 없음
@@ -85,5 +85,5 @@ ST-Y06,requirement,환급 확인(요청·승인),domain,PASS,tests/payment/reque
 ST-Y07,requirement,환급 실패/UNKNOWN,domain,PARTIAL,tests/payment/reportRefundAttempt + resolveRefundAttempt 5 tests,수동 증빙 모델의 시도 결과 기록·UNKNOWN 예약·조회 해소만. 권한 검증·PG 연동(P2)·대사 큐 없음
 ST-Y08,requirement,결제 승인 실행(P2),domain,NOT_IMPLEMENTED,P2 PG 계약 필요,
 ST-Y09,requirement,결제 승인 결과(P2),domain,NOT_IMPLEMENTED,P2,
-ST-A,requirement,인증·서점 개설·초대·직원 비활성(ST-A01~A08),jwt-http,PARTIAL,tests/auth/resolvePrincipal + bindActor + authorizedActions 12 tests,주체 도출(A05 즉시 차단·A08 세션 만료 판정)과 역할·행위자 주입만. A01~A04 이메일 인증·서점 개설·초대·만료/철회 및 A06/A07·직원 비활성화 명령 자체·JWT 검증 미구현
+ST-A,requirement,인증·서점 개설·초대·직원 비활성(ST-A01~A08),jwt-http,PARTIAL,tests/auth/resolvePrincipal + bindActor + authorizedActions 14 tests,주체 도출(A05 즉시 차단·A08 세션 만료 판정)과 역할·행위자 주입(50개 명령)만. A01~A04 이메일 인증·서점 개설·초대·만료/철회 및 A06/A07·직원 비활성화 명령 자체·JWT 검증 미구현
 ST-B,requirement,도서·공급처·템플릿 관리(ST-B01~B05),domain,NOT_IMPLEMENTED,공급처는 테스트용 최소 모델만,YES24 이용권한 검증 필요
