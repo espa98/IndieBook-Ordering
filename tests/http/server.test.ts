@@ -417,6 +417,17 @@ describe("HTTP 서버: 공급처와 조달 배정", () => {
     expect(released.status).toBe(201);
     expect(released.json.data).toMatchObject({ releasedBy: STAFF_A, quantity: 2 });
 
+    // 남은 공급처 의무가 있는 품목의 재조달은 Owner의 중복 위험 승인이 필요하다 (BR-P05)
+    const obligation = { purchaseOrderId: po.json.data.id, poLineId: po.json.data.lines[0].poLineId };
+    expect((await call(allocations, { method: "POST", sub: STAFF_A, body: { supplierCode: "http-s", quantity: 2 } })).status).toBe(422);
+    const approvalBody = { ...obligation, surplusPlan: "STOCK_INTAKE", planNote: "남는 물량은 재고로 편입", approvedAt: "2026-03-04T06:40:00.000Z" };
+    const approvals = `${orders()}/${o.orderId}/lines/${o.lineId}/duplicate-risk-approvals`;
+    expect((await call(approvals, { method: "POST", sub: STAFF_A, body: approvalBody })).status).toBe(403);
+    const approved = await call(approvals, { method: "POST", sub: OWNER_A, body: approvalBody });
+    expect(approved.status).toBe(201);
+    expect(approved.json.data).toMatchObject({ approvedBy: OWNER_A, surplusPlan: "STOCK_INTAKE" });
+    expect((await call(allocations, { method: "POST", sub: STAFF_A, body: { supplierCode: "http-s", quantity: 2 } })).status).toBe(201);
+
     const off = await call(`${sup}/http-s/activation`, { method: "POST", sub: OWNER_A, body: { active: false, reason: "거래 중단", changedAt: "2026-03-04T06:20:00.000Z" } });
     expect(off.status).toBe(200);
     expect(off.json.data).toMatchObject({ active: false, version: 3 });

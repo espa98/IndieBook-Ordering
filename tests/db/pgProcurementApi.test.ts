@@ -243,10 +243,47 @@ describe("조달 배정·해제 (Postgres 영속화)", () => {
     expect(await poRow(po.id)).toMatchObject({ status: "SENT", version: 3 }); // 이미 전달된 발주는 그대로다
     expect((await rows("select count(*)::int as n from public.ordering_sourcing_releases where allocation_id = $1", [allocation.id]))[0].n).toBe(1);
     expect(await codeOf(() => release(api, allocation.id))).toBe("BUSINESS_INVARIANT"); // 이미 해제됨
+    expect(await codeOf(() => allocate(api, line, "sup-b", 2))).toBe("BUSINESS_INVARIANT"); // 한도는 풀렸지만 남은 의무 때문에 중복 위험 승인이 필요하다 (BR-P05)
+    await approveRisk(api, line, { purchaseOrderId: po.id, poLineId: po.lines[0]!.poLineId });
     expect((await allocate(api, line, "sup-b", 2)).status).toBe("ACTIVE"); // 해제로 한도가 풀렸다
 
     const lone = await allocate(api, await confirmedLine(11, 1), "sup-a", 1);
     expect((await release(api, lone.id)).retainedObligations).toEqual([]); // 발주에 연결되지 않은 배정
+  });
+});
+
+const approveRisk = (api: Api, line: { orderId: string; lineId: string }, obligation: { purchaseOrderId: string; poLineId: string }, actor = owner) =>
+  api.approveDuplicateRisk(actor, { tenantId: T_A, orderId: line.orderId, lineId: line.lineId, ...obligation, surplusPlan: "STOCK_INTAKE", planNote: "남는 물량은 재고로 편입", approvedAt: "2026-03-04T06:40:00.000Z", idempotencyKey: key() });
+
+describe("중복 구매 위험 (이전 공급처 의무가 남은 품목의 재조달, BR-P05)", () => {
+  it("배정을 풀었지만 공급처 의무가 남은 품목은 Owner의 승인 뒤에만 다른 공급처로 재조달되고, 의무가 사라지면 승인 없이도 가능하다", async () => {
+    const api = createPgProcurementApi({ pool: db.pool() });
+    const line = await confirmedLine(16, 2);
+    const first = await allocate(api, line, "sup-a", 2);
+    const po = await create(api, "sup-a", [first.id]);
+    await ready(api, po.id, 1);
+    await deliver(api, po.id, 2);
+    await release(api, first.id); // 발주는 이미 전달되어 공급처 의무 2권이 남는다
+    const obligation = { purchaseOrderId: po.id, poLineId: po.lines[0]!.poLineId };
+
+    expect(await codeOf(() => allocate(api, line, "sup-b", 2))).toBe("BUSINESS_INVARIANT"); // 중복 위험 승인 필요
+    expect(await codeOf(() => approveRisk(api, line, obligation, staff))).toBe("FORBIDDEN"); // Owner만
+    expect(await codeOf(() => approveRisk(api, line, { ...obligation, poLineId: "0a000000-0000-4000-8000-00000000ffff" }))).toBe("BUSINESS_INVARIANT"); // 열린 의무가 없는 승인
+    const approval = await approveRisk(api, line, obligation);
+    expect(approval).toMatchObject({ orderId: line.orderId, lineId: line.lineId, ...obligation, surplusPlan: "STOCK_INTAKE", approvedBy: OWNER_A });
+    expect((await rows("select count(*)::int as n from public.ordering_duplicate_risk_approvals where order_id = $1", [line.orderId]))[0].n).toBe(1);
+    expect((await allocate(api, line, "sup-b", 2)).status).toBe("ACTIVE"); // 승인 뒤에는 재조달할 수 있다
+
+    // 공급처가 전량 품절을 확정하면 의무가 사라져 승인 없이도 재조달할 수 있다
+    const other = await confirmedLine(17, 2);
+    const second = await allocate(api, other, "sup-a", 2);
+    const po2 = await create(api, "sup-a", [second.id]);
+    await ready(api, po2.id, 1);
+    await deliver(api, po2.id, 2);
+    await release(api, second.id);
+    expect(await codeOf(() => allocate(api, other, "sup-b", 2))).toBe("BUSINESS_INVARIANT");
+    await api.recordSupplierReply(staff, { tenantId: T_A, purchaseOrderId: po2.id, poLineId: po2.lines[0]!.poLineId, kind: "OUT_OF_STOCK", quantity: 2, source: "UNANSWERED", evidence: "공급처 품절 회신", repliedAt: "2026-03-04T06:20:00.000Z", idempotencyKey: key() });
+    expect((await allocate(api, other, "sup-b", 2)).status).toBe("ACTIVE");
   });
 });
 

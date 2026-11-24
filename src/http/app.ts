@@ -220,6 +220,11 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
       fields: ["supplierCode", "quantity"],
       run: (c) => procurement.allocateSourcing(actor(c), merge(c, { tenantId: t(c), orderId: c.params.orderId!, lineId: c.params.lineId!, idempotencyKey: c.idempotencyKey })),
     }),
+    route("POST", "/orders/(?<orderId>[^/]+)/lines/(?<lineId>[^/]+)/duplicate-risk-approvals", {
+      success: 201,
+      fields: ["purchaseOrderId", "poLineId", "surplusPlan", "planNote", "approvedAt"],
+      run: (c) => procurement.approveDuplicateRisk(actor(c), merge(c, { tenantId: t(c), orderId: c.params.orderId!, lineId: c.params.lineId!, idempotencyKey: c.idempotencyKey })),
+    }),
     route("POST", "/sourcing-allocations/(?<allocationId>[^/]+)/releases", {
       success: 201,
       fields: ["reason", "releasedAt"],

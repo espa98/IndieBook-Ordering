@@ -4,6 +4,7 @@ import type { UserPrincipal } from "../auth/principal";
 import { AppError } from "../errors/AppError";
 import type { IdempotencyStore } from "../idempotency/executeIdempotent";
 import type { Order } from "../order/createDraftOrder";
+import type { ApproveDuplicateRiskRequest, DuplicateRiskApproval } from "../procurement/approveDuplicateRisk";
 import type { AllocateSourcingRequest, SourcingAllocation, Supplier } from "../procurement/allocateSourcing";
 import type { CreatePurchaseOrderRequest, PurchaseOrder } from "../procurement/createPurchaseOrder";
 import type { MarkPurchaseOrderReadyRequest } from "../procurement/markPurchaseOrderReady";
@@ -33,6 +34,7 @@ export type MarkPurchaseOrderReadyBody = MarkPurchaseOrderReadyRequest;
 export type RecordPurchaseOrderDeliveryBody = Omit<RecordPurchaseOrderDeliveryRequest, "deliveredBy">;
 export type RecordSupplierReplyBody = RecordSupplierReplyRequest;
 export type AllocateSourcingBody = AllocateSourcingRequest;
+export type ApproveDuplicateRiskBody = Omit<ApproveDuplicateRiskRequest, "actorRole" | "approvedBy">;
 export type ReleaseSourcingBody = Omit<ReleaseSourcingRequest, "releasedBy">;
 
 /** 발주 생성·전달 준비·전달 기록·공급처 회신을 Postgres 영속화 위에서 실행한다 (E7 권고안 a).
@@ -152,6 +154,28 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
     row ? { tenantId: row.tenant_id, code: row.code, active: row.active, ...(row.name === null ? {} : { name: row.name }), ...(row.order_channel === null ? {} : { orderChannel: row.order_channel }), version: Number(row.version) } : undefined;
   const toAllocation = (a: any): SourcingAllocation => ({ id: a.id, tenantId: a.tenant_id, orderId: a.order_id, lineId: a.order_line_id, supplierCode: a.supplier_code, quantity: a.quantity, status: a.status });
 
+  /** 주문이 풀어낸 배정 중 공급처 의무가 남은 것을 계산하는 데 필요한 기록을 적재한다 (BR-P05) */
+  async function loadObligationDeps(client: PoolClient, tenantId: string, orderId: string) {
+    const releases = (await client.query("select * from public.ordering_sourcing_releases where tenant_id = $1 and order_id = $2 order by recorded_at, id", [tenantId, orderId])).rows.map(
+      (r): SourcingRelease => ({ id: r.id, tenantId: r.tenant_id, allocationId: r.allocation_id, orderId: r.order_id, lineId: r.order_line_id, supplierCode: r.supplier_code, quantity: r.quantity, reason: r.reason, retainedObligations: r.retained_obligations, releasedBy: r.released_by, releasedAt: r.released_at.toISOString(), recordedAt: r.recorded_at.toISOString() }),
+    );
+    const poIds = [...new Set(releases.flatMap((r) => r.retainedObligations.map((o) => o.purchaseOrderId)))].sort();
+    const states: Awaited<ReturnType<typeof loadPoState>>[] = [];
+    for (const poId of poIds) states.push(await loadPoState(client, tenantId, poId));
+    const approvals = (await client.query("select * from public.ordering_duplicate_risk_approvals where tenant_id = $1 and order_id = $2 order by recorded_at, id", [tenantId, orderId])).rows.map(
+      (a): DuplicateRiskApproval => ({ id: a.id, tenantId: a.tenant_id, orderId: a.order_id, lineId: a.order_line_id, purchaseOrderId: a.purchase_order_id, poLineId: a.po_line_id, surplusPlan: a.surplus_plan, planNote: a.plan_note, approvedBy: a.approved_by, approvedAt: a.approved_at.toISOString(), recordedAt: a.recorded_at.toISOString() }),
+    );
+    const supplierObligations = {
+      purchaseOrders: { get: (_t: string, id: string) => states.find((st) => st.po?.id === id)?.po },
+      replies: { list: (_t: string, poId: string) => states.find((st) => st.po?.id === poId)?.replies ?? [] },
+      cancellations: { listResponses: (_t: string, poId: string) => states.find((st) => st.po?.id === poId)?.responses ?? [] },
+      receipts: { list: (_t: string, poId: string) => states.find((st) => st.po?.id === poId)?.receipts ?? [] },
+      receiptCorrections: { list: (_t: string, receiptId: string) => states.flatMap((st) => st.corrections).filter((c) => c.receiptId === receiptId) },
+      sourcingReleases: { listByOrder: () => releases },
+    };
+    return { supplierObligations, approvals };
+  }
+
   const allocateOnce = (actor: Actor, request: AllocateSourcingBody) =>
     inTransaction(deps.pool, "service_role", actor.userId, async (client) => {
       const principal = principalFor(await loadMembership(client, actor.userId, request.tenantId), actor.userId, request.tenantId);
@@ -161,6 +185,7 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
         ? toSupplier((await client.query("select * from public.ordering_suppliers where tenant_id = $1 and code = $2", [request.tenantId, request.supplierCode])).rows[0])
         : undefined;
       const existing = order ? (await client.query("select * from public.ordering_sourcing_allocations where tenant_id = $1 and order_id = $2", [order.tenantId, order.id])).rows.map(toAllocation) : [];
+      const risk = order ? await loadObligationDeps(client, order.tenantId, order.id) : undefined;
       const idempotency = await loadCommands(client, request.tenantId, request.idempotencyKey);
       const known = new Set(idempotency.keys());
       const saved: SourcingAllocation[] = [];
@@ -171,6 +196,7 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
           orders: { get: (t, id) => (order && order.tenantId === t && order.id === id ? order : undefined), list: () => (order ? [order] : []), save: forbidden },
           suppliers: { get: (_t2, code) => (supplier && supplier.code === code ? supplier : undefined) },
           allocations: { get: (_t2, id) => existing.find((a) => a.id === id), list: () => existing, save: (a) => void saved.push(a) },
+          ...(risk ? { supplierObligations: { ...risk.supplierObligations, duplicateRiskApprovals: { list: () => risk.approvals } } } : {}),
           idempotency,
         },
         principal,
@@ -193,6 +219,7 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
         const row = (await client.query("select * from public.ordering_sourcing_allocations where tenant_id = $1 and id = $2 for update", [request.tenantId, request.allocationId])).rows[0];
         allocation = row ? toAllocation(row) : undefined;
         if (allocation) {
+          await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`sline:${request.tenantId}:${allocation.lineId}`]);
           const links = (
             await client.query(
               `select p.id as po_id, p.status, p.version, p.supplier_code, k.po_line_id, l.book_key, k.order_id, k.order_line_id, k.quantity
@@ -240,6 +267,37 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
       return result;
     });
 
+  const approveRiskOnce = (actor: Actor, request: ApproveDuplicateRiskBody) =>
+    inTransaction(deps.pool, "service_role", actor.userId, async (client) => {
+      const principal = principalFor(await loadMembership(client, actor.userId, request.tenantId), actor.userId, request.tenantId);
+      const [order] = isUuid(request.orderId) ? await loadOrders(client, request.tenantId, { orderId: request.orderId, lock: "share" }) : [];
+      if (order && isUuid(request.lineId)) await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`sline:${request.tenantId}:${request.lineId}`]);
+      const risk = order ? await loadObligationDeps(client, order.tenantId, order.id) : undefined;
+      const idempotency = await loadCommands(client, request.tenantId, request.idempotencyKey);
+      const known = new Set(idempotency.keys());
+      const saved: DuplicateRiskApproval[] = [];
+      const { tenantId: _t, ...rest } = request;
+      void _t;
+      const none = { purchaseOrders: { get: () => undefined }, replies: { list: () => [] }, cancellations: { listResponses: () => [] }, receipts: { list: () => [] }, receiptCorrections: { list: () => [] }, sourcingReleases: { listByOrder: () => [] } };
+      const result = authorizedActions.approveDuplicateRisk(
+        {
+          supplierObligations: risk?.supplierObligations ?? none,
+          duplicateRiskApprovals: { list: () => risk?.approvals ?? [], save: (a) => void saved.push(a) },
+          idempotency,
+        },
+        principal,
+        rest,
+      );
+      for (const a of saved) {
+        await client.query(
+          "insert into public.ordering_duplicate_risk_approvals (id, tenant_id, order_id, order_line_id, purchase_order_id, po_line_id, surplus_plan, plan_note, approved_by, approved_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+          [a.id, a.tenantId, a.orderId, a.lineId, a.purchaseOrderId, a.poLineId, a.surplusPlan, a.planNote, a.approvedBy, a.approvedAt, a.recordedAt],
+        );
+      }
+      await saveNewCommands(client, idempotency, known);
+      return result;
+    });
+
   async function insertPurchaseOrder(client: PoolClient, po: PurchaseOrder) {
     await client.query("insert into public.ordering_purchase_orders (id, tenant_id, supplier_code, status, version) values ($1, $2, $3, $4, $5)", [po.id, po.tenantId, po.supplierCode, po.status, po.version]);
     for (const line of po.lines) {
@@ -254,6 +312,7 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
   void (undefined as unknown as UserPrincipal);
   return {
     allocateSourcing: (actor: Actor, request: AllocateSourcingBody) => withRetry(() => allocateOnce(actor, request)),
+    approveDuplicateRisk: (actor: Actor, request: ApproveDuplicateRiskBody) => withRetry(() => approveRiskOnce(actor, request)),
     releaseSourcing: (actor: Actor, request: ReleaseSourcingBody) => withRetry(() => releaseOnce(actor, request)),
     createPurchaseOrder: (actor: Actor, request: CreatePurchaseOrderBody) => withRetry(() => createOnce(actor, request)),
     markPurchaseOrderReady: (actor: Actor, body: MarkPurchaseOrderReadyBody) =>
