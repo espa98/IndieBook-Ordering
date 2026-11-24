@@ -435,6 +435,44 @@ describe("HTTP 서버: 공급처와 조달 배정", () => {
   });
 });
 
+describe("HTTP 서버: 발주 취소", () => {
+  it("전달 전 발주는 바로 취소되고, 전달된 발주는 공급처 취소 요청 → 응답 → 전량 수락 확정으로만 취소된다", async () => {
+    const c = await db.connect();
+    await c.query(`insert into public.ordering_suppliers (tenant_id, code, active, name, order_channel, version) values ($1, 'sup-cancel', true, '취소 공급처', 'EMAIL', 1) on conflict do nothing`, [T_A]);
+    const newPo = async (book: number, quantity: number) => {
+      const o = await confirmedOrder(book, quantity);
+      const allocationId = (await c.query(`insert into public.ordering_sourcing_allocations (tenant_id, order_id, order_line_id, supplier_code, quantity) values ($1, $2, $3, 'sup-cancel', $4) returning id`, [T_A, o.orderId, o.lineId, quantity])).rows[0].id as string;
+      const po = await call(`/v1/tenants/${T_A}/purchase-orders`, { method: "POST", sub: STAFF_A, body: { supplierCode: "sup-cancel", allocationIds: [allocationId] } });
+      return { id: po.json.data.id as string, poLineId: po.json.data.lines[0].poLineId as string };
+    };
+    const pos = `/v1/tenants/${T_A}/purchase-orders`;
+
+    const undelivered = await newPo(6, 1);
+    const cancelBody = { expectedVersion: 1, reason: "공급처 변경", cancelledAt: "2026-03-04T06:15:00.000Z" };
+    expect((await call(`${pos}/${undelivered.id}/cancellation`, { method: "POST", sub: STAFF_A, body: { ...cancelBody, expectedVersion: 9 } })).status).toBe(409);
+    expect((await call(`${pos}/${undelivered.id}/cancellation`, { method: "POST", sub: STAFF_A, body: { ...cancelBody, cancelledBy: OWNER_A } })).status).toBe(400); // 행위자 위조
+    const cancelled = await call(`${pos}/${undelivered.id}/cancellation`, { method: "POST", sub: STAFF_A, body: cancelBody });
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.json.data).toMatchObject({ status: "CANCELLED", version: 2, cancelledBy: STAFF_A });
+
+    const sent = await newPo(7, 2);
+    await call(`${pos}/${sent.id}/ready`, { method: "POST", sub: STAFF_A, body: { expectedVersion: 1 } });
+    await call(`${pos}/${sent.id}/delivery`, { method: "POST", sub: STAFF_A, body: { expectedVersion: 2, method: "EMAIL", deliveredAt: "2026-03-04T06:10:00.000Z" } });
+    expect((await call(`${pos}/${sent.id}/cancellation`, { method: "POST", sub: STAFF_A, body: { ...cancelBody, expectedVersion: 3 } })).status).toBe(422); // 전달된 발주
+    const request = await call(`${pos}/${sent.id}/lines/${sent.poLineId}/cancellation-requests`, { method: "POST", sub: STAFF_A, body: { quantity: 2, reason: "고객 취소" } });
+    expect(request.status).toBe(201);
+    const responsePath = `${pos}/${sent.id}/cancellation-requests/${request.json.data.id}/responses`;
+    const responseBody = { acceptedQuantity: 2, rejectedQuantity: 0, evidence: "공급처 취소 회신 메일", repliedAt: "2026-03-04T06:25:00.000Z" };
+    expect((await call(responsePath, { method: "POST", sub: STAFF_A, body: { ...responseBody, acceptedQuantity: 3 } })).status).toBe(422); // 요청 2권 초과
+    expect((await call(responsePath, { method: "POST", sub: STAFF_A, body: responseBody })).status).toBe(201);
+    expect((await call(`${pos}/${sent.id}/cancellation-confirmation`, { method: "POST", sub: STAFF_A, body: { expectedVersion: 9 } })).status).toBe(409);
+    const confirmed = await call(`${pos}/${sent.id}/cancellation-confirmation`, { method: "POST", sub: STAFF_A, body: { expectedVersion: 3 } });
+    expect(confirmed.status).toBe(200);
+    expect(confirmed.json.data).toMatchObject({ status: "CANCELLED", version: 4 });
+    await c.end();
+  });
+});
+
 describe("HTTP 서버: 입력 방어", () => {
   it("Idempotency-Key 누락·공백·128자 초과는 400이다", async () => {
     const body = { lines: lines() };

@@ -245,6 +245,26 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
       fields: ["expectedVersion", "method", "deliveredAt", "referenceNumber", "fileVersion"],
       run: (c) => procurement.recordPurchaseOrderDelivery(actor(c), merge(c, { tenantId: t(c), purchaseOrderId: c.params.purchaseOrderId!, idempotencyKey: c.idempotencyKey })),
     }),
+    route("POST", "/purchase-orders/(?<purchaseOrderId>[^/]+)/cancellation", {
+      success: 200,
+      fields: ["expectedVersion", "reason", "cancelledAt"],
+      run: (c) => procurement.cancelUndeliveredPurchaseOrder(actor(c), merge(c, { tenantId: t(c), purchaseOrderId: c.params.purchaseOrderId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/purchase-orders/(?<purchaseOrderId>[^/]+)/lines/(?<poLineId>[^/]+)/cancellation-requests", {
+      success: 201,
+      fields: ["quantity", "reason"],
+      run: (c) => procurement.createCancellationRequest(actor(c), merge(c, { tenantId: t(c), purchaseOrderId: c.params.purchaseOrderId!, poLineId: c.params.poLineId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/purchase-orders/(?<purchaseOrderId>[^/]+)/cancellation-requests/(?<requestId>[^/]+)/responses", {
+      success: 201,
+      fields: ["acceptedQuantity", "rejectedQuantity", "evidence", "repliedAt"],
+      run: (c) => procurement.respondToCancellationRequest(actor(c), merge(c, { tenantId: t(c), purchaseOrderId: c.params.purchaseOrderId!, cancellationRequestId: c.params.requestId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/purchase-orders/(?<purchaseOrderId>[^/]+)/cancellation-confirmation", {
+      success: 200,
+      fields: ["expectedVersion"],
+      run: (c) => procurement.confirmPurchaseOrderCancellation(actor(c), merge(c, { tenantId: t(c), purchaseOrderId: c.params.purchaseOrderId!, idempotencyKey: c.idempotencyKey })),
+    }),
     route("POST", "/purchase-orders/(?<purchaseOrderId>[^/]+)/supplier-replies", {
       success: 201,
       fields: ["poLineId", "kind", "quantity", "source", "eta", "evidence", "repliedAt"],

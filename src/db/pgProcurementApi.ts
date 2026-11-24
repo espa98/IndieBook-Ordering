@@ -7,6 +7,10 @@ import type { Order } from "../order/createDraftOrder";
 import type { ApproveDuplicateRiskRequest, DuplicateRiskApproval } from "../procurement/approveDuplicateRisk";
 import type { AllocateSourcingRequest, SourcingAllocation, Supplier } from "../procurement/allocateSourcing";
 import type { CreatePurchaseOrderRequest, PurchaseOrder } from "../procurement/createPurchaseOrder";
+import type { CancelUndeliveredPurchaseOrderRequest } from "../procurement/cancelUndeliveredPurchaseOrder";
+import type { ConfirmPurchaseOrderCancellationRequest } from "../procurement/confirmPurchaseOrderCancellation";
+import type { CancellationRequest, CancellationResponse, CreateCancellationRequestRequest } from "../procurement/createCancellationRequest";
+import type { RespondToCancellationRequestRequest } from "../procurement/respondToCancellationRequest";
 import type { MarkPurchaseOrderReadyRequest } from "../procurement/markPurchaseOrderReady";
 import type { ReleaseSourcingRequest, SourcingRelease } from "../procurement/releaseSourcing";
 import type { RecordPurchaseOrderDeliveryRequest } from "../procurement/recordPurchaseOrderDelivery";
@@ -33,9 +37,16 @@ export type CreatePurchaseOrderBody = CreatePurchaseOrderRequest;
 export type MarkPurchaseOrderReadyBody = MarkPurchaseOrderReadyRequest;
 export type RecordPurchaseOrderDeliveryBody = Omit<RecordPurchaseOrderDeliveryRequest, "deliveredBy">;
 export type RecordSupplierReplyBody = RecordSupplierReplyRequest;
+export type CancelUndeliveredPurchaseOrderBody = Omit<CancelUndeliveredPurchaseOrderRequest, "cancelledBy">;
+export type CreateCancellationRequestBody = CreateCancellationRequestRequest;
+export type RespondToCancellationRequestBody = RespondToCancellationRequestRequest;
+export type ConfirmPurchaseOrderCancellationBody = ConfirmPurchaseOrderCancellationRequest;
 export type AllocateSourcingBody = AllocateSourcingRequest;
 export type ApproveDuplicateRiskBody = Omit<ApproveDuplicateRiskRequest, "actorRole" | "approvedBy">;
 export type ReleaseSourcingBody = Omit<ReleaseSourcingRequest, "releasedBy">;
+
+/** 상태 전이 명령이 새로 저장할 기록 */
+type Saved = { po: PurchaseOrder[]; replies: PoReply[]; cancellationRequests: CancellationRequest[]; cancellationResponses: CancellationResponse[] };
 
 /** 발주 생성·전달 준비·전달 기록·공급처 회신을 Postgres 영속화 위에서 실행한다 (E7 권고안 a).
  * 락 순서: 배정 락('src:', 정렬 순) → 주문 행(공유). 발주 상태 전이는 발주 행을 `FOR UPDATE`로 잡는다. */
@@ -113,8 +124,9 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
   const transition = <B extends { tenantId: string; purchaseOrderId: string; idempotencyKey: string }, R>(
     actor: Actor,
     body: B,
-    lineId: unknown,
-    run: (state: Awaited<ReturnType<typeof loadPoState>> | undefined, principal: UserPrincipal, idempotency: IdempotencyStore, saved: { po: PurchaseOrder[]; replies: PoReply[] }, rest: Omit<B, "tenantId">) => R,
+    /** 잠글 발주 품목: 하나, 여러 개, 또는 발주 행을 잠근 뒤 찾아내는 함수 */
+    lineId: string | string[] | undefined | ((client: PoolClient) => Promise<unknown>),
+    run: (state: Awaited<ReturnType<typeof loadPoState>> | undefined, principal: UserPrincipal, idempotency: IdempotencyStore, saved: Saved, rest: Omit<B, "tenantId">) => R,
   ): Promise<R> =>
     withRetry(() =>
       inTransaction(deps.pool, "service_role", actor.userId, async (client) => {
@@ -122,16 +134,24 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
         const exists = isUuid(body.tenantId) && isUuid(body.purchaseOrderId)
           ? (await client.query("select 1 from public.ordering_purchase_orders where tenant_id = $1 and id = $2 for update", [body.tenantId, body.purchaseOrderId])).rowCount === 1
           : false;
-        if (exists && isUuid(lineId)) await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [polLockKey(body.tenantId, lineId)]);
+        if (exists) {
+          const resolved = typeof lineId === "function" ? await (lineId as (c: PoolClient) => Promise<unknown>)(client) : lineId;
+          for (const id of [...new Set(Array.isArray(resolved) ? resolved : [resolved])].filter(isUuid).sort()) {
+            await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [polLockKey(body.tenantId, id)]);
+          }
+        }
         const state = exists ? await loadPoState(client, body.tenantId, body.purchaseOrderId) : undefined;
         const idempotency = await loadCommands(client, body.tenantId, body.idempotencyKey);
         const known = new Set(idempotency.keys());
-        const saved = { po: [] as PurchaseOrder[], replies: [] as PoReply[] };
+        const saved: Saved = { po: [], replies: [], cancellationRequests: [], cancellationResponses: [] };
         const { tenantId: _t, ...rest } = body;
         void _t;
         const result = run(state, principal, idempotency, saved, rest);
         for (const po of saved.po) {
-          const updated = await client.query("update public.ordering_purchase_orders set status = $3, version = $4, delivery = $5 where tenant_id = $1 and id = $2 and version = $6", [po.tenantId, po.id, po.status, po.version, po.delivery ?? null, state?.po?.version]);
+          const updated = await client.query(
+            "update public.ordering_purchase_orders set status = $3, version = $4, delivery = $5, cancelled_at = coalesce($7, cancelled_at), cancelled_by = coalesce($8, cancelled_by), cancel_reason = coalesce($9, cancel_reason) where tenant_id = $1 and id = $2 and version = $6",
+            [po.tenantId, po.id, po.status, po.version, po.delivery ?? null, state?.po?.version, po.cancelledAt ?? null, po.cancelledBy ?? null, po.cancelReason ?? null],
+          );
           if (updated.rowCount !== 1) throw new AppError("VERSION_CONFLICT");
         }
         for (const r of saved.replies) {
@@ -140,10 +160,27 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
             [r.id, r.tenantId, r.purchaseOrderId, r.poLineId, r.kind, r.quantity, r.source ?? null, r.eta ?? null, r.evidence, r.repliedAt, r.recordedAt],
           );
         }
+        for (const r of saved.cancellationRequests) {
+          await client.query("insert into public.ordering_po_cancellation_requests (id, tenant_id, purchase_order_id, po_line_id, quantity, reason, requested_at) values ($1, $2, $3, $4, $5, $6, $7)", [r.id, r.tenantId, r.purchaseOrderId, r.poLineId, r.quantity, r.reason, r.requestedAt]);
+        }
+        for (const r of saved.cancellationResponses) {
+          await client.query(
+            "insert into public.ordering_po_cancellation_responses (id, tenant_id, purchase_order_id, po_line_id, request_id, accepted_quantity, rejected_quantity, evidence, replied_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+            [r.id, r.tenantId, r.purchaseOrderId, r.poLineId, r.requestId, r.acceptedQuantity, r.rejectedQuantity, r.evidence, r.repliedAt, r.recordedAt],
+          );
+        }
         await saveNewCommands(client, idempotency, known);
         return result;
       }),
     );
+  type PoState = Awaited<ReturnType<typeof loadPoState>>;
+  const cancellationRepo = (state: PoState | undefined, saved: Saved) => ({
+    getRequest: (_t: string, id: string) => state?.requests.find((r) => r.id === id),
+    listRequests: () => [...(state?.requests ?? []), ...saved.cancellationRequests],
+    saveRequest: (r: CancellationRequest) => void saved.cancellationRequests.push(r),
+    listResponses: () => [...(state?.responses ?? []), ...saved.cancellationResponses],
+    saveResponse: (r: CancellationResponse) => void saved.cancellationResponses.push(r),
+  });
   const poRepo = (state: { po?: PurchaseOrder } | undefined, saved: { po: PurchaseOrder[] }) => ({
     get: (_t: string, id: string) => (state?.po && state.po.id === id ? state.po : undefined),
     list: () => (state?.po ? [state.po] : []),
@@ -322,6 +359,42 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
     recordPurchaseOrderDelivery: (actor: Actor, body: RecordPurchaseOrderDeliveryBody) =>
       transition(actor, body, undefined, (state, principal, idempotency, saved, rest) =>
         authorizedActions.recordPurchaseOrderDelivery({ purchaseOrders: poRepo(state, saved), exports: { list: () => [], save: forbidden }, idempotency }, principal, rest),
+      ),
+    cancelUndeliveredPurchaseOrder: (actor: Actor, body: CancelUndeliveredPurchaseOrderBody) =>
+      transition(actor, body, undefined, (state, principal, idempotency, saved, rest) =>
+        authorizedActions.cancelUndeliveredPurchaseOrder({ purchaseOrders: poRepo(state, saved), idempotency }, principal, rest),
+      ),
+    createCancellationRequest: (actor: Actor, body: CreateCancellationRequestBody) =>
+      transition(actor, body, body.poLineId, (state, principal, idempotency, saved, rest) =>
+        authorizedActions.createCancellationRequest(
+          { purchaseOrders: poRepo(state, saved), replies: { list: () => state?.replies ?? [], save: forbidden }, cancellations: cancellationRepo(state, saved), idempotency },
+          principal,
+          rest,
+        ),
+      ),
+    respondToCancellationRequest: (actor: Actor, body: RespondToCancellationRequestBody) =>
+      transition(
+        actor,
+        body,
+        async (client) => (isUuid(body.cancellationRequestId) ? (await client.query("select po_line_id from public.ordering_po_cancellation_requests where tenant_id = $1 and id = $2", [body.tenantId, body.cancellationRequestId])).rows[0]?.po_line_id : undefined),
+        (state, principal, idempotency, saved, rest) =>
+          authorizedActions.respondToCancellationRequest(
+            { purchaseOrders: poRepo(state, saved), replies: { list: () => state?.replies ?? [], save: forbidden }, cancellations: cancellationRepo(state, saved), idempotency },
+            principal,
+            rest,
+          ),
+      ),
+    confirmPurchaseOrderCancellation: (actor: Actor, body: ConfirmPurchaseOrderCancellationBody) =>
+      transition(
+        actor,
+        body,
+        async (client) => (await client.query("select id from public.ordering_po_lines where tenant_id = $1 and purchase_order_id = $2", [body.tenantId, body.purchaseOrderId])).rows.map((r) => r.id as string),
+        (state, principal, idempotency, saved, rest) =>
+          authorizedActions.confirmPurchaseOrderCancellation(
+            { purchaseOrders: poRepo(state, saved), replies: { list: () => state?.replies ?? [], save: forbidden }, cancellations: cancellationRepo(state, saved), idempotency },
+            principal,
+            rest,
+          ),
       ),
     recordSupplierReply: (actor: Actor, body: RecordSupplierReplyBody) =>
       transition(actor, body, body.poLineId, (state, principal, idempotency, saved, rest) =>

@@ -287,6 +287,112 @@ describe("중복 구매 위험 (이전 공급처 의무가 남은 품목의 재�
   });
 });
 
+const cancelUndelivered = (api: Api, purchaseOrderId: string, expectedVersion: number, actor = staff) =>
+  api.cancelUndeliveredPurchaseOrder(actor, { tenantId: T_A, purchaseOrderId, expectedVersion, reason: "공급처 변경", cancelledAt: "2026-03-04T06:15:00.000Z", idempotencyKey: key() });
+const requestCancel = (api: Api, purchaseOrderId: string, poLineId: string, quantity: number) =>
+  api.createCancellationRequest(staff, { tenantId: T_A, purchaseOrderId, poLineId, quantity, reason: "고객 취소로 물량 축소", idempotencyKey: key() });
+const respondCancel = (api: Api, purchaseOrderId: string, cancellationRequestId: string, acceptedQuantity: number, rejectedQuantity: number) =>
+  api.respondToCancellationRequest(staff, { tenantId: T_A, purchaseOrderId, cancellationRequestId, acceptedQuantity, rejectedQuantity, evidence: "공급처 취소 회신 메일", repliedAt: "2026-03-04T06:25:00.000Z", idempotencyKey: key() });
+const confirmCancel = (api: Api, purchaseOrderId: string, expectedVersion: number) =>
+  api.confirmPurchaseOrderCancellation(staff, { tenantId: T_A, purchaseOrderId, expectedVersion, idempotencyKey: key() });
+/** 배정 → 발주 → 전달까지 마친 발주 (SENT, version 3) */
+async function sentPo(book: number, quantity: number, api: Api) {
+  const line = await confirmedLine(book, quantity);
+  const allocation = await allocate(api, line, "sup-a", quantity);
+  const po = await create(api, "sup-a", [allocation.id]);
+  await ready(api, po.id, 1);
+  await deliver(api, po.id, 2);
+  return { line, allocation, po, poLineId: po.lines[0]!.poLineId };
+}
+
+describe("발주 취소 (미전달 취소, 공급처 취소 요청·응답·확정)", () => {
+  it("전달하지 않은 발주는 공급처 수락 없이 취소되고 연결됐던 배정은 해제하거나 새 발주에 다시 연결할 수 있으며, 전달된 발주·낡은 version은 거부된다", async () => {
+    const api = createPgProcurementApi({ pool: db.pool() });
+    const line = await confirmedLine(18, 2);
+    const allocation = await allocate(api, line, "sup-a", 2);
+    const po = await create(api, "sup-a", [allocation.id]);
+
+    expect(await codeOf(() => cancelUndelivered(api, po.id, 9))).toBe("VERSION_CONFLICT");
+    expect(await codeOf(() => cancelUndelivered(api, po.id, 1, { userId: STRANGER }))).toBe("FORBIDDEN");
+    expect(await codeOf(() => cancelUndelivered(api, "0a000000-0000-4000-8000-00000000ffff", 1))).toBe("NOT_FOUND");
+    const cancelled = await cancelUndelivered(api, po.id, 1);
+    expect(cancelled).toMatchObject({ status: "CANCELLED", version: 2, cancelledBy: STAFF_A, cancelReason: "공급처 변경" });
+    expect((await rows("select status, cancelled_by, cancel_reason, cancelled_at is not null as has_time from public.ordering_purchase_orders where id = $1", [po.id]))[0]).toEqual({ status: "CANCELLED", cancelled_by: STAFF_A, cancel_reason: "공급처 변경", has_time: true });
+    expect(await codeOf(() => cancelUndelivered(api, po.id, 2))).toBe("BUSINESS_INVARIANT"); // 이미 취소됨
+
+    const again = await create(api, "sup-a", [allocation.id]); // 취소된 발주의 배정은 새 발주에 다시 연결된다
+    expect(again.status).toBe("DRAFT");
+    await cancelUndelivered(api, again.id, 1);
+    expect((await release(api, allocation.id)).retainedObligations).toEqual([]); // 취소된 발주에는 남는 의무가 없다
+
+    const sent = await sentPo(19, 1, api);
+    expect(await codeOf(() => cancelUndelivered(api, sent.po.id, 3))).toBe("BUSINESS_INVARIANT"); // 전달된 발주는 공급처 취소 흐름으로만 취소한다
+  });
+
+  it("전달된 발주의 취소는 요청 → 공급처 응답(수락·거절) → 전량 수락 확정 순으로만 이루어지고 요청·응답 수량 불변식이 지켜진다", async () => {
+    const api = createPgProcurementApi({ pool: db.pool() });
+    const { po, poLineId } = await sentPo(20, 3, api);
+    const draftLine = await confirmedLine(1, 1);
+    const draftPo = await create(api, "sup-a", [(await allocate(api, draftLine, "sup-a", 1)).id]);
+
+    expect(await codeOf(() => requestCancel(api, draftPo.id, draftPo.lines[0]!.poLineId, 1))).toBe("BUSINESS_INVARIANT"); // 전달 전 발주
+    expect(await codeOf(() => requestCancel(api, po.id, "0a000000-0000-4000-8000-00000000ffff", 1))).toBe("NOT_FOUND");
+    const first = await requestCancel(api, po.id, poLineId, 2);
+    expect(first).toMatchObject({ purchaseOrderId: po.id, poLineId, quantity: 2 });
+    expect(await codeOf(() => requestCancel(api, po.id, poLineId, 2))).toBe("BUSINESS_INVARIANT"); // 발주 3권 중 미응답 2권을 빼면 1권만 요청 가능
+    expect((await poRow(po.id)).version).toBe(3); // 요청은 발주를 바꾸지 않는다
+
+    expect(await codeOf(() => respondCancel(api, po.id, first.id, 2, 1))).toBe("BUSINESS_INVARIANT"); // 요청 2권 초과
+    expect(await codeOf(() => respondCancel(api, po.id, "0a000000-0000-4000-8000-00000000ffff", 1, 0))).toBe("NOT_FOUND");
+    const answered = await respondCancel(api, po.id, first.id, 1, 1);
+    expect(answered).toMatchObject({ requestId: first.id, acceptedQuantity: 1, rejectedQuantity: 1 });
+    expect((await poRow(po.id)).version).toBe(3); // 응답도 발주 상태를 바꾸지 않는다
+    expect(await codeOf(() => confirmCancel(api, po.id, 3))).toBe("BUSINESS_INVARIANT"); // 유효 발주량이 아직 2권 남았다
+
+    const second = await requestCancel(api, po.id, poLineId, 2); // 거절된 수량은 다시 요청할 수 있다
+    await respondCancel(api, po.id, second.id, 2, 0);
+    expect(await codeOf(() => confirmCancel(api, po.id, 9))).toBe("VERSION_CONFLICT");
+    expect(await confirmCancel(api, po.id, 3)).toMatchObject({ status: "CANCELLED", version: 4 });
+    expect((await rows("select cancelled_at is not null as has_time from public.ordering_purchase_orders where id = $1", [po.id]))[0].has_time).toBe(true);
+    expect(await codeOf(() => requestCancel(api, po.id, poLineId, 1))).toBe("BUSINESS_INVARIANT"); // 취소된 발주
+  });
+});
+
+describe("발주 취소의 실제 동시성과 DB 방어 (두 독립 세션)", () => {
+  it("발주 3권에 두 세션이 동시에 2권씩 취소를 요청하면 하나만 성공하고, 같은 요청에 동시에 2권씩 수락해도 요청량을 넘지 못한다", async () => {
+    const { po, poLineId } = await sentPo(1, 3, createPgProcurementApi({ pool: db.pool() }));
+    const requests = await Promise.allSettled([requestCancel(createPgProcurementApi({ pool: db.pool() }), po.id, poLineId, 2), requestCancel(createPgProcurementApi({ pool: db.pool() }), po.id, poLineId, 2)]);
+    expect(outcomes(requests)).toEqual(["BUSINESS_INVARIANT", "OK"]);
+
+    const request = (requests.find((r) => r.status === "fulfilled") as PromiseFulfilledResult<{ id: string }>).value;
+    const responses = await Promise.allSettled([respondCancel(createPgProcurementApi({ pool: db.pool() }), po.id, request.id, 2, 0), respondCancel(createPgProcurementApi({ pool: db.pool() }), po.id, request.id, 2, 0)]);
+    expect(outcomes(responses)).toEqual(["BUSINESS_INVARIANT", "OK"]);
+    expect((await rows("select coalesce(sum(accepted_quantity), 0)::int as n from public.ordering_po_cancellation_responses where request_id = $1", [request.id]))[0].n).toBe(2);
+  });
+
+  it("직접 SQL로도 전달 전 발주에 취소 요청·응답을 넣거나 요청량을 넘겨 응답하거나 요청을 발주 수량보다 크게 낼 수 없다", async () => {
+    const api = createPgProcurementApi({ pool: db.pool() });
+    const draftLine = await confirmedLine(2, 1);
+    const draft = await create(api, "sup-a", [(await allocate(api, draftLine, "sup-a", 1)).id]);
+    const { po, poLineId } = await sentPo(3, 3, api);
+    const c = await db.connect();
+    const q = (sql: string) => () => c.query(sql);
+    const reqIns = (poId: string, lineId: string, n: number) => `insert into public.ordering_po_cancellation_requests (tenant_id, purchase_order_id, po_line_id, quantity, reason) values ('${T_A}', '${poId}', '${lineId}', ${n}, '사유') returning id`;
+    try {
+      expect(await sqlState(q(reqIns(draft.id, draft.lines[0]!.poLineId, 1)))).toBe("P0001"); // 전달 전 발주
+      expect(await sqlState(q(reqIns(po.id, poLineId, 4)))).toBe("P0001"); // 발주 3권 초과
+      const requestId = (await c.query(reqIns(po.id, poLineId, 2))).rows[0].id as string;
+      const resIns = (a: number, r: number) => `insert into public.ordering_po_cancellation_responses (tenant_id, purchase_order_id, po_line_id, request_id, accepted_quantity, rejected_quantity, evidence, replied_at) values ('${T_A}', '${po.id}', '${poLineId}', '${requestId}', ${a}, ${r}, '근거', now())`;
+      expect(await sqlState(q(resIns(2, 1)))).toBe("P0001"); // 요청 2권 초과
+      await c.query(resIns(1, 0));
+      expect(await sqlState(q(resIns(1, 1)))).toBe("P0001"); // 이미 1권 응답, 남은 1권뿐
+      await c.query(resIns(0, 1));
+    } finally {
+      await c.end();
+    }
+  });
+});
+
 describe("조달 배정의 실제 동시성과 DB 방어 (두 독립 세션)", () => {
   it("주문 품목 3권에 두 세션이 동시에 2권씩 배정하면 하나만 성공한다", async () => {
     const line = await confirmedLine(12, 3);
