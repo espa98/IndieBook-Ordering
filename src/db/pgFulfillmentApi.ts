@@ -11,7 +11,12 @@ import type {
   OrderCancellationRequest,
   RequestOrderCancellationRequest,
 } from "../order/requestOrderCancellation";
+import type { ReceiptAllocation } from "../inventory/allocateReceipt";
+import type { AllocationCancellation } from "../inventory/cancelAllocation";
+import type { AllocationDelivery } from "../inventory/deliverAllocation";
+import type { AllocationRelease } from "../inventory/releaseAllocation";
 import { loadLedger } from "./pgPaymentApi";
+import { loadAllocationLedger, polLockKey } from "./pgReceivingApi";
 import { loadBookLedger } from "./pgStockApi";
 import {
   inTransaction,
@@ -91,16 +96,13 @@ async function loadCancellations(client: PoolClient, tenantId: string, orderId: 
  * 수령(인도)과 주문 취소 요청을 Postgres 영속화 위에서 실행한다 (E7 권고안 a).
  * 락 순서는 주문 행 → 주문 인도 락(`ful:`) → 책 락(정렬 순)으로 고정되어 같은 책을 다루는 인도끼리, 인도와 취소 요청 사이에서
  * 교착 없이 직렬화된다. 같은 락을 DB 트리거도 잡아 어댑터를 거치지 않는 쓰기도 막는다.
- * 현재는 재고 예약 출처만 영속화한다. 입고 배분 출처는 거부한다.
+ * 재고 예약 출처와 입고 배분 출처를 모두 영속화한다. 락 순서는 주문 → 인도 → 책 → 발주 품목이다.
  */
 export function createPgFulfillmentApi(deps: { pool: PoolLike }) {
   async function postOnce(actor: Actor, request: PostFulfillmentBody): Promise<Fulfillment> {
     return inTransaction(deps.pool, "service_role", actor.userId, async (client) => {
       const principal = principalFor(await loadMembership(client, actor.userId, request.tenantId), actor.userId, request.tenantId);
       const sources = Array.isArray(request.sources) ? request.sources : [];
-      if (sources.some((s) => s && s.kind === "RECEIPT_ALLOCATION")) {
-        throw new AppError("VALIDATION_ERROR", "receipt allocation sources are not supported by the persistent adapter yet");
-      }
 
       const [order] = await loadOrders(client, request.tenantId, { orderId: request.orderId, lock: "share" });
       let reservations: StockReservationRecord[] = [];
@@ -111,6 +113,10 @@ export function createPgFulfillmentApi(deps: { pool: PoolLike }) {
       let requests: OrderCancellationRequest[] = [];
       let decisions: OrderCancellationDecision[] = [];
       let paymentLedger: Awaited<ReturnType<typeof loadLedger>> | undefined;
+      let allocations: ReceiptAllocation[] = [];
+      let allocationReleases: AllocationRelease[] = [];
+      let allocationDeliveries: AllocationDelivery[] = [];
+      let allocationCancellations: AllocationCancellation[] = [];
       if (order) {
         // 같은 주문의 인도·취소 요청을 직렬화한 뒤, 출처 예약의 책 락을 정렬 순으로 잡는다
         await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`ful:${order.tenantId}:${order.id}`]);
@@ -130,6 +136,22 @@ export function createPgFulfillmentApi(deps: { pool: PoolLike }) {
           deliveries = deliveries.concat(ledger.deliveries);
           movements = movements.concat(ledger.movements);
         }
+        // 입고 배분 출처의 발주 품목 락은 책 락 뒤에 정렬 순으로 잡는다(락 순서: 주문 → 인도 → 책 → 발주 품목)
+        const allocationIds = sources.filter((s) => s?.kind === "RECEIPT_ALLOCATION").map((s) => s.sourceId).filter(isUuid);
+        if (allocationIds.length > 0) {
+          const lines = (
+            await client.query(
+              `select distinct g.po_line_id from public.ordering_receipt_allocations a
+                 join public.ordering_goods_receipts g on g.tenant_id = a.tenant_id and g.id = a.receipt_id
+                where a.tenant_id = $1 and a.id = any($2::uuid[])`,
+              [order.tenantId, allocationIds],
+            )
+          ).rows.map((r) => r.po_line_id as string);
+          for (const line of lines.sort()) {
+            await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [polLockKey(order.tenantId, line)]);
+          }
+          ({ allocations, releases: allocationReleases, deliveries: allocationDeliveries, cancellations: allocationCancellations } = await loadAllocationLedger(client, order.tenantId, allocationIds));
+        }
         fulfillments = await loadFulfillments(client, order.tenantId, order.id);
         ({ requests, decisions } = await loadCancellations(client, order.tenantId, order.id));
         paymentLedger = await loadLedger(client, order);
@@ -139,11 +161,11 @@ export function createPgFulfillmentApi(deps: { pool: PoolLike }) {
 
       const newDeliveries: StockReservationDelivery[] = [];
       const newMovements: StockMovement[] = [];
+      const newAllocationDeliveries: AllocationDelivery[] = [];
       const newFulfillments: Fulfillment[] = [];
       const forbidden = () => {
         throw new Error("this command must not write this ledger");
       };
-      const none = { get: () => undefined, list: () => [], listByOrder: () => [], save: forbidden };
       const { tenantId: _tenantId, ...rest } = request;
       void _tenantId;
       const postDeps: Parameters<typeof authorizedActions.postFulfillment>[0] =
@@ -171,10 +193,18 @@ export function createPgFulfillmentApi(deps: { pool: PoolLike }) {
             save: (d) => void newDeliveries.push(d),
           },
           stockMovements: { list: (_t, bookId) => movements.filter((m) => m.bookId === bookId), save: (m) => void newMovements.push(m) },
-          receiptAllocations: none,
-          allocationReleases: { list: () => [], save: forbidden },
-          allocationDeliveries: { list: () => [], save: forbidden },
-          allocationCancellations: { list: () => [] },
+          receiptAllocations: {
+            get: (_t, id) => allocations.find((a) => a.id === id),
+            listByOrder: (_t, orderId) => allocations.filter((a) => a.orderId === orderId),
+            list: (_t, receiptId) => allocations.filter((a) => a.receiptId === receiptId),
+            save: forbidden,
+          },
+          allocationReleases: { list: (_t, allocationId) => allocationReleases.filter((r) => r.allocationId === allocationId), save: forbidden },
+          allocationDeliveries: {
+            list: (_t, allocationId) => allocationDeliveries.filter((d) => d.allocationId === allocationId),
+            save: (d) => void newAllocationDeliveries.push(d),
+          },
+          allocationCancellations: { list: (_t, allocationId) => allocationCancellations.filter((c) => c.allocationId === allocationId) },
           idempotency,
         };
       const result = authorizedActions.postFulfillment(postDeps, principal, rest);
@@ -190,6 +220,12 @@ export function createPgFulfillmentApi(deps: { pool: PoolLike }) {
         await client.query(
           "insert into public.ordering_stock_movements (id, tenant_id, book_key, kind, direction, quantity, reason, reservation_id, cancellation_id, acted_by, acted_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
           [m.id, m.tenantId, m.bookId, m.kind, m.direction, m.quantity, m.reason, m.reservationId ?? null, m.cancellationId ?? null, m.actedBy, m.actedAt, m.recordedAt],
+        );
+      }
+      for (const d of newAllocationDeliveries) {
+        await client.query(
+          "insert into public.ordering_allocation_deliveries (id, tenant_id, allocation_id, receipt_id, order_id, order_line_id, quantity, delivered_by, delivered_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+          [d.id, d.tenantId, d.allocationId, d.receiptId, d.orderId, d.orderLineId, d.quantity, d.deliveredBy, d.deliveredAt, d.recordedAt],
         );
       }
       for (const f of newFulfillments) {

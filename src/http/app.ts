@@ -2,6 +2,7 @@ import { verifyJwt, type JwtVerifyOptions } from "../auth/jwt";
 import { createPgFulfillmentApi } from "../db/pgFulfillmentApi";
 import { createPgOrderApi } from "../db/pgOrderApi";
 import { createPgPaymentApi } from "../db/pgPaymentApi";
+import { createPgReceivingApi } from "../db/pgReceivingApi";
 import { createPgStockApi } from "../db/pgStockApi";
 import type { PoolLike } from "../db/pgSupport";
 import { AppError } from "../errors/AppError";
@@ -60,6 +61,7 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
   const stock = createPgStockApi({ pool: deps.pool });
   const payments = createPgPaymentApi({ pool: deps.pool });
   const fulfillments = createPgFulfillmentApi({ pool: deps.pool });
+  const receiving = createPgReceivingApi({ pool: deps.pool });
   const actor = (c: Ctx) => ({ userId: c.userId });
   // 본문은 신뢰할 수 없는 JSON이다. 형식 검증은 도메인이 하므로 여기서는 경계 타입만 맞춘다
   const merge = (c: Ctx, extra: Record<string, unknown>) => ({ ...c.body, ...extra }) as never;
@@ -134,6 +136,21 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
       success: 201,
       fields: ["paymentId", "amountKrw", "evidence", "requestedAt"],
       run: (c) => payments.requestRefund(actor(c), merge(c, { tenantId: t(c), refundTaskId: c.params.taskId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/purchase-orders/(?<purchaseOrderId>[^/]+)/receipts", {
+      success: 201,
+      fields: ["poLineId", "normalQuantity", "damagedQuantity", "misdeliveredQuantity", "receivedAt"],
+      run: (c) => receiving.receiveGoods(actor(c), merge(c, { tenantId: t(c), purchaseOrderId: c.params.purchaseOrderId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/receipts/(?<receiptId>[^/]+)/allocations", {
+      success: 201,
+      fields: ["orderId", "orderLineId", "quantity", "allocatedAt"],
+      run: (c) => receiving.allocateReceipt(actor(c), merge(c, { tenantId: t(c), receiptId: c.params.receiptId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/allocations/(?<allocationId>[^/]+)/releases", {
+      success: 201,
+      fields: ["quantity", "reason", "releasedAt"],
+      run: (c) => receiving.releaseAllocation(actor(c), merge(c, { tenantId: t(c), allocationId: c.params.allocationId!, idempotencyKey: c.idempotencyKey })),
     }),
     route("POST", "/refund-requests/(?<requestId>[^/]+)/decision", {
       success: 200,

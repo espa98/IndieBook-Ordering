@@ -147,13 +147,13 @@ describe("createPgFulfillmentApi.postFulfillment: 수령(인도)을 Postgres 영
     expect(await num("select count(*)::int as n from public.ordering_fulfillments")).toBe(before + 1);
   });
 
-  it("입고 배분 출처는 아직 영속화하지 않아 VALIDATION_ERROR로 거부하고, 권한은 FORBIDDEN·UNAUTHENTICATED·타 서점 NOT_FOUND이다", async () => {
+  it("존재하지 않는 입고 배분 출처는 NOT_FOUND이고(입고 배분 출처 인도는 tests/db/pgReceivingApi에서 검증), 권한은 FORBIDDEN·UNAUTHENTICATED·타 서점 NOT_FOUND이다", async () => {
     const api = createPgFulfillmentApi({ pool: db.pool() });
     const d = await deliverable(6, 1);
 
     expect(
       await codeOf(() => api.postFulfillment(staff, { ...fulfillBody(d, 1), sources: [{ kind: "RECEIPT_ALLOCATION", sourceId: d.reservationId, quantity: 1 }] })),
-    ).toBe("VALIDATION_ERROR");
+    ).toBe("NOT_FOUND");
     expect(await codeOf(() => api.postFulfillment({ userId: STRANGER }, fulfillBody(d, 1)))).toBe("FORBIDDEN");
     expect(await codeOf(() => api.postFulfillment({ userId: EX_STAFF_A }, fulfillBody(d, 1)))).toBe("FORBIDDEN");
     expect(await codeOf(() => api.postFulfillment({ userId: "" }, fulfillBody(d, 1)))).toBe("UNAUTHENTICATED");

@@ -211,6 +211,60 @@ describe("HTTP 서버: 업무 흐름 (주문 → 예약 → 결제 → 인도 �
   });
 });
 
+describe("HTTP 서버: 입고·배분 (발주 → 입고 → 배분 → 인도)", () => {
+  it("검수 입고, 고객별 배분, 배분 해제, 배분 물량 인도가 HTTP로 이어지고 검수자·배분자는 토큰의 사용자로 기록된다", async () => {
+    const o = await confirmedOrder(9, 2);
+    const c = await db.connect();
+    const po = (await c.query(`insert into public.ordering_purchase_orders (tenant_id, supplier_code, status, version) values ($1, 'sup-a', 'SENT', 3) returning id`, [T_A])).rows[0].id as string;
+    const poLine = (await c.query(`insert into public.ordering_po_lines (tenant_id, purchase_order_id, book_key, quantity) values ($1, $2, $3, 2) returning id`, [T_A, po, BOOK(9)])).rows[0].id as string;
+    await c.query(`insert into public.ordering_po_links (tenant_id, po_line_id, allocation_id, order_id, order_line_id, quantity) values ($1, $2, gen_random_uuid(), $3, $4, 2)`, [T_A, poLine, o.orderId, o.lineId]);
+    await c.end();
+
+    const receipt = await call(`/v1/tenants/${T_A}/purchase-orders/${po}/receipts`, {
+      method: "POST",
+      sub: STAFF_A,
+      body: { poLineId: poLine, normalQuantity: 2, damagedQuantity: 0, misdeliveredQuantity: 0, receivedAt: "2026-03-04T06:35:00.000Z" },
+    });
+    expect(receipt.status).toBe(201);
+    expect(receipt.json.data).toMatchObject({ normalQuantity: 2, inspectedBy: STAFF_A });
+
+    const allocation = await call(`/v1/tenants/${T_A}/receipts/${receipt.json.data.id}/allocations`, {
+      method: "POST",
+      sub: STAFF_A,
+      body: { orderId: o.orderId, orderLineId: o.lineId, quantity: 2, allocatedAt: "2026-03-04T06:40:00.000Z" },
+    });
+    expect(allocation.status).toBe(201);
+    expect(allocation.json.data).toMatchObject({ quantity: 2, allocatedBy: STAFF_A });
+    const allocationId = allocation.json.data.id as string;
+
+    const release = await call(`/v1/tenants/${T_A}/allocations/${allocationId}/releases`, { method: "POST", sub: STAFF_A, body: { quantity: 1, reason: "고객이 1권 변경", releasedAt: "2026-03-04T06:50:00.000Z" } });
+    expect(release.status).toBe(201);
+    expect(release.json.data).toMatchObject({ quantity: 1, releasedBy: STAFF_A });
+
+    const pay = await call(`${orders()}/${o.orderId}/payments`, { method: "POST", sub: STAFF_A, body: { method: "CARD", amountKrw: "15000", externalReference: `HTTP-RCV-${++seq}`, paidAt: "2026-03-04T06:00:00.000Z" } });
+    await call(`/v1/tenants/${T_A}/payments/${pay.json.data.id}/confirmation`, { method: "POST", sub: STAFF_A, body: { evidence: "카드 승인 내역", confirmedAt: "2026-03-04T06:30:00.000Z" } });
+    const fulfillment = await call(`${orders()}/${o.orderId}/fulfillments`, {
+      method: "POST",
+      sub: STAFF_A,
+      body: { orderLineId: o.lineId, sources: [{ kind: "RECEIPT_ALLOCATION", sourceId: allocationId, quantity: 1 }], receivedAt: "2026-03-04T06:55:00.000Z" },
+    });
+    expect(fulfillment.status).toBe(201);
+    expect(fulfillment.json.data).toMatchObject({ quantity: 1, amountKrw: "15000" });
+    // 남은 배분이 없으니 더 인도할 수 없다
+    const again = await call(`${orders()}/${o.orderId}/fulfillments`, {
+      method: "POST",
+      sub: STAFF_A,
+      body: { orderLineId: o.lineId, sources: [{ kind: "RECEIPT_ALLOCATION", sourceId: allocationId, quantity: 1 }], receivedAt: "2026-03-04T06:56:00.000Z" },
+    });
+    expect(again.status).toBe(422);
+    // 행위자 필드를 보내는 위조 시도는 400이다
+    const forged = await call(`/v1/tenants/${T_A}/receipts/${receipt.json.data.id}/allocations`, { method: "POST", sub: STAFF_A, body: { orderId: o.orderId, orderLineId: o.lineId, quantity: 1, allocatedAt: "2026-03-04T06:40:00.000Z", allocatedBy: OWNER_A } });
+    expect(forged.status).toBe(400);
+    // 비멤버는 403
+    expect((await call(`/v1/tenants/${T_A}/purchase-orders/${po}/receipts`, { method: "POST", sub: STRANGER, body: { poLineId: poLine, normalQuantity: 1, damagedQuantity: 0, misdeliveredQuantity: 0, receivedAt: "2026-03-04T06:35:00.000Z" } })).status).toBe(403);
+  });
+});
+
 describe("HTTP 서버: 입력 방어", () => {
   it("Idempotency-Key 누락·공백·128자 초과는 400이다", async () => {
     const body = { lines: lines() };
