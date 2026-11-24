@@ -58,4 +58,17 @@ describe("applyMigrations: 마이그레이션 러너", () => {
       good.cleanup();
     }
   });
+
+  it("줄바꿈(CRLF/LF)만 다른 같은 파일은 변경으로 보지 않는다 (체크아웃 환경이 달라도 안전)", async () => {
+    const m = migrationDir({ "030_eol.sql": "create table mig_d (id int);\nselect 1;\n" });
+    const client = await db.connect();
+    try {
+      await applyMigrations(client, m.dir);
+      writeFileSync(join(m.dir, "030_eol.sql"), "create table mig_d (id int);\r\nselect 1;\r\n");
+      expect(await applyMigrations(client, m.dir)).toEqual([]);
+    } finally {
+      await client.end();
+      m.cleanup();
+    }
+  });
 });

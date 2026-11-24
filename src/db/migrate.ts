@@ -29,7 +29,8 @@ export async function applyMigrations(client: Client, dir: string): Promise<stri
   const newlyApplied: string[] = [];
   for (const file of files) {
     const sql = readFileSync(join(dir, file), "utf8");
-    const checksum = createHash("sha256").update(sql).digest("hex");
+    // 체크아웃 환경에 따라 달라지는 줄바꿈(CRLF)은 내용 변경으로 보지 않는다
+    const checksum = createHash("sha256").update(sql.replace(/\r\n/g, "\n")).digest("hex");
     const previous = applied.get(file);
     if (previous !== undefined) {
       if (previous !== checksum) {
