@@ -8,7 +8,7 @@
 
 | 영역 | 판정 | 한 줄 근거 |
 |---|---|---|
-| 도메인 단위·통합(메모리 저장소) | **PASS** | `npx vitest run` 109 files / 1086 tests 통과, 실패 0 (DB 테스트 22개 포함) |
+| 도메인 단위·통합(메모리 저장소) | **PASS** | `npx vitest run` 110 files / 1095 tests 통과, 실패 0 (DB 테스트 31개 포함) |
 | 타입 검사 | **PASS** | `npx tsc --noEmit` 출력 없음 |
 | OpenAPI 스키마·계약 | **PARTIAL** | 주문 API(05단계)만 명세가 있고 26개 통과. 나머지 영역은 명세·구현 없음 |
 | HTTP | **PARTIAL** | 핸들러 단위 41개 통과. 실제 서버·라우터·JWT 없음 |
@@ -25,7 +25,7 @@
 
 | 명령 | 결과 |
 |---|---|
-| `npx vitest run` | files 109, tests 1086, passed 1086, failed 0 (격리 DB 스키마·RLS 추가 후 재실행. 디렉터리별 표도 이 실행의 JSON 집계) |
+| `npx vitest run` | files 110, tests 1095, passed 1095, failed 0 (주문 영속화 어댑터 추가 후 재실행. 디렉터리별 표도 이 실행의 JSON 집계) |
 | `npx tsc --noEmit` | 출력 없음(오류 0) |
 | 정적 점검: `git ls-files` 파일명(.env·secret·credential·pem·key) | 해당 없음 |
 | 정적 점검: `src tests openapi implementation package.json`에서 JWT·키 패턴, `ordering-dev`·`testBookshare` 프로젝트 ID, `service_role` grep | 해당 없음 |
@@ -50,8 +50,8 @@
 | closure | 4 | 15 |
 | cancellation | 5 | 25 |
 | reopening | 1 | 6 |
-| db | 4 | 22 |
-| **합계** | **109** | **1086** |
+| db | 5 | 31 |
+| **합계** | **110** | **1095** |
 
 (`tests/helpers`는 테스트 파일이 없는 공용 픽스처다.)
 
@@ -281,4 +281,30 @@
 - **도메인 코드와 DB가 아직 연결되지 않았다.** 도메인 함수는 모두 동기식이고 저장소 인터페이스도 동기식인데 Postgres 드라이버는 비동기다. 이 간극을 메우는 영속화 방식은 사용자 결정이 필요하다(`release/approval_items.md` E7). 그래서 "기존 도메인 테스트가 DB에서도 통과"하는 검증과 도메인 수준 동시성(마지막 1권 등)은 아직 없다.
 - **쓰기 경로:** 백엔드가 `service_role`로 쓰면 RLS를 우회하므로 권한은 `authorizedActions`가 책임진다. 백엔드가 요청마다 `authenticated` 역할과 JWT 클레임으로 전환해 RLS를 방어선으로 쓰는 구성도 가능하며, 이 선택(E7과 함께 결정)은 아직 하지 않았다.
 - 조회 전용 `security_invoker` 뷰·민감 테이블 최소 필드 조회·RPC EXECUTE 점검은 해당 테이블이 없어 하지 않았다.
+
+## 16. 주문 영속화 어댑터 (E7 권고안 a 구현, `src/db/pgOrderApi.ts`)
+
+테스트 9개(`tests/db/pgOrderApi.test.ts`), 격리 로컬 Postgres 17.12.
+
+**방식:** 요청마다 한 트랜잭션에서 ① 멤버십 ② 주문·품목(쓰기는 `FOR UPDATE`) ③ 같은 키의 멱등 기록 ④ 주문이 가리키는 도서를 적재하고, **기존 동기 `createOrderApi`를 코드 변경 없이 그대로 실행**한 뒤, 변경분(주문·품목·멱등 기록·표시번호 카운터)을 같은 트랜잭션에 저장한다. 도메인이 던진 오류는 트랜잭션을 롤백한다. 쓰기는 `service_role`, 읽기는 `authenticated`+JWT 클레임(`sub`)으로 실행해 RLS가 서점·활성 멤버십을 한 번 더 거른다.
+
+`003_books_commands_counters.sql`이 `ordering_books`(RLS 읽기, 서버 쓰기), `ordering_commands`(멱등 기록, 클라이언트 권한 없음), `ordering_counters`(서점별 표시번호)를 추가했다.
+
+| 검증한 것 | 결과 |
+|---|---|
+| 주문·품목·스냅샷·멱등 기록이 함께 저장되고 새 API 인스턴스(재시작)에서도 조회 | 통과 |
+| 같은 멱등 키·같은 본문은 같은 주문, 다른 본문은 `IDEMPOTENCY_CONFLICT`(재시작 뒤에도) | 통과 |
+| 없는 도서·타 서점 도서·수량 0은 400이고 주문·멱등 기록이 남지 않음(롤백) | 통과 |
+| 확정 시 서점별 표시번호 1부터 순차, 서점 사이 독립, 낡은 version·재확정 거부 | 통과 |
+| 비멤버·비활성 FORBIDDEN, 인증 없음 UNAUTHENTICATED, 타 서점 주문 ID는 없는 ID와 같은 NOT_FOUND | 통과 |
+| 목록 최신순·상태 필터·커서, 타 서점 주문 비노출 | 통과 |
+| **두 독립 연결 동시성** 3건: 같은 주문 동시 확정은 하나만 성공(진 쪽은 커밋된 CONFIRMED를 읽고 `BUSINESS_INVARIANT`), 서로 다른 주문 5건 동시 확정의 표시번호가 중복 없이 연속, 같은 멱등 키 동시 생성은 주문 1건·같은 결과 | 통과 |
+
+**한계**
+- **범위:** 주문 API 4개(생성·확정·상세·목록)만 영속화했다. 재고·예약·배분·발주·입고·결제·환급·안내·종결 등 나머지 도메인은 스키마도 어댑터도 없다. 이 방식을 각 영역에 반복해야 한다(영역마다 "무엇을 잠그고 적재하는가"를 정의).
+- **적재 범위:** 목록은 서점의 주문 전체를 적재해 도메인 `listOrders`로 걸러낸다. 주문이 많아지면 SQL 쪽 페이지네이션이 필요하다.
+- **저장 도중 실패 주입 롤백**은 시험하지 않았다. 도메인 오류에 의한 롤백과 한 트랜잭션 구조까지만 확인했다(T4는 여전히 부분).
+- 멱등 기록에 도메인 결과를 JSON으로 저장한다. 결과 형태가 바뀌면 오래된 기록 호환 정책이 필요하다.
+- `createPgOrderApi`는 풀을 받기만 하며 접속 정보·환경 변수·HTTP 서버는 없다. 서버(E2: Node.js)에서 이 어댑터를 라우터에 연결하는 일이 남았다.
+- 읽기 경로의 `userId`가 UUID가 아니면 DB에 보내지 않고 FORBIDDEN/UNAUTHENTICATED로 처리한다(Supabase 사용자 ID는 UUID).
 

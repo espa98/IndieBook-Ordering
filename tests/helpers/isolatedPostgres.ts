@@ -13,6 +13,8 @@ export type IsolatedPostgres = {
   port: number;
   /** 새 독립 연결을 연다. 호출자가 end()한다 */
   connect(database?: string): Promise<pg.Client>;
+  /** 백엔드처럼 여러 연결을 돌려 쓰는 풀. stop()이 함께 닫는다 */
+  pool(database?: string): pg.Pool;
   stop(): Promise<void>;
 };
 
@@ -40,6 +42,7 @@ export async function startIsolatedPostgres(): Promise<IsolatedPostgres> {
   await server.initialise();
   await server.start();
   await server.createDatabase("bookflow_test");
+  const pools: pg.Pool[] = [];
   return {
     port,
     async connect(database = "bookflow_test") {
@@ -47,7 +50,13 @@ export async function startIsolatedPostgres(): Promise<IsolatedPostgres> {
       await client.connect();
       return client;
     },
+    pool(database = "bookflow_test") {
+      const pool = new pg.Pool({ host: "127.0.0.1", port, user: "postgres", password: "isolated-test-only", database, max: 8 });
+      pools.push(pool);
+      return pool;
+    },
     async stop() {
+      await Promise.all(pools.map((p) => p.end()));
       await server.stop();
       rmSync(dir, { recursive: true, force: true });
     },
