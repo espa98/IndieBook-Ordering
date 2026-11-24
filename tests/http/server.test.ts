@@ -298,6 +298,40 @@ describe("HTTP 서버: 입고·배분 (발주 → 입고 → 배분 → 인도)"
   });
 });
 
+describe("HTTP 서버: 취소 물량 처분 (재고 편입·반품 요청)", () => {
+  it("취소로 풀린 입고 배분 물량을 Owner만 재고로 편입하거나 반품 요청하고(Staff 403), 같은 물량은 한 번만 처분된다", async () => {
+    await seedStock(12, 1);
+    const o = await confirmedOrder(12, 2);
+    const c = await db.connect();
+    const po = (await c.query(`insert into public.ordering_purchase_orders (tenant_id, supplier_code, status, version) values ($1, 'sup-a', 'SENT', 3) returning id`, [T_A])).rows[0].id as string;
+    const poLine = (await c.query(`insert into public.ordering_po_lines (tenant_id, purchase_order_id, book_key, quantity) values ($1, $2, $3, 2) returning id`, [T_A, po, BOOK(12)])).rows[0].id as string;
+    await c.query(`insert into public.ordering_po_links (tenant_id, po_line_id, allocation_id, order_id, order_line_id, quantity) values ($1, $2, gen_random_uuid(), $3, $4, 2)`, [T_A, poLine, o.orderId, o.lineId]);
+    const receipt = await call(`/v1/tenants/${T_A}/purchase-orders/${po}/receipts`, { method: "POST", sub: STAFF_A, body: { poLineId: poLine, normalQuantity: 2, damagedQuantity: 0, misdeliveredQuantity: 0, receivedAt: "2026-03-04T06:35:00.000Z" } });
+    const allocation = await call(`/v1/tenants/${T_A}/receipts/${receipt.json.data.id}/allocations`, { method: "POST", sub: STAFF_A, body: { orderId: o.orderId, orderLineId: o.lineId, quantity: 2, allocatedAt: "2026-03-04T06:40:00.000Z" } });
+    const cancel = await call(`${orders()}/${o.orderId}/cancellation-requests`, { method: "POST", sub: STAFF_A, body: { orderLineId: o.lineId, quantity: 2, reason: "고객 요청", expectedVersion: 2, requestedAt: "2026-03-04T06:45:00.000Z" } });
+    const base = `/v1/tenants/${T_A}/order-cancellation-requests/${cancel.json.data.id}`;
+    await call(`${base}/decision`, { method: "POST", sub: OWNER_A, body: { decision: "APPROVED", decidedAt: "2026-03-04T06:47:00.000Z" } });
+    await call(`${base}/application`, { method: "POST", sub: OWNER_A, body: { appliedAt: "2026-03-04T06:49:00.000Z" } });
+    const cancellationId = (await c.query("select id from public.ordering_allocation_cancellations where allocation_id = $1", [allocation.json.data.id])).rows[0].id as string;
+    await c.end();
+
+    const intakePath = `/v1/tenants/${T_A}/allocation-cancellations/${cancellationId}/stock-intakes`;
+    const intakeBody = { quantity: 1, actedAt: "2026-03-04T06:55:00.000Z" };
+    expect((await call(intakePath, { method: "POST", sub: STAFF_A, body: intakeBody })).status).toBe(403);
+    const intaken = await call(intakePath, { method: "POST", sub: OWNER_A, body: intakeBody });
+    expect(intaken.status).toBe(201);
+    expect(intaken.json.data.intake).toMatchObject({ quantity: 1, actedBy: OWNER_A });
+
+    const returnPath = `/v1/tenants/${T_A}/allocation-cancellations/${cancellationId}/return-requests`;
+    const returnBody = { quantity: 1, requestedAt: "2026-03-04T06:56:00.000Z" };
+    expect((await call(returnPath, { method: "POST", sub: STAFF_A, body: returnBody })).status).toBe(403);
+    const requested = await call(returnPath, { method: "POST", sub: OWNER_A, body: returnBody });
+    expect(requested.status).toBe(201);
+    expect(requested.json.data).toMatchObject({ quantity: 1, supplierCode: "sup-a", requestedBy: OWNER_A });
+    expect((await call(returnPath, { method: "POST", sub: OWNER_A, body: returnBody })).status).toBe(422); // 처분 대기가 없다
+  });
+});
+
 describe("HTTP 서버: 입력 방어", () => {
   it("Idempotency-Key 누락·공백·128자 초과는 400이다", async () => {
     const body = { lines: lines() };

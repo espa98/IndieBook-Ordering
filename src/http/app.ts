@@ -1,5 +1,6 @@
 import { verifyJwt, type JwtVerifyOptions } from "../auth/jwt";
 import { createPgCancellationApi } from "../db/pgCancellationApi";
+import { createPgDispositionApi } from "../db/pgDispositionApi";
 import { createPgFulfillmentApi } from "../db/pgFulfillmentApi";
 import { createPgOrderApi } from "../db/pgOrderApi";
 import { createPgPaymentApi } from "../db/pgPaymentApi";
@@ -64,6 +65,7 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
   const fulfillments = createPgFulfillmentApi({ pool: deps.pool });
   const receiving = createPgReceivingApi({ pool: deps.pool });
   const cancellations = createPgCancellationApi({ pool: deps.pool });
+  const dispositions = createPgDispositionApi({ pool: deps.pool });
   const actor = (c: Ctx) => ({ userId: c.userId });
   // 본문은 신뢰할 수 없는 JSON이다. 형식 검증은 도메인이 하므로 여기서는 경계 타입만 맞춘다
   const merge = (c: Ctx, extra: Record<string, unknown>) => ({ ...c.body, ...extra }) as never;
@@ -133,6 +135,16 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
       success: 201,
       fields: ["expectedVersion", "requestedAt"],
       run: (c) => cancellations.requestOrderClosure(actor(c), merge(c, { tenantId: t(c), orderId: c.params.orderId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/allocation-cancellations/(?<cancellationId>[^/]+)/stock-intakes", {
+      success: 201,
+      fields: ["quantity", "actedAt"],
+      run: (c) => dispositions.transferCancelledToStock(actor(c), merge(c, { tenantId: t(c), cancellationId: c.params.cancellationId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/allocation-cancellations/(?<cancellationId>[^/]+)/return-requests", {
+      success: 201,
+      fields: ["quantity", "requestedAt"],
+      run: (c) => dispositions.requestReturn(actor(c), merge(c, { tenantId: t(c), cancellationId: c.params.cancellationId!, idempotencyKey: c.idempotencyKey })),
     }),
     route("POST", "/orders/(?<orderId>[^/]+)/payments", {
       success: 201,
