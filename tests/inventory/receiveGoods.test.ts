@@ -5,7 +5,8 @@ import { respondToCancellationRequest } from "../../src/procurement/respondToCan
 import { receiveGoods } from "../../src/inventory/receiveGoods";
 import { AppError } from "../../src/errors/AppError";
 import { thrown } from "../helpers/thrown";
-import { receivingScene } from "../helpers/inventoryFixtures";
+import { correctReceipt } from "../../src/inventory/correctReceipt";
+import { correctionScene, receivingScene } from "../helpers/inventoryFixtures";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -261,5 +262,25 @@ describe("receiveGoods: 검수 입고 (ST-R01, DEC-03: 입고와 고객 배분�
 
       expect((error as AppError).code).toBe("VALIDATION_ERROR");
     });
+  });
+
+  it("입고 정정으로 줄어든 정상 순량만큼 미입고량이 다시 늘어 정상 입고로 받을 수 있다 (BR-Q12)", () => {
+    const { deps, correctRequest, sent, poLineId } = correctionScene(); // 발주 6권, 정상 4권 입고
+    correctReceipt(deps, correctRequest({ quantity: 1 })); // 정상 순량 3 -> 미입고 3
+
+    const second = receiveGoods(deps, {
+      tenantId: "tenant-a",
+      purchaseOrderId: sent.id,
+      poLineId,
+      normalQuantity: 3,
+      damagedQuantity: 0,
+      misdeliveredQuantity: 0,
+      inspectedBy: "김검수",
+      receivedAt: "2026-03-04T06:50:00.000Z",
+      idempotencyKey: "recv-after-correction",
+    });
+
+    expect(second.normalQuantity).toBe(3);
+    expect(second.excessQuantity).toBe(0);
   });
 });

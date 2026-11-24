@@ -10,6 +10,7 @@ import {
 } from "../procurement/validation";
 import type { CancellationRepository } from "../procurement/createCancellationRequest";
 import type { PurchaseOrderRepository } from "../procurement/createPurchaseOrder";
+import type { ReceiptCorrectionRepository } from "./correctReceipt";
 import { poLineState } from "../procurement/poLineState";
 import type { PoReplyRepository } from "../procurement/recordSupplierReply";
 
@@ -36,6 +37,8 @@ export type GoodsReceiptRepository = {
 export type ReceiveGoodsDeps = {
   purchaseOrders: PurchaseOrderRepository;
   receipts: GoodsReceiptRepository;
+  /** 입고 정정은 정상 검수 순량을 줄여 미입고량을 늘린다 (BR-Q12) */
+  receiptCorrections: ReceiptCorrectionRepository;
   replies: PoReplyRepository;
   /** 공급처가 수락한 취소가 유효 발주량을 줄이므로 필요하다 (DEC-04) */
   cancellations: CancellationRepository;
@@ -129,10 +132,14 @@ export function receiveGoods(
           .filter((r) => r.poLineId === line.poLineId)
           .reduce((sum, r) => sum + r.acceptedQuantity, 0),
       );
-      const received = deps.receipts
+      const lineReceipts = deps.receipts
         .list(request.tenantId, po.id)
-        .filter((r) => r.poLineId === line.poLineId)
-        .reduce((sum, r) => sum + r.normalQuantity, 0);
+        .filter((r) => r.poLineId === line.poLineId);
+      const received =
+        lineReceipts.reduce((sum, r) => sum + r.normalQuantity, 0) -
+        lineReceipts
+          .flatMap((r) => deps.receiptCorrections.list(request.tenantId, r.id))
+          .reduce((sum, c) => sum + c.quantity, 0);
       // 정상 입고는 아직 받을 수 있는 양(Qopen)까지만, 넘는 만큼은 승인 전까지 별도로 둔다 (D30)
       const open = Math.max(0, qvalid - received);
       const posted = Math.min(request.normalQuantity, open);

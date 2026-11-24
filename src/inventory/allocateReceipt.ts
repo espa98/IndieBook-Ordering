@@ -5,6 +5,7 @@ import {
 } from "../idempotency/executeIdempotent";
 import { invalid, isNonEmptyString, parseUtcTimestamp } from "../procurement/validation";
 import { allocationState } from "./allocationState";
+import type { ReceiptCorrectionRepository } from "./correctReceipt";
 import type { AllocationReleaseRepository } from "./releaseAllocation";
 import type { PurchaseOrderRepository } from "../procurement/createPurchaseOrder";
 import type { GoodsReceiptRepository } from "./receiveGoods";
@@ -33,6 +34,7 @@ export type AllocateReceiptDeps = {
   receipts: GoodsReceiptRepository;
   receiptAllocations: ReceiptAllocationRepository;
   allocationReleases: AllocationReleaseRepository;
+  receiptCorrections: ReceiptCorrectionRepository;
   idempotency: IdempotencyStore;
   now?: () => Date;
 };
@@ -97,7 +99,12 @@ export function planAllocation(
       0,
     );
   const allocated = netOf(deps.receiptAllocations.list(request.tenantId, receipt.id));
-  if (allocated + request.quantity > receipt.normalQuantity) {
+  const netNormal =
+    receipt.normalQuantity -
+    deps.receiptCorrections
+      .list(request.tenantId, receipt.id)
+      .reduce((sum, c) => sum + c.quantity, 0);
+  if (allocated + request.quantity > netNormal) {
     throw new AppError(
       "BUSINESS_INVARIANT",
       "allocated quantity must not exceed the receipt's normal quantity",

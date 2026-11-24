@@ -15,6 +15,10 @@ import type {
   AllocationDelivery,
   DeliverAllocationRequest,
 } from "../../src/inventory/deliverAllocation";
+import type {
+  CorrectReceiptRequest,
+  ReceiptCorrection,
+} from "../../src/inventory/correctReceipt";
 import type { ReallocateAllocationRequest } from "../../src/inventory/reallocateAllocation";
 import { allocateReceipt } from "../../src/inventory/allocateReceipt";
 import { receiveGoods } from "../../src/inventory/receiveGoods";
@@ -184,7 +188,11 @@ export function excessScene() {
 export function receivingScene(options: Parameters<typeof sentScene>[0] = {}) {
   const s = sentScene(options);
   const receipts = createInMemoryReceiptRepository();
-  const deps = { ...s.deps, receipts };
+  const deps = {
+    ...s.deps,
+    receipts,
+    receiptCorrections: createInMemoryReceiptCorrectionRepository(),
+  };
   const request = (extra: Record<string, unknown> = {}) => ({
     tenantId: "tenant-a",
     purchaseOrderId: s.sent.id,
@@ -247,4 +255,38 @@ export function reallocationScene() {
     ...extra,
   });
   return { ...s, reallocateRequest };
+}
+
+export function createInMemoryReceiptCorrectionRepository() {
+  const all: ReceiptCorrection[] = [];
+  return {
+    list(tenantId: string, receiptId: string): ReceiptCorrection[] {
+      return all.filter((c) => c.tenantId === tenantId && c.receiptId === receiptId);
+    },
+    save(correction: ReceiptCorrection): void {
+      all.push(correction);
+    },
+  };
+}
+
+/** 4권이 정상 입고(미배분 4권)된 세계에서 입고 정정 요청을 만드는 세계 */
+export function correctionScene() {
+  const s = allocationScene();
+  const { receiptCorrections } = s.deps;
+  const deps = s.deps;
+  let seq = 0;
+  const correctRequest = (
+    extra: Partial<CorrectReceiptRequest> = {},
+  ): CorrectReceiptRequest => ({
+    tenantId: "tenant-a",
+    receiptId: s.receipt.id,
+    quantity: 1,
+    reason: "검수 수량 오기입, 실제로는 3권",
+    actorRole: "OWNER",
+    correctedBy: "점주",
+    correctedAt: "2026-03-04T06:45:00.000Z",
+    idempotencyKey: `cor-${++seq}`,
+    ...extra,
+  });
+  return { ...s, deps, receiptCorrections, correctRequest, allocateRequest: s.request };
 }

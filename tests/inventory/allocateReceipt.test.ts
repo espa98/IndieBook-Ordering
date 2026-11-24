@@ -2,9 +2,10 @@ import { describe, it, expect } from "vitest";
 import { AppError } from "../../src/errors/AppError";
 import { allocateReceipt } from "../../src/inventory/allocateReceipt";
 import { receiveGoods } from "../../src/inventory/receiveGoods";
+import { correctReceipt } from "../../src/inventory/correctReceipt";
 import { deliverAllocation } from "../../src/inventory/deliverAllocation";
 import { releaseAllocation } from "../../src/inventory/releaseAllocation";
-import { allocationScene, deliveryScene, releaseScene } from "../helpers/inventoryFixtures";
+import { allocationScene, correctionScene, deliveryScene, releaseScene } from "../helpers/inventoryFixtures";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -248,6 +249,27 @@ describe("allocateReceipt: 입고 수량의 고객별 배분 (ST-R04, UC-11, BR-
 
     expect(thrown).toBeInstanceOf(AppError);
     expect((thrown as AppError).code).toBe("BUSINESS_INVARIANT");
+    expect(deps.receiptAllocations.list("tenant-a", receipt.id)).toHaveLength(1);
+  });
+
+  it("입고 정정으로 줄어든 정상 순량(3)이 배분 한도가 된다", () => {
+    const { deps, correctRequest, allocateRequest, receipt, orders } = correctionScene();
+    correctReceipt(deps, correctRequest({ quantity: 1 })); // 정상 4 -> 순량 3
+    const to = (i: number, quantity: number) => {
+      try {
+        allocateReceipt(
+          deps,
+          allocateRequest({ orderId: orders[i]!.id, orderLineId: orders[i]!.lines[0]!.lineId, quantity }),
+        );
+      } catch (error) {
+        return error;
+      }
+    };
+
+    expect(to(1, 3)).toBeUndefined(); // 3/3
+    const over = to(0, 1); // 총 4 > 순량 3
+    expect(over).toBeInstanceOf(AppError);
+    expect((over as AppError).code).toBe("BUSINESS_INVARIANT");
     expect(deps.receiptAllocations.list("tenant-a", receipt.id)).toHaveLength(1);
   });
 });
