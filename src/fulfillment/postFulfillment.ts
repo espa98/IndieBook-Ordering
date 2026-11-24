@@ -47,6 +47,8 @@ export type Fulfillment = {
   receivedBy: string;
   receivedAt: string;
   recordedAt: string;
+  /** 정정 역거래 행이면 원 수령 참조. 수량·금액은 음수이며 순 수령량 합계에 그대로 합산된다 (ST-F02) */
+  correctsFulfillmentId?: string;
 };
 
 export type FulfillmentRepository = {

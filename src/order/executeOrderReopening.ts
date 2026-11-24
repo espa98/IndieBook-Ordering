@@ -4,6 +4,7 @@ import {
   type IdempotencyStore,
 } from "../idempotency/executeIdempotent";
 import { parseUtcTimestamp } from "../procurement/validation";
+import type { FulfillmentCorrectionRepository } from "../fulfillment/correctFulfillment";
 import type { PaymentCorrectionRepository } from "../payment/correctPayment";
 import type { OrderRepository } from "./confirmOrderService";
 import {
@@ -12,7 +13,9 @@ import {
   type EvaluateOrderClosureDeps,
 } from "./evaluateOrderClosure";
 
-export type ReopeningTrigger = { kind: "PAYMENT_CORRECTION"; id: string };
+export type ReopeningTrigger =
+  | { kind: "PAYMENT_CORRECTION"; id: string }
+  | { kind: "FULFILLMENT_CORRECTION"; id: string };
 
 /**
  * 종결 후 승인된 정정으로 종결 조건이 깨져 주문을 재개한 서버 기록 (추가 전용, ST-O10).
@@ -39,6 +42,8 @@ export type OrderReopeningRepository = {
 export type ExecuteOrderReopeningDeps = EvaluateOrderClosureDeps & {
   orders: OrderRepository;
   paymentCorrections: PaymentCorrectionRepository;
+  /** 수령 정정(ST-F02)을 재개 근거로 받으려면 필요하다 */
+  fulfillmentCorrections?: Pick<FulfillmentCorrectionRepository, "list">;
   orderReopenings: OrderReopeningRepository;
   idempotency: IdempotencyStore;
   now?: () => Date;
@@ -81,7 +86,11 @@ export function executeOrderReopening(
       if (!order) {
         throw new AppError("NOT_FOUND");
       }
-      const correction = deps.paymentCorrections.get(request.tenantId, request.trigger.id);
+      const triggerId = request.trigger.id;
+      const correction =
+        request.trigger.kind === "FULFILLMENT_CORRECTION"
+          ? deps.fulfillmentCorrections?.list(request.tenantId, order.id).find((c) => c.id === triggerId)
+          : deps.paymentCorrections.get(request.tenantId, triggerId);
       if (!correction) {
         throw new AppError("NOT_FOUND");
       }
