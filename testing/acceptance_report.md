@@ -8,7 +8,7 @@
 
 | 영역 | 판정 | 한 줄 근거 |
 |---|---|---|
-| 도메인 단위·통합(메모리 저장소) | **PASS** | `npx vitest run` 95 files / 1032 tests 통과, 실패 0 |
+| 도메인 단위·통합(메모리 저장소) | **PASS** | `npx vitest run` 100 files / 1050 tests 통과, 실패 0 |
 | 타입 검사 | **PASS** | `npx tsc --noEmit` 출력 없음 |
 | OpenAPI 스키마·계약 | **PARTIAL** | 주문 API(05단계)만 명세가 있고 26개 통과. 나머지 영역은 명세·구현 없음 |
 | HTTP | **PARTIAL** | 핸들러 단위 41개 통과. 실제 서버·라우터·JWT 없음 |
@@ -25,7 +25,7 @@
 
 | 명령 | 결과 |
 |---|---|
-| `npx vitest run` | files 95, tests 1032, passed 1032, failed 0 (인증 계층 추가 후 재실행. 아래 디렉터리별 표는 21e22e3 기준 JSON 집계에 auth 변경만 반영) |
+| `npx vitest run` | files 100, tests 1050, passed 1050, failed 0 (직원 관리·카탈로그 추가 후 재실행. 디렉터리별 표도 이 실행의 JSON 집계) |
 | `npx tsc --noEmit` | 출력 없음(오류 0) |
 | 정적 점검: `git ls-files` 파일명(.env·secret·credential·pem·key) | 해당 없음 |
 | 정적 점검: `src tests openapi implementation package.json`에서 JWT·키 패턴, `ordering-dev`·`testBookshare` 프로젝트 ID, `service_role` grep | 해당 없음 |
@@ -36,6 +36,7 @@
 | 디렉터리 | 파일 | 테스트 |
 |---|---|---|
 | auth | 8 | 42 |
+| catalog | 5 | 18 |
 | errors | 1 | 8 |
 | http | 3 | 41 |
 | idempotency | 2 | 53 |
@@ -49,7 +50,7 @@
 | closure | 4 | 15 |
 | cancellation | 5 | 25 |
 | reopening | 1 | 6 |
-| **합계** | **95** | **1032** |
+| **합계** | **100** | **1050** |
 
 (`tests/helpers`는 테스트 파일이 없는 공용 픽스처다.)
 
@@ -67,7 +68,7 @@
 | 수령 ST-F | F01 | F02 | F03(P1) |
 | 결제·환급 ST-Y | Y01~Y04, Y06 | Y05, Y07 | Y08·Y09(P2) |
 | 인증·계정 ST-A | — | A03·A04·A05·A08 일부 | A01, A02, A06, A07 |
-| 도서·공급처 ST-B | — | — | 전부 |
+| 도서·공급처·템플릿 ST-B | — | B01~B05 도메인 로직 | YES24 검색 연동 |
 
 **PARTIAL의 의미:** 도메인 규칙은 구현·테스트했으나 아래 한계 중 하나가 남은 것이다. 항목별 한계는 `testing/test_matrix.csv`의 notes에 있다.
 - ST-O05/O06: 공급처 의무는 `supplierObligations`로 부분 처리(§9). 미응답·거절 판정은 없음.
@@ -77,7 +78,7 @@
 - ST-F02: Owner 단일 명령. 정정 직후 안내·결제 영향 점검 없음.
 - ST-Y05: 과수납 사유만. ST-Y07: 수동 증빙 모델의 시도 결과 기록·UNKNOWN 예약·조회 해소만.
 
-**P0 범위의 미구현 중 릴리스에 영향이 큰 것:** 인증·테넌트·직원 관리(ST-A01~A08), 도서·공급처·템플릿 관리(ST-B01~B05). 이 외 P0 상태 전이의 도메인 로직은 모두 PASS 또는 PARTIAL이 되었다(주문 보류·가격 변경·초안 폐기는 정책 미승인 또는 범위 밖).
+**P0 범위의 미구현 중 릴리스에 영향이 큰 것:** 인증·서점 개설·이메일 인증(ST-A01/A02/A06/A07). 도서·공급처·템플릿(ST-B)은 도메인 로직까지 구현했고 외부 YES24 연동만 없다. 이 외 P0 상태 전이의 도메인 로직은 모두 PASS 또는 PARTIAL이 되었다(주문 보류·가격 변경·초안 폐기는 정책 미승인 또는 범위 밖).
 
 ## 3. 게이트 G0~G7 (구현현황표 기준)
 
@@ -138,7 +139,7 @@
 | 6d9bb13 | 해제 후 남는 공급처 의무 파생, 주문 종결 차단, 재조달 중복 위험 승인 | BR-P05 |
 | 21e22e3 | 파손·오배송 처리 기록과 발주 종결 차단 | BR-P06, ST-R01 |
 
-테스트는 968 → 1005개(+37), 파일은 76 → 88개(+12)다. 그 뒤 인증·권한 계층(§10)으로 1032개, 95 files가 되었다(직원 관리 ST-A03~A05 포함, §10.1).
+테스트는 968 → 1005개(+37), 파일은 76 → 88개(+12)다. 그 뒤 인증·권한 계층(§10)으로 1050개, 100 files가 되었다(직원 관리 §10.1, 카탈로그 §11).
 
 ### 9.1 이번 갱신에서 새로 생긴 위험·주의
 
@@ -161,7 +162,7 @@
 | `resolvePrincipal` | 검증이 끝난 신원(userId·tenantId·sessionExpiresAt)에서 USER 주체를 만든다. 역할은 멤버십에서 온다. 세션 만료·형식 오류는 UNAUTHENTICATED, 비활성·타 테넌트·비멤버는 같은 FORBIDDEN. 멤버십은 매 호출 다시 읽어 직원 비활성화가 즉시 반영된다(ST-A05, ST-A08) |
 | `createSystemPrincipal` | 서버 내부 업무용 SYSTEM 주체 |
 | `bindActor` | 명령의 `tenantId`·역할·행위자 이름·`executedBy`를 요청 본문이 아니라 주체에서 주입하고(위조 값은 덮어씀), 허용되지 않은 주체는 명령을 호출하기 전에 FORBIDDEN으로 거부 |
-| `authorizedActions` | 역할·SYSTEM 실행자·행위자 이름(`...By`)·테넌트를 요청으로 받는 59개 명령을 바인딩한 모음(역할/SYSTEM 19개 + 행위자 이름 31개 + 테넌트만 주입 9개 = 59개). 구조 테스트 3개가 `actorRole`·`executedBy`를 받거나, 멱등 키와 `...By` 필드를 가졌거나, 멱등 키와 `tenantId`를 가진 명령 파일이 이 모음에서 빠지면 실패시킨다 |
+| `authorizedActions` | 역할·SYSTEM 실행자·행위자 이름(`...By`)·테넌트를 요청으로 받는 68개 명령을 바인딩한 모음(역할/SYSTEM 19개 + 행위자 이름 31개 + 테넌트만 주입 9개 + 직원 관리 3개 + 카탈로그 6개). 구조 테스트 3개가 `actorRole`·`executedBy`를 받거나, 멱등 키와 `...By` 필드를 가졌거나, 멱등 키와 `tenantId`를 가진 명령 파일이 이 모음에서 빠지면 실패시킨다 |
 
 **남은 한계**
 - 외부 진입점이 `authorizedActions` 대신 도메인 함수를 직접 호출하면 우회된다. 진입점 규약과 서버 조립에서 강제해야 한다.
@@ -188,4 +189,27 @@
 - 멱등 재생은 같은 응답(토큰 포함)을 돌려준다. 멱등 저장소에 평문 토큰이 남는 점에 유의해야 한다.
 - Owner 추가·강등·역할 변경·탈퇴는 없다. 초대 수락에는 `authorizedActions`를 쓰지 않는다(테넌트가 토큰에서 정해지고 주체가 아직 없음).
 - 중복 초대 검사는 `invitations.list`를 전수 조회한다(메모리 저장소 가정).
+
+## 11. 도서·공급처·문구 템플릿 (ST-B01~B05, `src/catalog`)
+
+테스트 18개(`tests/catalog`). 모든 명령은 `authorizedActions`에 바인딩했다(68개 중 6개).
+
+| 명령 | 전이 | 규칙 |
+|---|---|---|
+| `registerBook` | ST-B01/B02 | YES24 선택은 출처·외부 ID·조회 시각 필수, 수기는 사유 필수, 판매가는 양의 정수 문자열, ISBN은 숫자만 정규화(10/13자리 형식만 검증). 같은 ISBN의 도서는 중복 후보로 거부하고 확인 표시(`acknowledgeDuplicateOf`)가 있어도 병합하지 않음 |
+| `updateBook` | ST-B03 | version 검사, 수정 전·후 값을 이력에 보존, 출처 정보 불변, ISBN 변경 시 중복 후보 확인. 기존 주문 단가는 주문 품목이 따로 갖고 있어 불변 |
+| `registerSupplier`·`updateSupplier`·`setSupplierActive` | ST-B04, SUP-001/002 | Owner 또는 점주가 위임한 직원. 발주 방식(WEB·EMAIL·PHONE·MESSENGER·FILE·API) 기록, 코드 중복 차단, 변경 이력. 비활성화는 신규 배정을 막고 진행 중 발주를 바꾸지 않으며 그 발주를 이력에 기록 |
+| `publishTemplateVersion`·`renderTemplate` | ST-B05 | 버전 vN→vN+1 추가 전용, 최신 버전 불일치는 VERSION_CONFLICT, 허용 변수 6종만(연락처·이름 제외), 이전 버전은 그대로 렌더링 가능 |
+
+**해석·승인 필요**
+- 허용 문구 변수 목록(`ALLOWED_TEMPLATE_VARIABLES`)과 개인정보 제외는 DEC-12 법률 검토 전의 보수적 해석이다.
+- 공급처 관리는 Owner 또는 "위임 직원"이다. 위임 저장소(`managementDelegations`)는 재고 조정 위임과 별개로 주입하며, 위임을 부여하는 명령은 아직 없다.
+- 도서 `listPriceKrw`는 판매가이고 DEC-08(확정 가격 변경)과 무관하다. 주문 품목은 제목·ISBN 스냅샷을 저장하지 않고 `bookId`와 단가만 가진다(BOOK-007 부분).
+
+**한계**
+- YES24 검색·조회 연동은 없다(DEC-17 외부 권한 검증 필요). 외부 결과는 호출자가 넘기는 값이며 시스템이 검증하지 않는다.
+- ISBN 체크 숫자는 검증하지 않는다. 제목·저자 기반 중복 후보는 찾지 않는다.
+- 도서 비활성화·삭제, 서점별 취급·가격·메모 분리(BOOK-008, P1), 도서 검색(BOOK-005)은 구현하지 않았다.
+- 공급처 코드는 영문 소문자·숫자·하이픈이며 기존 공급처 모델에 `name`·`orderChannel`·`version`을 선택 필드로 추가했다(기존 데이터는 `version` 없음을 1로 본다).
+- 주문 생성(`createOrderService`)은 도서 레코드를 조회하지 않는다. 존재하지 않는 `bookId`도 주문에 담긴다.
 
