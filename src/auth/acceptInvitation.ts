@@ -3,6 +3,7 @@ import {
   executeIdempotent,
   type IdempotencyStore,
 } from "../idempotency/executeIdempotent";
+import type { AccountPrincipal } from "./accountPrincipal";
 import type { Membership, MembershipRepository } from "./authorizeTenantAccess";
 import {
   hashInvitationToken,
@@ -77,4 +78,24 @@ export function acceptInvitation(
       return membership;
     },
   );
+}
+
+/**
+ * 확인된 계정 주체로 초대를 수락한다. 사용자 ID와 확인된 이메일을 요청이 아니라 계정에서 가져오므로
+ * 호출자가 다른 사람의 이메일을 주장할 수 없다. 이메일을 인증하지 않은 계정은 거부한다 (ST-A01, ST-A03).
+ */
+export function acceptInvitationAsAccount(
+  deps: AcceptInvitationDeps,
+  principal: AccountPrincipal,
+  request: { token: string; idempotencyKey: string },
+): Membership {
+  if (!principal.verified) {
+    throw new AppError("FORBIDDEN");
+  }
+  return acceptInvitation(deps, {
+    token: request.token,
+    userId: principal.userId,
+    verifiedEmail: principal.email,
+    idempotencyKey: request.idempotencyKey,
+  });
 }
