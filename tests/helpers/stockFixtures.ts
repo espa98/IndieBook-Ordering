@@ -1,5 +1,9 @@
 import type { ReserveStockRequest } from "../../src/inventory/reserveStock";
 import type {
+  DeliverStockReservationRequest,
+  StockReservationDelivery,
+} from "../../src/inventory/deliverStockReservation";
+import type {
   ReleaseStockReservationRequest,
   StockReservationRelease,
 } from "../../src/inventory/releaseStockReservation";
@@ -77,11 +81,24 @@ export function createInMemoryStockReservationReleaseRepository() {
   };
 }
 
+export function createInMemoryStockReservationDeliveryRepository() {
+  const all: StockReservationDelivery[] = [];
+  return {
+    list(tenantId: string, reservationId: string): StockReservationDelivery[] {
+      return all.filter((d) => d.tenantId === tenantId && d.reservationId === reservationId);
+    },
+    save(delivery: StockReservationDelivery): void {
+      all.push(delivery);
+    },
+  };
+}
+
 /** book-1 재고 5권이 Owner에 의해 초기 등록된 세계 */
 export function adjustScene() {
   const base = stockScene();
   const stockReservations = createInMemoryStockReservationRepository();
   const stockReservationReleases = createInMemoryStockReservationReleaseRepository();
+  const stockReservationDeliveries = createInMemoryStockReservationDeliveryRepository();
   // 점주가 재고 조정을 명시적으로 위임한 직원 (DEC-19)
   const delegated = new Set<string>();
   const stockDelegations = {
@@ -90,9 +107,16 @@ export function adjustScene() {
   };
   const s = {
     ...base,
-    deps: { ...base.deps, stockReservations, stockReservationReleases, stockDelegations },
+    deps: {
+      ...base.deps,
+      stockReservations,
+      stockReservationReleases,
+      stockReservationDeliveries,
+      stockDelegations,
+    },
     stockReservations,
     stockReservationReleases,
+    stockReservationDeliveries,
     stockDelegations,
   };
   registerInitialStock(s.deps, s.initialRequest({ quantity: 5 }));
@@ -156,4 +180,22 @@ export function reservationReleaseScene() {
     ...extra,
   });
   return { ...s, deps, reservation, stockReservationReleases, releaseRequest };
+}
+
+/** reservationReleaseScene(주문이 2권 예약)에서 인도 요청을 만드는 세계 */
+export function reservationDeliveryScene() {
+  const s = reservationReleaseScene();
+  let seq = 0;
+  const deliverRequest = (
+    extra: Partial<DeliverStockReservationRequest> = {},
+  ): DeliverStockReservationRequest => ({
+    tenantId: "tenant-a",
+    reservationId: s.reservation.id,
+    quantity: 1,
+    deliveredBy: "김직원",
+    deliveredAt: "2026-03-04T06:55:00.000Z",
+    idempotencyKey: `rdlv-${++seq}`,
+    ...extra,
+  });
+  return { ...s, deliverRequest };
 }

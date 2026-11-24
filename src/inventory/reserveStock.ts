@@ -13,6 +13,7 @@ import {
   type StockReservation,
   type StockReservationRepository,
 } from "./stockReservation";
+import type { StockReservationDeliveryRepository } from "./deliverStockReservation";
 import type { StockReservationReleaseRepository } from "./releaseStockReservation";
 
 /** 예약 기록. 생성 근거(담당자·업무 시각·기록 시각)를 함께 남긴다. */
@@ -29,6 +30,7 @@ export type ReserveStockDeps = {
   stockMovements: StockMovementRepository;
   stockReservations: StockReservationRepository;
   stockReservationReleases: StockReservationReleaseRepository;
+  stockReservationDeliveries: Pick<StockReservationDeliveryRepository, "list">;
   idempotency: IdempotencyStore;
   now?: () => Date;
 };
@@ -84,7 +86,7 @@ export function reserveStock(
           "stock can only be reserved for a confirmed order",
         );
       }
-      const { reservations, releases } = readReservationLedger(
+      const { reservations, releases, deliveries } = readReservationLedger(
         deps,
         request.tenantId,
         line.bookId,
@@ -93,6 +95,7 @@ export function reserveStock(
         deps.stockMovements.list(request.tenantId, line.bookId),
         reservations,
         releases,
+        deliveries,
       );
       if (request.quantity > available) {
         throw new AppError(

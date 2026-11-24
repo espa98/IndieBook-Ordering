@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { AppError } from "../../src/errors/AppError";
 import { adjustStock } from "../../src/inventory/adjustStock";
+import { deliverStockReservation } from "../../src/inventory/deliverStockReservation";
 import { releaseStockReservation } from "../../src/inventory/releaseStockReservation";
-import { adjustScene, reservationReleaseScene } from "../helpers/stockFixtures";
+import { adjustScene, reservationDeliveryScene, reservationReleaseScene } from "../helpers/stockFixtures";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -190,5 +191,20 @@ describe("adjustStock: 재고 증감 조정 (ST-I02, UC-26, BR-Q09/Q22, DEC-19)"
     releaseStockReservation(deps, releaseRequest({ reservationId: reservation.id, quantity: 2 }));
 
     expect(out(4)).toBeUndefined(); // 보유 1 >= 예약 0
+  });
+
+  it("예약 인도 후에는 인도로 줄어든 보유와 예약 기준으로 조정 한도가 계산된다", () => {
+    const { deps, adjustRequest, deliverRequest } = reservationDeliveryScene(); // 보유 5, 예약 2
+    deliverStockReservation(deps, deliverRequest({ quantity: 2 })); // 보유 3, 예약 0
+    const out = (quantity: number) => {
+      try {
+        adjustStock(deps, adjustRequest({ direction: "OUT", quantity, reason: "분실" }));
+      } catch (error) {
+        return error;
+      }
+    };
+
+    expect(out(4)).toBeInstanceOf(AppError); // 보유 3 < 4
+    expect(out(3)).toBeUndefined(); // 예약 0이라 보유 전량 조정 가능
   });
 });

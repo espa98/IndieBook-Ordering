@@ -1,4 +1,5 @@
 import type { StockMovement } from "./registerInitialStock";
+import type { StockReservationDelivery } from "./deliverStockReservation";
 import type { StockReservationRelease } from "./releaseStockReservation";
 import type { StockReservation } from "./stockReservation";
 
@@ -9,14 +10,15 @@ export function stockLevel(
   movements: readonly StockMovement[],
   reservations: readonly StockReservation[],
   releases: readonly StockReservationRelease[] = [],
+  deliveries: readonly StockReservationDelivery[] = [],
 ): StockLevel {
   const onHand = movements.reduce(
     (sum, m) => sum + (m.direction === "IN" ? m.quantity : -m.quantity),
     0,
   );
-  // 예약량 R = 생성 - 해제 (BR-Q03). 인도(ST-I05)는 아직 반영하지 않는다.
-  const reserved =
-    reservations.reduce((sum, r) => sum + r.quantity, 0) -
-    releases.reduce((sum, r) => sum + r.quantity, 0);
+  // 미인도 예약량 R = 생성 - 해제 - 인도 (BR-Q03). 인도된 양은 보유 원장에서도 빠져 있다.
+  const sum = (items: readonly { quantity: number }[]) =>
+    items.reduce((total, i) => total + i.quantity, 0);
+  const reserved = sum(reservations) - sum(releases) - sum(deliveries);
   return { onHand, reserved, available: onHand - reserved };
 }

@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { AppError } from "../../src/errors/AppError";
+import { deliverStockReservation } from "../../src/inventory/deliverStockReservation";
 import { releaseStockReservation } from "../../src/inventory/releaseStockReservation";
-import { reservationReleaseScene } from "../helpers/stockFixtures";
+import { reservationDeliveryScene, reservationReleaseScene } from "../helpers/stockFixtures";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -123,5 +124,21 @@ describe("releaseStockReservation: 주문 재고 예약 해제 (ST-I04, UC-27, B
     expect((thrown as AppError).code).toBe("IDEMPOTENCY_CONFLICT");
     expect((thrown as AppError).httpStatus).toBe(409);
     expect(deps.stockReservationReleases.list("tenant-a", reservation.id)).toHaveLength(1);
+  });
+
+  it("이미 인도한 수량은 해제할 수 없고 미인도 잔량만 해제할 수 있다", () => {
+    const { deps, deliverRequest, releaseRequest } = reservationDeliveryScene(); // 예약 2
+    deliverStockReservation(deps, deliverRequest({ quantity: 1 })); // 인도 1 -> 미인도 1
+
+    let thrown: unknown;
+    try {
+      releaseStockReservation(deps, releaseRequest({ quantity: 2 }));
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AppError);
+    expect((thrown as AppError).code).toBe("BUSINESS_INVARIANT");
+    expect(releaseStockReservation(deps, releaseRequest({ quantity: 1 })).quantity).toBe(1);
   });
 });

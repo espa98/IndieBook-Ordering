@@ -13,10 +13,12 @@ export type StockMovement = {
   id: string;
   tenantId: string;
   bookId: string;
-  kind: "INITIAL" | "ADJUST";
+  kind: "INITIAL" | "ADJUST" | "DELIVERY";
   direction: "IN" | "OUT";
   quantity: number;
   reason: string;
+  /** 예약 인도로 생긴 항목의 원 예약 참조 (정정·감사 추적용) */
+  reservationId?: string;
   actedBy: string;
   actedAt: string;
   recordedAt: string;

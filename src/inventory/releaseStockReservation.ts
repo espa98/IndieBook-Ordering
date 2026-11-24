@@ -4,6 +4,7 @@ import {
   type IdempotencyStore,
 } from "../idempotency/executeIdempotent";
 import { invalid, isNonEmptyString, parseUtcTimestamp } from "../procurement/validation";
+import type { StockReservationDeliveryRepository } from "./deliverStockReservation";
 import type { StockReservationRepository } from "./stockReservation";
 
 /** 재고 예약 해제 기록 (추가 전용). 원 예약과 재고 원장(보유)은 바꾸지 않는다 (ST-I04). */
@@ -27,6 +28,7 @@ export type StockReservationReleaseRepository = {
 export type ReleaseStockReservationDeps = {
   stockReservations: StockReservationRepository;
   stockReservationReleases: StockReservationReleaseRepository;
+  stockReservationDeliveries: Pick<StockReservationDeliveryRepository, "list">;
   idempotency: IdempotencyStore;
   now?: () => Date;
 };
@@ -74,10 +76,12 @@ export function releaseStockReservation(
       if (!reservation) {
         throw new AppError("NOT_FOUND");
       }
-      const released = deps.stockReservationReleases
-        .list(request.tenantId, reservation.id)
-        .reduce((sum, r) => sum + r.quantity, 0);
-      if (request.quantity > reservation.quantity - released) {
+      const sum = (items: { quantity: number }[]) =>
+        items.reduce((total, i) => total + i.quantity, 0);
+      const released = sum(deps.stockReservationReleases.list(request.tenantId, reservation.id));
+      const delivered = sum(deps.stockReservationDeliveries.list(request.tenantId, reservation.id));
+      // 미인도 예약만 해제할 수 있다 (ST-I04)
+      if (request.quantity > reservation.quantity - released - delivered) {
         throw new AppError(
           "BUSINESS_INVARIANT",
           "released quantity must not exceed the reservation's remaining quantity",
