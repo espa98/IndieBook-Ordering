@@ -5,6 +5,7 @@ import {
 } from "../idempotency/executeIdempotent";
 import { invalid, isNonEmptyString, parseUtcTimestamp } from "../procurement/validation";
 import type { ReturnDispatchRepository } from "./dispatchReturn";
+import type { ReturnExceptionRepository } from "./reportReturnException";
 import type { ReturnRequestRepository } from "./requestReturn";
 
 /** 반품 완료 기록 (추가 전용). 공급처의 최종 확인 근거를 남기며 비용 후속은 분리한다 (ST-C05). */
@@ -28,6 +29,7 @@ export type CompleteReturnDeps = {
   returnRequests: ReturnRequestRepository;
   returnDispatches: Pick<ReturnDispatchRepository, "list">;
   returnCompletions: ReturnCompletionRepository;
+  returnExceptions: Pick<ReturnExceptionRepository, "list">;
   idempotency: IdempotencyStore;
   now?: () => Date;
 };
@@ -81,8 +83,11 @@ export function completeReturn(
       const completed = deps.returnCompletions
         .list(request.tenantId, returnRequest.id)
         .reduce((sum, c) => sum + c.quantity, 0);
+      const excepted = deps.returnExceptions
+        .list(request.tenantId, returnRequest.id)
+        .reduce((sum, e) => sum + e.quantity, 0);
       // 실제로 출고한 수량만 완료할 수 있다. 요청이나 수락을 반품 완료로 간주하지 않는다 (BR-C02)
-      if (request.quantity > dispatched - completed) {
+      if (request.quantity > dispatched - completed - excepted) {
         throw new AppError(
           "BUSINESS_INVARIANT",
           "completed quantity must not exceed the dispatched uncompleted quantity",

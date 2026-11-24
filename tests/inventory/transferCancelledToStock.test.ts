@@ -3,8 +3,9 @@ import { AppError } from "../../src/errors/AppError";
 import { transferCancelledToStock } from "../../src/inventory/transferCancelledToStock";
 import { requestReturn } from "../../src/inventory/requestReturn";
 import { cancelAllocation } from "../../src/inventory/cancelAllocation";
+import { resolveReturnException } from "../../src/inventory/resolveReturnException";
 import { recordReturnReply } from "../../src/inventory/recordReturnReply";
-import { cancellationScene, intakeScene, returnReplyScene, returnScene } from "../helpers/inventoryFixtures";
+import { cancellationScene, intakeScene, resolutionScene, returnReplyScene, returnScene } from "../helpers/inventoryFixtures";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -148,6 +149,8 @@ describe("transferCancelledToStock: 취소 도서 매장 재고 편입 (ST-C06, 
       stockIntakes: { list: () => [] as never[], save() {} },
       returnRequests: { list: () => [] as never[] },
       returnReplies: { list: () => [] as never[] },
+      returnExceptions: { list: () => [] as never[] },
+      returnExceptionResolutions: { list: () => [] as never[] },
     };
     const cancellation = cancelAllocation(deps, base.cancelRequest({ quantity: 2 }));
 
@@ -230,6 +233,41 @@ describe("transferCancelledToStock: 취소 도서 매장 재고 편입 (ST-C06, 
     recordReturnReply(deps, replyRequest({ acceptedQuantity: 1, rejectedQuantity: 1 })); // 거절 1
 
     expect(intake(2)).toBeInstanceOf(AppError); // 처분 대기는 거절된 1뿐
+    expect(intake(1)).toBeUndefined();
+    expect(intake(1)).toBeInstanceOf(AppError);
+  });
+
+  it("출고 후 반송·분실로 신고됐지만 아직 회수되지 않은 수량은 재고로 편입할 수 없다 (미회수 편입 금지)", () => {
+    const { deps, transferRequest, cancellation, stockMovements } = resolutionScene(); // 요청 2, 출고·반송 1(미회수)
+    const before = stockMovements.list("tenant-a", "book-1").length;
+
+    let thrown: unknown;
+    try {
+      transferCancelledToStock(deps, transferRequest({ quantity: 1 }));
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AppError);
+    expect((thrown as AppError).code).toBe("BUSINESS_INVARIANT");
+    expect(deps.stockIntakes.list("tenant-a", cancellation.id)).toEqual([]);
+    expect(stockMovements.list("tenant-a", "book-1")).toHaveLength(before);
+  });
+
+  it("실물 회수·검수 확인된(RECOVERED) 수량만 처분 대기로 돌아와 재고로 편입할 수 있다", () => {
+    const { deps, transferRequest, resolveRequest } = resolutionScene(); // 출고·반송 1(미회수)
+    const intake = (quantity: number) => {
+      try {
+        transferCancelledToStock(deps, transferRequest({ quantity }));
+      } catch (error) {
+        return error;
+      }
+    };
+
+    expect(intake(1)).toBeInstanceOf(AppError); // 미회수
+    resolveReturnException(deps, resolveRequest({ outcome: "RECOVERED", quantity: 1 }));
+
+    expect(intake(2)).toBeInstanceOf(AppError); // 회수된 1뿐
     expect(intake(1)).toBeUndefined();
     expect(intake(1)).toBeInstanceOf(AppError);
   });

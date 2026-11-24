@@ -23,6 +23,15 @@ import type {
   AllocationCancellation,
   CancelAllocationRequest,
 } from "../../src/inventory/cancelAllocation";
+import type { RenegotiateReturnRequest } from "../../src/inventory/renegotiateReturn";
+import type {
+  ResolveReturnExceptionRequest,
+  ReturnExceptionResolution,
+} from "../../src/inventory/resolveReturnException";
+import type {
+  ReportReturnExceptionRequest,
+  ReturnException,
+} from "../../src/inventory/reportReturnException";
 import type {
   CompleteReturnRequest,
   ReturnCompletion,
@@ -43,6 +52,7 @@ import type {
   StockIntake,
   TransferCancelledToStockRequest,
 } from "../../src/inventory/transferCancelledToStock";
+import { reportReturnException } from "../../src/inventory/reportReturnException";
 import { dispatchReturn } from "../../src/inventory/dispatchReturn";
 import { recordReturnReply } from "../../src/inventory/recordReturnReply";
 import { requestReturn } from "../../src/inventory/requestReturn";
@@ -383,7 +393,17 @@ export function intakeScene() {
   const stockIntakes = createInMemoryStockIntakeRepository();
   const returnRequests = createInMemoryReturnRequestRepository();
   const returnReplies = createInMemoryReturnReplyRepository();
-  const deps = { ...s.deps, stockMovements, stockIntakes, returnRequests, returnReplies };
+  const returnExceptions = createInMemoryReturnExceptionRepository();
+  const returnExceptionResolutions = createInMemoryReturnExceptionResolutionRepository();
+  const deps = {
+    ...s.deps,
+    stockMovements,
+    stockIntakes,
+    returnRequests,
+    returnReplies,
+    returnExceptions,
+    returnExceptionResolutions,
+  };
   registerInitialStock(deps, {
     tenantId: "tenant-a",
     bookId: "book-1",
@@ -407,7 +427,7 @@ export function intakeScene() {
     idempotencyKey: `int-${++seq}`,
     ...extra,
   });
-  return { ...s, deps, cancellation, stockMovements, stockIntakes, returnRequests, returnReplies, intakeRequest };
+  return { ...s, deps, cancellation, stockMovements, stockIntakes, returnRequests, returnReplies, returnExceptions, returnExceptionResolutions, intakeRequest };
 }
 
 export function createInMemoryReturnRequestRepository() {
@@ -530,6 +550,7 @@ export function createInMemoryReturnCompletionRepository() {
 export function completionScene() {
   const s = dispatchScene();
   const returnCompletions = createInMemoryReturnCompletionRepository();
+  const { returnExceptions } = s;
   const deps = { ...s.deps, returnCompletions };
   dispatchReturn(deps, s.dispatchRequest({ quantity: 1, idempotencyKey: "dsp-scene" }));
   let seq = 0;
@@ -545,5 +566,104 @@ export function completionScene() {
     idempotencyKey: `cmp-${++seq}`,
     ...extra,
   });
-  return { ...s, deps, returnCompletions, completeRequest };
+  return { ...s, deps, returnCompletions, returnExceptions, completeRequest };
+}
+
+export function createInMemoryReturnExceptionRepository() {
+  const all: ReturnException[] = [];
+  return {
+    get(tenantId: string, id: string): ReturnException | undefined {
+      return all.find((e) => e.tenantId === tenantId && e.id === id);
+    },
+    list(tenantId: string, returnRequestId: string): ReturnException[] {
+      return all.filter((e) => e.tenantId === tenantId && e.returnRequestId === returnRequestId);
+    },
+    save(exception: ReturnException): void {
+      all.push(exception);
+    },
+  };
+}
+
+/** completionScene(요청 2, 수락·출고 1, 완료 0)에서 반송·분실을 신고하는 세계 */
+export function exceptionScene() {
+  const s = completionScene();
+  const { returnExceptions, deps } = s;
+  let seq = 0;
+  const exceptionRequest = (
+    extra: Partial<ReportReturnExceptionRequest> = {},
+  ): ReportReturnExceptionRequest => ({
+    tenantId: "tenant-a",
+    returnRequestId: s.returnRequestRecord.id,
+    quantity: 1,
+    kind: "RETURNED_BACK",
+    evidence: "택배사 반송 통보 2026-03-07",
+    reportedBy: "김직원",
+    reportedAt: "2026-03-04T06:59:55.000Z",
+    idempotencyKey: `exc-${++seq}`,
+    ...extra,
+  });
+  return { ...s, deps, returnExceptions, exceptionRequest };
+}
+
+export function createInMemoryReturnExceptionResolutionRepository() {
+  const all: ReturnExceptionResolution[] = [];
+  return {
+    list(tenantId: string, returnExceptionId: string): ReturnExceptionResolution[] {
+      return all.filter(
+        (r) => r.tenantId === tenantId && r.returnExceptionId === returnExceptionId,
+      );
+    },
+    save(resolution: ReturnExceptionResolution): void {
+      all.push(resolution);
+    },
+  };
+}
+
+/** exceptionScene에서 출고 1권이 반송 예외로 신고된(미회수) 세계 */
+export function resolutionScene() {
+  const s = exceptionScene();
+  const { returnExceptionResolutions } = s;
+  const deps = s.deps;
+  const returnException = reportReturnException(
+    deps,
+    s.exceptionRequest({ quantity: 1, idempotencyKey: "exc-scene" }),
+  );
+  let seq = 0;
+  const resolveRequest = (
+    extra: Partial<ResolveReturnExceptionRequest> = {},
+  ): ResolveReturnExceptionRequest => ({
+    tenantId: "tenant-a",
+    returnExceptionId: returnException.id,
+    outcome: "RECOVERED",
+    quantity: 1,
+    evidence: "실물 회수 및 검수 완료 2026-03-08",
+    resolvedBy: "김직원",
+    resolvedAt: "2026-03-04T06:59:58.000Z",
+    idempotencyKey: `res-${++seq}`,
+    ...extra,
+  });
+  return { ...s, deps, returnExceptionResolutions, returnException, resolveRequest };
+}
+
+/** 반품 요청 2권 중 1권을 공급처가 거절한(처분 대기 1) 세계 */
+export function renegotiationScene() {
+  const s = returnReplyScene();
+  recordReturnReply(
+    s.deps,
+    s.replyRequest({ acceptedQuantity: 0, rejectedQuantity: 1, idempotencyKey: "rep-reject-scene" }),
+  );
+  let seq = 0;
+  const renegotiateRequest = (
+    extra: Partial<RenegotiateReturnRequest> = {},
+  ): RenegotiateReturnRequest => ({
+    tenantId: "tenant-a",
+    originalRequestId: s.returnRequestRecord.id,
+    quantity: 1,
+    retryReason: "공급처 담당자 변경, 재협의로 수락 가능성 확인",
+    requestedBy: "김직원",
+    requestedAt: "2026-03-04T06:59:40.000Z",
+    idempotencyKey: `rng-${++seq}`,
+    ...extra,
+  });
+  return { ...s, renegotiateRequest };
 }

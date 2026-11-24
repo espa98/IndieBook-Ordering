@@ -5,6 +5,8 @@ import {
 } from "../idempotency/executeIdempotent";
 import { invalid, isNonEmptyString, parseUtcTimestamp } from "../procurement/validation";
 import { cancellationPending } from "./cancellationPending";
+import type { ReturnExceptionRepository } from "./reportReturnException";
+import type { ReturnExceptionResolutionRepository } from "./resolveReturnException";
 import type { ReturnReplyRepository } from "./recordReturnReply";
 import type { ReturnRequestRepository } from "./requestReturn";
 import type { AllocationCancellationRepository } from "./cancelAllocation";
@@ -35,6 +37,8 @@ export type TransferCancelledToStockDeps = {
   stockIntakes: StockIntakeRepository;
   returnRequests: Pick<ReturnRequestRepository, "list">;
   returnReplies: Pick<ReturnReplyRepository, "list">;
+  returnExceptions: Pick<ReturnExceptionRepository, "list">;
+  returnExceptionResolutions: Pick<ReturnExceptionResolutionRepository, "list">;
   stockMovements: StockMovementRepository;
   idempotency: IdempotencyStore;
   now?: () => Date;

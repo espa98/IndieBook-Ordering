@@ -2,6 +2,7 @@ import type { ReceiptAllocation } from "./allocateReceipt";
 import type { AllocationCancellation } from "./cancelAllocation";
 import type { ReturnCompletion } from "./completeReturn";
 import type { ReturnDispatch } from "./dispatchReturn";
+import type { ReturnExceptionResolution } from "./resolveReturnException";
 import type { ReturnReply } from "./recordReturnReply";
 import type { ReturnRequest } from "./requestReturn";
 import type { StockIntake } from "./transferCancelledToStock";
@@ -25,6 +26,7 @@ export function receiptBalances(
     replies?: readonly ReturnReply[];
     dispatches?: readonly ReturnDispatch[];
     completions?: readonly ReturnCompletion[];
+    resolutions?: readonly ReturnExceptionResolution[];
   } = {},
 ): BucketBalances {
   return receiptBuckets(
@@ -80,6 +82,12 @@ export function receiptBalances(
         from: "RETURN_DISPATCHED" as const,
         to: "RETURNED_FINAL" as const,
         quantity: c.quantity,
+      })),
+      // 반송·분실 예외 해소: 회수 확인은 처분 대기로 복귀, 공급처 최종 확인은 반품 완료 (ST-C09)
+      ...(returns.resolutions ?? []).map((r) => ({
+        from: "RETURN_DISPATCHED" as const,
+        to: r.outcome === "RECOVERED" ? ("DISPOSITION_PENDING" as const) : ("RETURNED_FINAL" as const),
+        quantity: r.quantity,
       })),
     ],
   );

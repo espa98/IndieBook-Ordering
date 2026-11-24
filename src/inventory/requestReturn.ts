@@ -7,6 +7,8 @@ import {
 } from "../idempotency/executeIdempotent";
 import { invalid, isNonEmptyString, parseUtcTimestamp } from "../procurement/validation";
 import { cancellationPending } from "./cancellationPending";
+import type { ReturnExceptionRepository } from "./reportReturnException";
+import type { ReturnExceptionResolutionRepository } from "./resolveReturnException";
 import type { ReturnReplyRepository } from "./recordReturnReply";
 import type { StockIntakeRepository } from "./transferCancelledToStock";
 import type { GoodsReceiptRepository } from "./receiveGoods";
@@ -22,6 +24,9 @@ export type ReturnRequest = {
   quantity: number;
   requestedBy: string;
   requestedAt: string;
+  /** 재협의로 생긴 요청이면 보존된 원 요청과 재시도 근거 (ST-C07) */
+  retryOfRequestId?: string;
+  retryReason?: string;
   recordedAt: string;
 };
 
@@ -38,6 +43,8 @@ export type RequestReturnDeps = {
   returnRequests: ReturnRequestRepository;
   stockIntakes: Pick<StockIntakeRepository, "list">;
   returnReplies: Pick<ReturnReplyRepository, "list">;
+  returnExceptions: Pick<ReturnExceptionRepository, "list">;
+  returnExceptionResolutions: Pick<ReturnExceptionResolutionRepository, "list">;
   idempotency: IdempotencyStore;
   now?: () => Date;
 };

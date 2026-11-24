@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { AppError } from "../../src/errors/AppError";
+import { reportReturnException } from "../../src/inventory/reportReturnException";
 import { completeReturn } from "../../src/inventory/completeReturn";
-import { completionScene } from "../helpers/inventoryFixtures";
+import { completionScene, exceptionScene } from "../helpers/inventoryFixtures";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -113,5 +114,20 @@ describe("completeReturn: 반품 완료 (ST-C05, UC-28, BR-C02)", () => {
     expect((thrown as AppError).code).toBe("IDEMPOTENCY_CONFLICT");
     expect((thrown as AppError).httpStatus).toBe(409);
     expect(deps.returnCompletions.list("tenant-a", returnRequestRecord.id)).toHaveLength(1);
+  });
+
+  it("반송·분실 예외로 신고된 수량은 정상 완료할 수 없다", () => {
+    const { deps, exceptionRequest, completeRequest } = exceptionScene(); // 출고 1
+    reportReturnException(deps, exceptionRequest({ quantity: 1 }));
+
+    let thrown: unknown;
+    try {
+      completeReturn(deps, completeRequest({ quantity: 1 }));
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AppError);
+    expect((thrown as AppError).code).toBe("BUSINESS_INVARIANT");
   });
 });
