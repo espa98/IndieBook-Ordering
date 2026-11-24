@@ -19,6 +19,8 @@ export type Order = {
   lines: OrderLine[];
   totalKrw?: string;
   displayNumber?: number;
+  /** 종결 시각. 종결된 주문에는 신규 중요 거래를 추가할 수 없다 (BR-O08) */
+  closedAt?: string;
 };
 
 export function createDraftOrder(input: {

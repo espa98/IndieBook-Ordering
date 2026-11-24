@@ -1,4 +1,5 @@
 import { AppError } from "../errors/AppError";
+import { assertOrderOpenForTransactions } from "../order/orderGuards";
 import {
   executeIdempotent,
   type IdempotencyStore,
@@ -82,12 +83,7 @@ export function allocateSourcing(
         // 없는 주문·타 테넌트 주문·주문에 속하지 않은 품목을 구별할 수 없게 같은 오류로 낸다
         throw new AppError("NOT_FOUND");
       }
-      if (order.status !== "CONFIRMED") {
-        throw new AppError(
-          "BUSINESS_INVARIANT",
-          "sourcing requires a CONFIRMED order",
-        );
-      }
+      assertOrderOpenForTransactions(order, "sourcing");
       const supplier = deps.suppliers.get(request.tenantId, request.supplierCode);
       if (!supplier) {
         // 타 테넌트의 공급처도 같은 NOT_FOUND라서 존재 여부가 드러나지 않는다

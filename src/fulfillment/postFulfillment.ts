@@ -1,4 +1,5 @@
 import { AppError } from "../errors/AppError";
+import { assertOrderOpenForTransactions } from "../order/orderGuards";
 import {
   executeIdempotent,
   type IdempotencyStore,
@@ -123,9 +124,7 @@ export function postFulfillment(
         // 없는 대상과 타 테넌트의 대상은 구별할 수 없게 같은 오류로 낸다
         throw new AppError("NOT_FOUND");
       }
-      if (order.status !== "CONFIRMED") {
-        throw new AppError("BUSINESS_INVARIANT", "only a confirmed order can be fulfilled");
-      }
+      assertOrderOpenForTransactions(order, "fulfillment");
       const quantity = request.sources.reduce((sum, s) => sum + s.quantity, 0);
       // 유효 수량 E - 기수령 F - 취소 요청으로 잠긴 수량 이내만 인도할 수 있다 (D27)
       const received = deps.fulfillments

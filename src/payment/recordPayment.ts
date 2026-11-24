@@ -1,4 +1,5 @@
 import { AppError } from "../errors/AppError";
+import { assertOrderOpenForTransactions } from "../order/orderGuards";
 import {
   executeIdempotent,
   type IdempotencyStore,
@@ -92,12 +93,7 @@ export function recordPayment(
         // 없는 주문과 타 테넌트의 주문은 구별할 수 없게 같은 오류로 낸다
         throw new AppError("NOT_FOUND");
       }
-      if (order.status !== "CONFIRMED") {
-        throw new AppError(
-          "BUSINESS_INVARIANT",
-          "payments can only be recorded for a confirmed order",
-        );
-      }
+      assertOrderOpenForTransactions(order, "recording a payment");
       // 같은 외부 거래를 두 번 기록하면 매출·환급이 이중으로 잡힌다 (DEC-14)
       const reference = request.externalReference.trim();
       if (

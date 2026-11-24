@@ -1,4 +1,5 @@
 import { AppError } from "../errors/AppError";
+import { assertOrderOpenForTransactions } from "../order/orderGuards";
 import {
   executeIdempotent,
   type IdempotencyStore,
@@ -80,12 +81,7 @@ export function reserveStock(
         // 없는 대상과 타 테넌트의 대상은 구별할 수 없게 같은 오류로 낸다
         throw new AppError("NOT_FOUND");
       }
-      if (order.status !== "CONFIRMED") {
-        throw new AppError(
-          "BUSINESS_INVARIANT",
-          "stock can only be reserved for a confirmed order",
-        );
-      }
+      assertOrderOpenForTransactions(order, "reserving stock");
       const { reservations, releases, deliveries } = readReservationLedger(
         deps,
         request.tenantId,
