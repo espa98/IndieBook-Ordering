@@ -115,6 +115,26 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
           idempotencyKey: c.idempotencyKey,
         }),
     }),
+    route("POST", "/books/(?<bookId>[^/]+)/initial-stock", {
+      success: 201,
+      fields: ["quantity", "actedAt"],
+      run: (c) => stock.registerInitialStock(actor(c), merge(c, { tenantId: t(c), bookId: c.params.bookId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/books/(?<bookId>[^/]+)/stock-adjustments", {
+      success: 201,
+      fields: ["direction", "quantity", "reason", "actedAt"],
+      run: (c) => stock.adjustStock(actor(c), merge(c, { tenantId: t(c), bookId: c.params.bookId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/stock-reservations/(?<reservationId>[^/]+)/releases", {
+      success: 201,
+      fields: ["quantity", "reason", "releasedAt"],
+      run: (c) => stock.releaseStockReservation(actor(c), merge(c, { tenantId: t(c), reservationId: c.params.reservationId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/payments/(?<paymentId>[^/]+)/void", {
+      success: 201,
+      fields: ["reason", "voidedAt"],
+      run: (c) => payments.voidPayment(actor(c), merge(c, { tenantId: t(c), paymentId: c.params.paymentId!, idempotencyKey: c.idempotencyKey })),
+    }),
     route("POST", "/orders/(?<orderId>[^/]+)/fulfillments", {
       success: 201,
       fields: ["orderLineId", "sources", "receivedAt"],

@@ -1,6 +1,6 @@
 # 릴리스 Go / No-Go (10단계)
 
-작성일: 2026-11-24 (갱신) · 기준 커밋: `0095c3c` (테스트 126 files / 1248 tests 통과, 마이그레이션 001~018)
+작성일: 2026-11-24 (갱신) · 기준 커밋: 최신(테스트 127 files / 1253 tests 통과, 마이그레이션 001~019)
 
 ## 결정: **NO-GO**
 
@@ -29,19 +29,18 @@ P0인데 **여전히 미구현**인 항목: 인증·테넌트(ST-A06/A07 중지�
 
 ### 2.1 명령 영속화 현황 (기계적으로 센 값)
 
-`authorizedActions`에 바인딩된 도메인 명령 70개 중 **46개를 어댑터(`src/db/pg*Api.ts`)가 직접 실행**하고, 5개(`deliverAllocation`·`deliverStockReservation`은 수령 경로, `confirmRefund`는 환급 승인 경로, `getOrder`·`listOrders`는 읽기 경로)는 그 명령을 통해 간접 실행되어 **51개가 영속화**되었다. **19개는 아직 영속화되지 않았다**(그 명령은 메모리 저장소 도메인 테스트로만 검증된다):
+`authorizedActions`에 바인딩된 도메인 명령 70개 중 **50개를 어댑터(`src/db/pg*Api.ts`)가 직접 실행**하고, 5개(`deliverAllocation`·`deliverStockReservation`은 수령 경로, `confirmRefund`는 환급 승인 경로, `getOrder`·`listOrders`는 읽기 경로)는 그 명령을 통해 간접 실행되어 **55개가 영속화**되었다. **15개는 아직 영속화되지 않았다**(그 명령은 메모리 저장소 도메인 테스트로만 검증된다):
 
 | 영역 | 영속화되지 않은 명령 | 영향 |
 |---|---|---|
-| 재고 | `registerInitialStock`(초기 재고 등록), `adjustStock`(재고 조정), `releaseStockReservation`(예약 해제) | **시험이 초기 재고를 SQL로 심고 있다.** 실제 운영에서는 초기 재고를 넣을 방법이 없고, 예약을 풀 방법도 없다 |
-| 결제 | `voidPayment`(결제 무효), `reportRefundAttempt`·`resolveRefundAttempt`(환급 시도 실패·UNKNOWN) | 확인 전 오기록 결제를 무효 처리할 수 없다. 환급 실패 처리 불가 |
+| 결제 | `reportRefundAttempt`·`resolveRefundAttempt`(환급 시도 실패·UNKNOWN) | 환급 도중 실패·UNKNOWN을 처리할 수 없다. (재고 등록·조정·예약 해제와 결제 무효는 §36에서 영속화했다) |
 | 직원·인증 | `inviteStaff`·`revokeInvitation`·`setMembershipStatus` | 직원 초대·비활성화(ST-A03~A05)는 도메인만 있고 HTTP·DB 경로가 없다 |
 | 도서·템플릿 | `registerBook`·`updateBook`·`publishTemplateVersion` | 도서 등록·수정, 안내 문구 템플릿 게시 불가(시험은 도서를 SQL로 심는다) |
 | 고객 안내 | `createNotificationTarget`·`recordNotificationAttempt`·`recordNotificationCopy`·`recordNotificationResult`·`renotify` | 안내(알림) 전체가 영속화되지 않음. `longUnreceivedWarnings`도 마찬가지 |
 | 서비스 주문 | `createOrderService`·`confirmOrderService` | 서비스 주문 경로 없음(일반 주문은 `createOrder`·`confirmOrder`로 영속화됨) |
 | 기타 | 발주 CSV 출력 이력(`exportPurchaseOrderCsv`, 바인딩 없음) | 전달 기록의 `fileVersion`을 지정하면 거부된다 |
 
-위 표가 **다음 구현 우선순위의 근거**다. 특히 초기 재고·결제 무효·직원 관리는 운영 시작에 필수인 P0 흐름이다.
+위 표가 **다음 구현 우선순위의 근거**다. 남은 것 중 직원 관리(초대·비활성화)와 도서 등록·수정, 환급 시도 실패 처리가 운영 시작에 필수인 P0 흐름이다.
 
 추가 차단·주의(10단계 이후): 새 검사 중 일부는 선택 의존성을 서버 조립에서 연결해야 동작한다(`testing/acceptance_report.md` §9.1). **현재 어댑터 연결 상태:** `allocateSourcing`·주문 종결·주문 재개의 `supplierObligations`(BR-P05), 재개의 `fulfillmentCorrections`, 환급 요청의 `refundAttempts`·`refundAttemptResolutions` 조회, 주문 생성의 `books`는 연결되었다. 환급 **시도 기록 명령**(`reportRefundAttempt`·`resolveRefundAttempt`)은 영속화되지 않아 시도 기록은 항상 비어 있다. 연결 누락을 배포 전 점검 항목에 넣어야 한다.
 

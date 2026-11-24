@@ -579,6 +579,41 @@ describe("HTTP 서버: 결제·수령 정정 (Owner 전용)", () => {
   });
 });
 
+describe("HTTP 서버: 재고 운영과 결제 무효", () => {
+  it("초기 재고 등록(Owner만), 재고 조정(위임 없는 직원은 403), 예약 해제, 확인 전 결제 무효가 HTTP로 이어진다", async () => {
+    const stockBase = `/v1/tenants/${T_A}/books/${BOOK(7)}`;
+    const initial = { quantity: 5, actedAt: "2026-03-04T06:00:00.000Z" };
+    expect((await call(`${stockBase}/initial-stock`, { method: "POST", sub: STAFF_A, body: initial })).status).toBe(403);
+    expect((await call(`${stockBase}/initial-stock`, { method: "POST", sub: OWNER_A, body: { ...initial, actedBy: STAFF_A } })).status).toBe(400); // 행위자 위조
+    const registered = await call(`${stockBase}/initial-stock`, { method: "POST", sub: OWNER_A, body: initial });
+    expect(registered.status).toBe(201);
+    expect(registered.json.data).toMatchObject({ kind: "INITIAL", quantity: 5, actedBy: OWNER_A });
+    expect((await call(`${stockBase}/initial-stock`, { method: "POST", sub: OWNER_A, body: initial })).status).toBe(422); // 도서당 한 번
+
+    const adjustment = { direction: "IN", quantity: 2, reason: "실사 정정", actedAt: "2026-03-04T06:10:00.000Z" };
+    expect((await call(`${stockBase}/stock-adjustments`, { method: "POST", sub: STAFF_A, body: adjustment })).status).toBe(403); // 재고 조정을 위임받지 않은 직원
+    const adjusted = await call(`${stockBase}/stock-adjustments`, { method: "POST", sub: OWNER_A, body: adjustment });
+    expect(adjusted.status).toBe(201);
+    expect(adjusted.json.data).toMatchObject({ kind: "ADJUST", direction: "IN", quantity: 2 });
+
+    const o = await confirmedOrder(7, 2);
+    const reservation = await call(`${orders()}/${o.orderId}/lines/${o.lineId}/stock-reservations`, { method: "POST", sub: STAFF_A, body: { quantity: 2, reservedAt: "2026-03-04T06:40:00.000Z" } });
+    const releasePath = `/v1/tenants/${T_A}/stock-reservations/${reservation.json.data.id}/releases`;
+    const release = { quantity: 1, reason: "고객 요청", releasedAt: "2026-03-04T06:50:00.000Z" };
+    expect((await call(releasePath, { method: "POST", sub: STAFF_A, body: { ...release, quantity: 3 } })).status).toBe(422); // 예약 2권 초과
+    const released = await call(releasePath, { method: "POST", sub: STAFF_A, body: release });
+    expect(released.status).toBe(201);
+    expect(released.json.data).toMatchObject({ quantity: 1, releasedBy: STAFF_A });
+
+    const payment = await call(`${orders()}/${o.orderId}/payments`, { method: "POST", sub: STAFF_A, body: { method: "BANK_TRANSFER", amountKrw: "30000", externalReference: `HTTP-VOID-${++seq}`, paidAt: "2026-03-04T06:00:00.000Z" } });
+    const voidPath = `/v1/tenants/${T_A}/payments/${payment.json.data.id}/void`;
+    const voided = await call(voidPath, { method: "POST", sub: STAFF_A, body: { reason: "오입력", voidedAt: "2026-03-04T06:20:00.000Z" } });
+    expect(voided.status).toBe(201);
+    expect(voided.json.data).toMatchObject({ reason: "오입력", voidedBy: STAFF_A });
+    expect((await call(voidPath, { method: "POST", sub: STAFF_A, body: { reason: "오입력", voidedAt: "2026-03-04T06:20:00.000Z" } })).status).toBe(422); // 이미 무효
+  });
+});
+
 describe("HTTP 서버: 입력 방어", () => {
   it("Idempotency-Key 누락·공백·128자 초과는 400이다", async () => {
     const body = { lines: lines() };

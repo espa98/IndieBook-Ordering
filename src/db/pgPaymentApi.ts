@@ -4,6 +4,7 @@ import type { CorrectPaymentRequest, PaymentCorrection } from "../payment/correc
 import { AppError } from "../errors/AppError";
 import type { Order } from "../order/createDraftOrder";
 import type { PaymentConfirmation, ConfirmPaymentRequest } from "../payment/confirmPayment";
+import type { PaymentVoid, VoidPaymentRequest } from "../payment/voidPayment";
 import type { RefundConfirmation } from "../payment/confirmRefund";
 import type { DecideRefundRequestRequest, DecideRefundRequestResult } from "../payment/decideRefundRequest";
 import type { OpenRefundTaskRequest, RefundTask } from "../payment/openRefundTask";
@@ -11,7 +12,6 @@ import type { Payment, RecordPaymentRequest } from "../payment/recordPayment";
 import type { RefundAttempt } from "../payment/reportRefundAttempt";
 import type { RefundRequest, RefundRequestDecision, RequestRefundRequest } from "../payment/requestRefund";
 import type { RefundAttemptResolution } from "../payment/resolveRefundAttempt";
-import type { PaymentVoid } from "../payment/voidPayment";
 import {
   inTransaction,
   isCommandKeyConflict,
@@ -205,6 +205,7 @@ export type RecordPaymentBody = Omit<RecordPaymentRequest, "recordedBy">;
 export type ConfirmPaymentBody = Omit<ConfirmPaymentRequest, "confirmedBy">;
 export type OpenRefundTaskBody = Omit<OpenRefundTaskRequest, "openedBy">;
 export type RequestRefundBody = Omit<RequestRefundRequest, "requestedBy">;
+export type VoidPaymentBody = Omit<VoidPaymentRequest, "voidedBy">;
 export type CorrectPaymentBody = Omit<CorrectPaymentRequest, "actorRole" | "correctedBy">;
 export type DecideRefundRequestBody = Omit<DecideRefundRequestRequest, "actorRole" | "decidedBy">;
 
@@ -300,7 +301,10 @@ export function createPgPaymentApi(deps: { pool: PoolLike }) {
         list: (_t: string, paymentId: string) => (l?.confirmations ?? []).filter((c) => c.paymentId === paymentId),
         save: (c: PaymentConfirmation) => void s.confirmations.push(c),
       },
-      paymentVoids: { list: (_t: string, paymentId: string) => (l?.voids ?? []).filter((v) => v.paymentId === paymentId) },
+      paymentVoids: {
+        list: (_t: string, paymentId: string) => (l?.voids ?? []).filter((v) => v.paymentId === paymentId),
+        save: (v: PaymentVoid) => void s.voids.push(v),
+      },
       paymentCorrections: {
         get: (_t: string, id: string) => l?.corrections.find((c) => c.id === id),
         list: (_t: string, paymentId: string) => (l?.corrections ?? []).filter((c) => c.paymentId === paymentId),
@@ -346,6 +350,12 @@ export function createPgPaymentApi(deps: { pool: PoolLike }) {
         void _t;
         return authorizedActions.confirmPayment(repos(ctx), ctx.principal, rest);
       }),
+    voidPayment: (actor: Actor, request: VoidPaymentBody): Promise<PaymentVoid> =>
+      execute(actor, request, { table: "ordering_payments", id: request.paymentId }, {}, (ctx) => {
+        const { tenantId: _t, ...rest } = request;
+        void _t;
+        return authorizedActions.voidPayment(repos(ctx), ctx.principal, rest);
+      }),
     correctPayment: (actor: Actor, request: CorrectPaymentBody): Promise<PaymentCorrection> =>
       execute(actor, request, { table: "ordering_payments", id: request.paymentId }, {}, (ctx) => {
         const { tenantId: _t, ...rest } = request;
@@ -382,8 +392,9 @@ type Sink = {
   decisions: RefundRequestDecision[];
   refunds: RefundConfirmation[];
   corrections: PaymentCorrection[];
+  voids: PaymentVoid[];
 };
-const newSink = (sameReference: Payment[]): Sink => ({ sameReference, payments: [], confirmations: [], tasks: [], requests: [], decisions: [], refunds: [], corrections: [] });
+const newSink = (sameReference: Payment[]): Sink => ({ sameReference, payments: [], confirmations: [], tasks: [], requests: [], decisions: [], refunds: [], corrections: [], voids: [] });
 
 /** 도메인이 새로 만든 기록을 저장한다. 같은 요청에서 결정 → 원장 순서가 지켜지도록 참조되는 쪽을 먼저 넣는다 */
 async function flush(client: PoolClient, s: Sink): Promise<void> {
@@ -398,6 +409,9 @@ async function flush(client: PoolClient, s: Sink): Promise<void> {
       "insert into public.ordering_payment_confirmations (id, tenant_id, payment_id, evidence, confirmed_by, confirmed_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7)",
       [c.id, c.tenantId, c.paymentId, c.evidence, c.confirmedBy, c.confirmedAt, c.recordedAt],
     );
+  }
+  for (const v of s.voids) {
+    await client.query("insert into public.ordering_payment_voids (id, tenant_id, payment_id, reason, voided_by, voided_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7)", [v.id, v.tenantId, v.paymentId, v.reason, v.voidedBy, v.voidedAt, v.recordedAt]);
   }
   for (const c of s.corrections) {
     await client.query(
