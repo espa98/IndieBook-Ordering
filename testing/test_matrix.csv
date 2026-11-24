@@ -41,7 +41,7 @@ ST-P05,requirement,발주 파일 출력(CSV),domain,PASS,tests/procurement,XLSX 
 ST-P06,requirement,실제 전달 기록,domain,PASS,tests/procurement,06단계
 ST-P07,requirement,공급처 회신,domain,PASS,tests/procurement,06단계
 ST-P08,requirement,공급처 취소 요청·회신,domain,PASS,tests/procurement,06단계
-ST-P09,requirement,미전달 발주 취소,domain,NOT_IMPLEMENTED,,
+ST-P09,requirement,미전달 발주 취소,domain,PARTIAL,tests/procurement/cancelUndeliveredPurchaseOrder 3 tests,DRAFT/READY 취소만. 배정은 자동 해제하지 않고 ACTIVE로 남김(재연결 또는 ST-P02 해제). 권한 검증 없음
 ST-P10,requirement,공급처 전량 취소 확정,domain,PASS,tests/procurement,06단계
 ST-P11,requirement,발주 종결,domain,NOT_IMPLEMENTED,,
 ST-R01,requirement,검수 입고,domain,PASS,tests/inventory/receiveGoods,07단계

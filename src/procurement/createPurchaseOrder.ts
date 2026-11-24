@@ -52,6 +52,9 @@ export type PurchaseOrder = {
   delivery?: PoDelivery;
   /** 공급처 전량 취소를 확정한 서버 기록 시각 (ST-P10) */
   cancelledAt?: string;
+  /** 미전달 발주를 취소한 담당자와 사유 (ST-P09) */
+  cancelledBy?: string;
+  cancelReason?: string;
 };
 
 export type PurchaseOrderRepository = {
