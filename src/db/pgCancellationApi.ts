@@ -28,6 +28,7 @@ import type { RefundTask } from "../payment/openRefundTask";
 import { loadCancellations, loadFulfillments } from "./pgFulfillmentApi";
 import { saveOrder } from "./pgOrderApi";
 import { loadLedger } from "./pgPaymentApi";
+import { loadObligationDeps } from "./pgProcurementApi";
 import { loadPoState, polLockKey } from "./pgReceivingApi";
 import { loadBookLedger } from "./pgStockApi";
 import {
@@ -345,10 +346,13 @@ export function createPgCancellationApi(deps: { pool: PoolLike }) {
       const pl = paymentLedger;
       const { tenantId: _t, ...rest } = request;
       void _t;
+      const obligations = order ? (await loadObligationDeps(client, order.tenantId, order.id)).supplierObligations : undefined;
       const closureDeps: Parameters<typeof authorizedActions.executeOrderClosure>[0] = {
         orders: { get: (t, id) => (order && order.tenantId === t && order.id === id ? order : undefined), list: () => (order ? [order] : []), save: (o) => void savedOrders.push(o) },
         closureRequests: { get: (_t2, id) => closureRequests.find((r) => r.id === id), list: () => closureRequests, save: forbidden },
         orderClosures: { list: () => closures, save: (c) => void newClosures.push(c) },
+        // 배정을 풀고도 공급처 의무가 남은 주문은 종결할 수 없다 (BR-P05)
+        supplierObligations: obligations,
         fulfillments: { list: () => fulfillments },
         payments: { list: (_t2, oid) => (pl?.payments ?? []).filter((p) => p.orderId === oid) },
         paymentConfirmations: { list: (_t2, id) => (pl?.confirmations ?? []).filter((c) => c.paymentId === id) },
@@ -400,6 +404,7 @@ export function createPgCancellationApi(deps: { pool: PoolLike }) {
       const pl = state.paymentLedger;
       const { tenantId: _t, ...rest } = request;
       void _t;
+      const obligations = order ? (await loadObligationDeps(client, order.tenantId, order.id)).supplierObligations : undefined;
       const result = authorizedActions.executeOrderReopening(
         {
           orders: { get: (t, id) => (order && order.tenantId === t && order.id === id ? order : undefined), list: () => (order ? [order] : []), save: (o) => void savedOrders.push(o) },
@@ -419,6 +424,7 @@ export function createPgCancellationApi(deps: { pool: PoolLike }) {
           returnExceptions: { list: (_t2, id) => state.exceptions.filter((e) => e.returnRequestId === id) },
           returnExceptionResolutions: { list: (_t2, id) => state.resolutions.filter((r) => r.returnExceptionId === id) },
           orderReopenings: { list: () => reopenings, save: (r) => void newReopenings.push(r) },
+          supplierObligations: obligations,
           idempotency,
         },
         principal,

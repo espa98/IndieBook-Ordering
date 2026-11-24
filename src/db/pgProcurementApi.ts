@@ -57,6 +57,28 @@ export type ReleaseSourcingBody = Omit<ReleaseSourcingRequest, "releasedBy">;
 /** 상태 전이 명령이 새로 저장할 기록 */
 type Saved = { po: PurchaseOrder[]; replies: PoReply[]; cancellationRequests: CancellationRequest[]; cancellationResponses: CancellationResponse[] };
 
+/** 주문이 풀어낸 배정 중 공급처 의무가 남은 것을 계산하는 데 필요한 기록을 적재한다 (BR-P05) */
+export async function loadObligationDeps(client: PoolClient, tenantId: string, orderId: string) {
+  const releases = (await client.query("select * from public.ordering_sourcing_releases where tenant_id = $1 and order_id = $2 order by recorded_at, id", [tenantId, orderId])).rows.map(
+    (r): SourcingRelease => ({ id: r.id, tenantId: r.tenant_id, allocationId: r.allocation_id, orderId: r.order_id, lineId: r.order_line_id, supplierCode: r.supplier_code, quantity: r.quantity, reason: r.reason, retainedObligations: r.retained_obligations, releasedBy: r.released_by, releasedAt: r.released_at.toISOString(), recordedAt: r.recorded_at.toISOString() }),
+  );
+  const poIds = [...new Set(releases.flatMap((r) => r.retainedObligations.map((o) => o.purchaseOrderId)))].sort();
+  const states: Awaited<ReturnType<typeof loadPoState>>[] = [];
+  for (const poId of poIds) states.push(await loadPoState(client, tenantId, poId));
+  const approvals = (await client.query("select * from public.ordering_duplicate_risk_approvals where tenant_id = $1 and order_id = $2 order by recorded_at, id", [tenantId, orderId])).rows.map(
+    (a): DuplicateRiskApproval => ({ id: a.id, tenantId: a.tenant_id, orderId: a.order_id, lineId: a.order_line_id, purchaseOrderId: a.purchase_order_id, poLineId: a.po_line_id, surplusPlan: a.surplus_plan, planNote: a.plan_note, approvedBy: a.approved_by, approvedAt: a.approved_at.toISOString(), recordedAt: a.recorded_at.toISOString() }),
+  );
+  const supplierObligations = {
+    purchaseOrders: { get: (_t: string, id: string) => states.find((st) => st.po?.id === id)?.po },
+    replies: { list: (_t: string, poId: string) => states.find((st) => st.po?.id === poId)?.replies ?? [] },
+    cancellations: { listResponses: (_t: string, poId: string) => states.find((st) => st.po?.id === poId)?.responses ?? [] },
+    receipts: { list: (_t: string, poId: string) => states.find((st) => st.po?.id === poId)?.receipts ?? [] },
+    receiptCorrections: { list: (_t: string, receiptId: string) => states.flatMap((st) => st.corrections).filter((c) => c.receiptId === receiptId) },
+    sourcingReleases: { listByOrder: () => releases },
+  };
+  return { supplierObligations, approvals };
+}
+
 /** 발주 생성·전달 준비·전달 기록·공급처 회신을 Postgres 영속화 위에서 실행한다 (E7 권고안 a).
  * 락 순서: 배정 락('src:', 정렬 순) → 주문 행(공유). 발주 상태 전이는 발주 행을 `FOR UPDATE`로 잡는다. */
 export function createPgProcurementApi(deps: { pool: PoolLike }) {
@@ -199,28 +221,6 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
   const toSupplier = (row: any): Supplier | undefined =>
     row ? { tenantId: row.tenant_id, code: row.code, active: row.active, ...(row.name === null ? {} : { name: row.name }), ...(row.order_channel === null ? {} : { orderChannel: row.order_channel }), version: Number(row.version) } : undefined;
   const toAllocation = (a: any): SourcingAllocation => ({ id: a.id, tenantId: a.tenant_id, orderId: a.order_id, lineId: a.order_line_id, supplierCode: a.supplier_code, quantity: a.quantity, status: a.status });
-
-  /** 주문이 풀어낸 배정 중 공급처 의무가 남은 것을 계산하는 데 필요한 기록을 적재한다 (BR-P05) */
-  async function loadObligationDeps(client: PoolClient, tenantId: string, orderId: string) {
-    const releases = (await client.query("select * from public.ordering_sourcing_releases where tenant_id = $1 and order_id = $2 order by recorded_at, id", [tenantId, orderId])).rows.map(
-      (r): SourcingRelease => ({ id: r.id, tenantId: r.tenant_id, allocationId: r.allocation_id, orderId: r.order_id, lineId: r.order_line_id, supplierCode: r.supplier_code, quantity: r.quantity, reason: r.reason, retainedObligations: r.retained_obligations, releasedBy: r.released_by, releasedAt: r.released_at.toISOString(), recordedAt: r.recorded_at.toISOString() }),
-    );
-    const poIds = [...new Set(releases.flatMap((r) => r.retainedObligations.map((o) => o.purchaseOrderId)))].sort();
-    const states: Awaited<ReturnType<typeof loadPoState>>[] = [];
-    for (const poId of poIds) states.push(await loadPoState(client, tenantId, poId));
-    const approvals = (await client.query("select * from public.ordering_duplicate_risk_approvals where tenant_id = $1 and order_id = $2 order by recorded_at, id", [tenantId, orderId])).rows.map(
-      (a): DuplicateRiskApproval => ({ id: a.id, tenantId: a.tenant_id, orderId: a.order_id, lineId: a.order_line_id, purchaseOrderId: a.purchase_order_id, poLineId: a.po_line_id, surplusPlan: a.surplus_plan, planNote: a.plan_note, approvedBy: a.approved_by, approvedAt: a.approved_at.toISOString(), recordedAt: a.recorded_at.toISOString() }),
-    );
-    const supplierObligations = {
-      purchaseOrders: { get: (_t: string, id: string) => states.find((st) => st.po?.id === id)?.po },
-      replies: { list: (_t: string, poId: string) => states.find((st) => st.po?.id === poId)?.replies ?? [] },
-      cancellations: { listResponses: (_t: string, poId: string) => states.find((st) => st.po?.id === poId)?.responses ?? [] },
-      receipts: { list: (_t: string, poId: string) => states.find((st) => st.po?.id === poId)?.receipts ?? [] },
-      receiptCorrections: { list: (_t: string, receiptId: string) => states.flatMap((st) => st.corrections).filter((c) => c.receiptId === receiptId) },
-      sourcingReleases: { listByOrder: () => releases },
-    };
-    return { supplierObligations, approvals };
-  }
 
   const allocateOnce = (actor: Actor, request: AllocateSourcingBody) =>
     inTransaction(deps.pool, "service_role", actor.userId, async (client) => {

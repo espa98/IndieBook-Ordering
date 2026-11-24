@@ -7,7 +7,7 @@ G4,gate,재고/인도 예약·배분·해제·인도 원장 대사,domain,PARTIA
 G5,gate,결제/환급 수동 사실 확인·원장 반영·외부 환급 증빙,domain,PARTIAL,tests/payment 11 files / 59 tests passed(메모리) + tests/db/pgPaymentApi 13 tests(Postgres 영속화·동시성),입력·확인·환급 업무·요청·승인은 DB 영속화·동시성 검증. 무효·보정·시도 보고·해소의 어댑터와 읽기 API 없음. PG 연동 없음(P2)
 G6,gate,원자적 종결 검사 및 Staff 요청 분리,domain,PARTIAL,tests/closure 4 files / 15 tests passed,원자성은 검증 후 연속 저장이며 DB 트랜잭션 아님
 G7,gate,기존 19개 테스트+2세션 경쟁+배포 승인,regression,BLOCKED,"기존 19개 테스트는 ordering-dev DB 측 테스트로 이 저장소에 없음, 2세션 경쟁은 DB 필요",배포 승인 없음
-TEST-UNIT,test-layer,단위/도메인 테스트,unit,PASS,npx vitest run → 126 files 1247 tests passed 0 failed,Node v24.18.0 / vitest 5.1.1 / base commit ac366ed + 인증 계층 변경
+TEST-UNIT,test-layer,단위/도메인 테스트,unit,PASS,npx vitest run → 126 files 1248 tests passed 0 failed,Node v24.18.0 / vitest 5.1.1 / base commit ac366ed + 인증 계층 변경
 TEST-TYPE,test-layer,타입 검사,static,PASS,npx tsc --noEmit → 출력 0줄(오류 없음),TypeScript 7.0.2
 TEST-OPENAPI,test-layer,OpenAPI 스키마 검사,contract,PARTIAL,tests/openapi 2 files / 26 tests passed,openapi/ordering.yaml은 05단계 주문 API만 다룸. 조달·입고·재고·결제·안내·종결 API는 명세·구현 없음
 TEST-HTTP,test-layer,HTTP 핸들러 테스트,http-handler,PARTIAL,tests/http 4 files / 55 tests passed(핸들러 단위 41 + 실제 서버 14),실제 node:http 서버 테스트 포함. OpenAPI 계약 테스트는 주문 엔드포인트만

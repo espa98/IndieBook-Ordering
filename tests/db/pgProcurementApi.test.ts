@@ -3,6 +3,8 @@ import { createPgCancellationApi } from "../../src/db/pgCancellationApi";
 import { createPgDispositionApi } from "../../src/db/pgDispositionApi";
 import { createPgFulfillmentApi } from "../../src/db/pgFulfillmentApi";
 import { createPgOrderApi } from "../../src/db/pgOrderApi";
+import { createPgPaymentApi } from "../../src/db/pgPaymentApi";
+import { createPgStockApi } from "../../src/db/pgStockApi";
 import { createPgProcurementApi } from "../../src/db/pgProcurementApi";
 import { createPgReceivingApi } from "../../src/db/pgReceivingApi";
 import { AppError } from "../../src/errors/AppError";
@@ -373,6 +375,34 @@ const blockersOf = async (run: () => Promise<unknown>) => {
 };
 const receiveAll = (po: { id: string }, poLineId: string, quantity: number) =>
   createPgReceivingApi({ pool: db.pool() }).receiveGoods(staff, { tenantId: T_A, purchaseOrderId: po.id, poLineId, normalQuantity: quantity, damagedQuantity: 0, misdeliveredQuantity: 0, receivedAt: "2026-03-04T06:35:00.000Z", idempotencyKey: key() });
+
+describe("주문 종결과 공급처 외부 의무 (BR-P05)", () => {
+  it("배정을 풀었지만 공급처 의무가 남은 주문은 다른 조건을 다 채워도 EXTERNAL_OBLIGATION_OPEN으로 종결이 차단되고, 의무가 사라지면 종결된다", async () => {
+    const api = createPgProcurementApi({ pool: db.pool() });
+    const line = await confirmedLine(19, 1);
+    const allocation = await allocate(api, line, "sup-a", 1);
+    const po = await create(api, "sup-a", [allocation.id]);
+    await ready(api, po.id, 1);
+    await deliver(api, po.id, 2);
+    await release(api, allocation.id); // 발주는 이미 전달되어 공급처 의무 1권이 남는다
+
+    // 주문은 매장 재고로 인도하고 결제까지 마친다
+    await rows(`insert into public.ordering_stock_movements (tenant_id, book_key, kind, direction, quantity, reason, acted_by, acted_at) values ($1, $2, 'INITIAL', 'IN', 1, '초기 재고', 'seed', now())`, [T_A, BOOK(19)]);
+    const reservation = await createPgStockApi({ pool: db.pool() }).reserveStock(owner, { tenantId: T_A, orderId: line.orderId, orderLineId: line.lineId, quantity: 1, reservedAt: "2026-03-04T06:40:00.000Z", idempotencyKey: key() });
+    const pay = createPgPaymentApi({ pool: db.pool() });
+    const payment = await pay.recordPayment(staff, { tenantId: T_A, orderId: line.orderId, method: "BANK_TRANSFER", amountKrw: "15000", externalReference: `OB-${key()}`, paidAt: "2026-03-04T06:00:00.000Z", idempotencyKey: key() });
+    await pay.confirmPayment(staff, { tenantId: T_A, paymentId: payment.id, evidence: "입금 확인", confirmedAt: "2026-03-04T06:30:00.000Z", idempotencyKey: key() });
+    await createPgFulfillmentApi({ pool: db.pool() }).postFulfillment(staff, { tenantId: T_A, orderId: line.orderId, orderLineId: line.lineId, sources: [{ kind: "STOCK_RESERVATION", sourceId: reservation.id, quantity: 1 }], receivedAt: "2026-03-04T06:50:00.000Z", idempotencyKey: key() });
+    const cancellations = createPgCancellationApi({ pool: db.pool() });
+    const version = (await rows("select version::int as v from public.ordering_orders where id = $1", [line.orderId]))[0].v as number;
+    const request = await cancellations.requestOrderClosure(staff, { tenantId: T_A, orderId: line.orderId, expectedVersion: version, requestedAt: "2026-03-04T06:58:00.000Z", idempotencyKey: key() });
+    const execute = () => cancellations.executeOrderClosure({ tenantId: T_A, closureRequestId: request.id, executedAt: "2026-03-04T06:59:00.000Z", idempotencyKey: key() });
+
+    expect(await blockersOf(execute)).toContain("EXTERNAL_OBLIGATION_OPEN");
+    await api.recordSupplierReply(staff, { tenantId: T_A, purchaseOrderId: po.id, poLineId: po.lines[0]!.poLineId, kind: "OUT_OF_STOCK", quantity: 1, source: "UNANSWERED", evidence: "공급처 품절 회신", repliedAt: "2026-03-04T06:20:00.000Z", idempotencyKey: key() });
+    expect((await execute()).orderId).toBe(line.orderId);
+  });
+});
 
 describe("발주 종결 실행 (서버 전용, ST-P11)", () => {
   it("모든 품목이 입고되고 취소 요청이 모두 응답되면 서버가 재계산해 종결하고, 종결된 발주에는 새 입고·회신이 막힌다", async () => {
