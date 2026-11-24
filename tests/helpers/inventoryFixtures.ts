@@ -101,6 +101,9 @@ export function createInMemoryReceiptAllocationRepository() {
     get(tenantId: string, id: string): ReceiptAllocation | undefined {
       return all.find((a) => a.tenantId === tenantId && a.id === id);
     },
+    listByOrder(tenantId: string, orderId: string): ReceiptAllocation[] {
+      return all.filter((a) => a.tenantId === tenantId && a.orderId === orderId);
+    },
     save(allocation: ReceiptAllocation): void {
       all.push(allocation);
     },

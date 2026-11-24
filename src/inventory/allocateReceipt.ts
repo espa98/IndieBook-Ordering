@@ -25,6 +25,7 @@ export type ReceiptAllocation = {
 
 export type ReceiptAllocationRepository = {
   get(tenantId: string, id: string): ReceiptAllocation | undefined;
+  listByOrder(tenantId: string, orderId: string): ReceiptAllocation[];
   list(tenantId: string, receiptId: string): ReceiptAllocation[];
   save(allocation: ReceiptAllocation): void;
 };
