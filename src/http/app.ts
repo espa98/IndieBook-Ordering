@@ -244,6 +244,11 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
       fields: ["outcome", "evidence", "resolvedAt"],
       run: (c) => payments.resolveRefundAttempt(actor(c), merge(c, { tenantId: t(c), attemptId: c.params.attemptId!, idempotencyKey: c.idempotencyKey })),
     }),
+    route("POST", "/message-templates", {
+      success: 201,
+      fields: ["key", "body", "expectedVersion", "publishedAt"],
+      run: (c) => catalog.publishTemplateVersion(actor(c), merge(c, { tenantId: t(c), idempotencyKey: c.idempotencyKey })),
+    }),
     route("POST", "/books", {
       success: 201,
       fields: ["source", "title", "authors", "isbn", "listPriceKrw", "externalId", "fetchedAt", "reason", "acknowledgeDuplicateOf", "registeredAt"],

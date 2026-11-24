@@ -796,3 +796,20 @@ describe("HTTP 서버: 도서 등록·수정", () => {
     expect(updated.json.data).toMatchObject({ listPriceKrw: "9500", version: 2 });
   });
 });
+
+describe("HTTP 서버: 안내 문구 템플릿 게시", () => {
+  it("위임 없는 직원은 403, Owner는 게시하고 버전이 오르며, 허용되지 않은 변수는 400·오래된 버전은 409이다", async () => {
+    const path = `/v1/tenants/${T_A}/message-templates`;
+    const publishedAt = new Date().toISOString();
+    const body = { key: "HTTP_DELAY", body: "{{bookTitle}} 입고가 늦어집니다.", expectedVersion: 0, publishedAt };
+    expect((await call(path, { method: "POST", sub: STAFF_A, body })).status).toBe(403);
+    expect((await call(path, { method: "POST", sub: OWNER_A, body: { ...body, body: "{{customerPhone}}" } })).status).toBe(400);
+    expect((await call(path, { method: "POST", sub: OWNER_A, body: { ...body, publishedBy: STAFF_A } })).status).toBe(400); // 행위자 위조
+    const v1 = await call(path, { method: "POST", sub: OWNER_A, body });
+    expect(v1.status).toBe(201);
+    expect(v1.json.data).toMatchObject({ key: "HTTP_DELAY", version: 1, variables: ["bookTitle"], publishedBy: OWNER_A });
+    expect((await call(path, { method: "POST", sub: OWNER_A, body })).status).toBe(409);
+    expect((await call(path, { method: "POST", sub: OWNER_A, body: { ...body, expectedVersion: 1 } })).json.data.version).toBe(2);
+  });
+});
+

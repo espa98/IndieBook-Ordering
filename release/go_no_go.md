@@ -1,6 +1,6 @@
 # 릴리스 Go / No-Go (10단계)
 
-작성일: 2026-11-24 (갱신) · 기준 커밋: 최신(테스트 129 files / 1268 tests 통과, 마이그레이션 001~021)
+작성일: 2026-11-24 (갱신) · 기준 커밋: 최신(테스트 129 files / 1271 tests 통과, 마이그레이션 001~022)
 
 ## 결정: **NO-GO**
 
@@ -29,13 +29,13 @@ P0인데 **여전히 미구현**인 항목: 인증·테넌트(ST-A06/A07 중지�
 
 ### 2.1 명령 영속화 현황 (기계적으로 센 값)
 
-`authorizedActions`에 바인딩된 도메인 명령 70개 중 **57개를 어댑터(`src/db/pg*Api.ts`)가 직접 실행**하고, 5개(`deliverAllocation`·`deliverStockReservation`은 수령 경로, `confirmRefund`는 환급 승인 경로, `getOrder`·`listOrders`는 읽기 경로)는 그 명령을 통해 간접 실행되어 **62개가 영속화**되었다. **8개는 아직 영속화되지 않았다**(그 명령은 메모리 저장소 도메인 테스트로만 검증된다):
+`authorizedActions`에 바인딩된 도메인 명령 70개 중 **58개를 어댑터(`src/db/pg*Api.ts`)가 직접 실행**하고, 5개(`deliverAllocation`·`deliverStockReservation`은 수령 경로, `confirmRefund`는 환급 승인 경로, `getOrder`·`listOrders`는 읽기 경로)는 그 명령을 통해 간접 실행되어 **63개가 영속화**되었다. **7개는 아직 영속화되지 않았다**(그 명령은 메모리 저장소 도메인 테스트로만 검증된다):
 
 | 영역 | 영속화되지 않은 명령 | 영향 |
 |---|---|---|
 | 결제 | (환급 시도 실패·UNKNOWN은 §39에서 영속화) 남은 것 없음 | — |
 | 직원·인증 | (초대·철회·비활성화는 §37에서 영속화) 남은 것: **초대 수락**(`acceptInvitation`), 서점 개설(`openStore`), 계정 등록·이메일 인증 | 직원이 초대를 수락해 멤버가 되는 경로가 없다(멤버는 SQL로만 추가). 수락은 JWT의 이메일 claim 신뢰 범위 결정이 필요하다(E3 후속) |
-| 도서·템플릿 | (도서 등록·수정은 §38에서 영속화) 남은 것: `publishTemplateVersion` | 안내 문구 템플릿 게시 불가. YES24 검색 연동은 없어 도서는 수기 또는 호출자가 보낸 YES24 결과로만 등록된다 |
+| 도서·템플릿 | (도서 등록·수정은 §38, 템플릿 게시는 §40에서 영속화) 남은 것 없음 | YES24 검색 연동은 없어 도서는 수기 또는 호출자가 보낸 YES24 결과로만 등록된다 |
 | 고객 안내 | `createNotificationTarget`·`recordNotificationAttempt`·`recordNotificationCopy`·`recordNotificationResult`·`renotify` | 안내(알림) 전체가 영속화되지 않음. `longUnreceivedWarnings`도 마찬가지 |
 | 서비스 주문 | `createOrderService`·`confirmOrderService` | 서비스 주문 경로 없음(일반 주문은 `createOrder`·`confirmOrder`로 영속화됨) |
 | 기타 | 발주 CSV 출력 이력(`exportPurchaseOrderCsv`, 바인딩 없음) | 전달 기록의 `fileVersion`을 지정하면 거부된다 |

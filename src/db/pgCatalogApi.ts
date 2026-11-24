@@ -1,6 +1,8 @@
 import type { PoolClient } from "pg";
 import { authorizedActions } from "../auth/authorizedActions";
 import type { Book, BookRevision, RegisterBookRequest } from "../catalog/registerBook";
+import type { TemplateVersion } from "../catalog/messageTemplate";
+import type { PublishTemplateVersionRequest } from "../catalog/publishTemplateVersion";
 import type { UpdateBookRequest } from "../catalog/updateBook";
 import {
   inTransaction,
@@ -18,6 +20,7 @@ type Actor = { userId: string };
 /** 호출자가 보내는 요청. 행위자 이름은 인증된 사용자에서 주입된다 */
 export type RegisterBookBody = Omit<RegisterBookRequest, "registeredBy">;
 
+export type PublishTemplateVersionBody = Omit<PublishTemplateVersionRequest, "actorRole" | "publishedBy">;
 export type UpdateBookBody = Omit<UpdateBookRequest, "changedBy">;
 
 export const toBook = (b: any): Book => ({
@@ -113,7 +116,42 @@ export function createPgCatalogApi(deps: { pool: PoolLike }) {
       return result;
     });
 
+  const publishOnce = (actor: Actor, request: PublishTemplateVersionBody) =>
+    inTransaction(deps.pool, "service_role", actor.userId, async (client) => {
+      const principal = principalFor(await loadMembership(client, actor.userId, request.tenantId), actor.userId, request.tenantId);
+      const valid = isUuid(request.tenantId) && typeof request.key === "string";
+      // 같은 템플릿의 동시 게시를 직렬화한다(락을 잡은 뒤에 읽어야 먼저 커밋된 버전이 보인다)
+      if (valid) await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`tpl:${request.tenantId}:${request.key}`]);
+      const versions: TemplateVersion[] = valid
+        ? (await client.query("select * from public.ordering_template_versions where tenant_id = $1 and key = $2 order by version", [request.tenantId, request.key])).rows.map(
+            (v): TemplateVersion => ({ id: v.id, tenantId: v.tenant_id, key: v.key, version: Number(v.version), body: v.body, variables: v.variables, publishedBy: v.published_by, publishedAt: v.published_at.toISOString(), recordedAt: v.recorded_at.toISOString() }),
+          )
+        : [];
+      const delegated = isUuid(request.tenantId)
+        ? (await client.query("select 1 from public.ordering_management_delegations where tenant_id = $1 and user_id = $2", [request.tenantId, actor.userId])).rowCount === 1
+        : false;
+      const idempotency = await loadCommands(client, request.tenantId, request.idempotencyKey);
+      const known = new Set(idempotency.keys());
+      const saved: TemplateVersion[] = [];
+      const { tenantId: _t, ...rest } = request;
+      void _t;
+      const result = authorizedActions.publishTemplateVersion(
+        { templateVersions: { list: () => versions, save: (v) => void saved.push(v) }, managementDelegations: { isDelegated: (_t2, userId) => delegated && userId === actor.userId }, idempotency },
+        principal,
+        rest,
+      );
+      for (const v of saved) {
+        await client.query(
+          "insert into public.ordering_template_versions (id, tenant_id, key, version, body, variables, published_by, published_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+          [v.id, v.tenantId, v.key, v.version, v.body, v.variables, v.publishedBy, v.publishedAt, v.recordedAt],
+        );
+      }
+      await saveNewCommands(client, idempotency, known);
+      return result;
+    });
+
   return {
+    publishTemplateVersion: (actor: Actor, request: PublishTemplateVersionBody) => withRetry(() => publishOnce(actor, request)),
     updateBook: (actor: Actor, request: UpdateBookBody) => withRetry(() => updateOnce(actor, request)),
     registerBook: (actor: Actor, request: RegisterBookBody) => withRetry(() => registerOnce(actor, request)),
   };
