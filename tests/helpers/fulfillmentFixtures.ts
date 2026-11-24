@@ -5,6 +5,11 @@ import type {
   Fulfillment,
   PostFulfillmentRequest,
 } from "../../src/fulfillment/postFulfillment";
+import { requestOrderCancellation } from "../../src/order/requestOrderCancellation";
+import {
+  createInMemoryOrderCancellationDecisionRepository,
+  createInMemoryOrderCancellationRequestRepository,
+} from "./cancellationRepos";
 import { releaseScene } from "./inventoryFixtures";
 import {
   createInMemoryPaymentConfirmationRepository,
@@ -25,21 +30,6 @@ export function createInMemoryFulfillmentRepository() {
   };
 }
 
-/** 취소 요청으로 인도가 잠긴 수량 (취소 요청 모델 ST-O05/D27이 생기기 전의 연결점) */
-export function createInMemoryOrderCancelLockRepository() {
-  const all: { tenantId: string; orderId: string; orderLineId: string; quantity: number }[] = [];
-  return {
-    list(tenantId: string, orderId: string, orderLineId: string) {
-      return all.filter(
-        (l) => l.tenantId === tenantId && l.orderId === orderId && l.orderLineId === orderLineId,
-      );
-    },
-    lock(tenantId: string, orderId: string, orderLineId: string, quantity: number) {
-      all.push({ tenantId, orderId, orderLineId, quantity });
-    },
-  };
-}
-
 /**
  * 주문 D(book-1 2권 × 15,000원)가 매장 재고 2권을 예약했고,
  * 주문 B(3권 × 15,000원)는 입고 배분 3권이 있는 세계. 결제는 아직 없다.
@@ -51,7 +41,8 @@ export function fulfillmentScene() {
   const paymentConfirmations = createInMemoryPaymentConfirmationRepository();
   const paymentVoids = createInMemoryPaymentVoidRepository();
   const fulfillments = createInMemoryFulfillmentRepository();
-  const orderCancelLocks = createInMemoryOrderCancelLockRepository();
+  const orderCancellationRequests = createInMemoryOrderCancellationRequestRepository();
+  const orderCancellationDecisions = createInMemoryOrderCancellationDecisionRepository();
   const deps = {
     ...st.deps,
     ...rel.deps,
@@ -61,7 +52,8 @@ export function fulfillmentScene() {
     paymentConfirmations,
     paymentVoids,
     fulfillments,
-    orderCancelLocks,
+    orderCancellationRequests,
+    orderCancellationDecisions,
   };
   const orderD = rel.w.addOrder([{ bookId: "book-1", quantity: 2, unitPriceKrw: "15000" }]);
   const reservation = reserveStock(deps, {
@@ -110,5 +102,22 @@ export function fulfillmentScene() {
     idempotencyKey: `ful-${++seq}`,
     ...extra,
   });
+  /** 주문 품목의 일부 수량을 취소 요청 중으로 만든다 (실제 취소 요청 기록 = D27 잠금) */
+  const orderCancelLocks = {
+    lock(tenantId: string, orderId: string, orderLineId: string, quantity: number) {
+      const order = deps.orders.get(tenantId, orderId)!;
+      requestOrderCancellation(deps, {
+        tenantId,
+        orderId,
+        orderLineId,
+        quantity,
+        reason: "취소 요청 잠금",
+        expectedVersion: order.version,
+        requestedBy: "김직원",
+        requestedAt: "2026-03-04T06:30:00.000Z",
+        idempotencyKey: `lock-${++seq}`,
+      });
+    },
+  };
   return { ...rel, deps, orderD, reservation, pay, fulfillRequest, fulfillments, orderCancelLocks, st };
 }

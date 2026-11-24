@@ -9,6 +9,11 @@ import type { PaymentConfirmationRepository } from "../payment/confirmPayment";
 import { paymentSummary } from "../payment/paymentSummary";
 import type { PaymentRepository } from "../payment/recordPayment";
 import type { PaymentVoidRepository } from "../payment/voidPayment";
+import { activeCancellationLock } from "../order/orderCancellationState";
+import type {
+  OrderCancellationDecisionRepository,
+  OrderCancellationRequestRepository,
+} from "../order/requestOrderCancellation";
 import type { OrderRepository } from "../order/confirmOrderService";
 import {
   planAllocationDelivery,
@@ -53,14 +58,9 @@ export type PostFulfillmentDeps = DeliverStockReservationDeps & DeliverAllocatio
   orders: OrderRepository;
   fulfillments: FulfillmentRepository;
   idempotency: IdempotencyStore;
-  /** 취소 요청 대상으로 잠긴 수량 (취소 요청 모델 ST-O05/D27이 채운다) */
-  orderCancelLocks: {
-    list(
-      tenantId: string,
-      orderId: string,
-      orderLineId: string,
-    ): { quantity: number }[];
-  };
+  /** 진행 중인 취소 요청의 수량은 잠겨 인도할 수 없다 (D27) */
+  orderCancellationRequests: Pick<OrderCancellationRequestRepository, "list">;
+  orderCancellationDecisions: Pick<OrderCancellationDecisionRepository, "list">;
   payments: PaymentRepository;
   paymentConfirmations: Pick<PaymentConfirmationRepository, "list">;
   paymentVoids: Pick<PaymentVoidRepository, "list">;
@@ -131,9 +131,11 @@ export function postFulfillment(
         .list(request.tenantId, order.id)
         .filter((f) => f.orderLineId === line.lineId)
         .reduce((sum, f) => sum + f.quantity, 0);
-      const locked = deps.orderCancelLocks
-        .list(request.tenantId, order.id, line.lineId)
-        .reduce((sum, l) => sum + l.quantity, 0);
+      const locked = activeCancellationLock(
+        deps.orderCancellationRequests.list(request.tenantId, order.id),
+        (requestId) => deps.orderCancellationDecisions.list(request.tenantId, requestId),
+        line.lineId,
+      );
       if (quantity > line.quantity - received - locked) {
         throw new AppError(
           "BUSINESS_INVARIANT",
