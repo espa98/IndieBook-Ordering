@@ -1,6 +1,6 @@
 # 승인·결정 필요 항목 정리
 
-작성일: 2026-11-24 · 기준 커밋: `7d58fd2` (테스트 105 files / 1064 tests 통과)
+작성일: 2026-11-24 · 기준 커밋: `0095c3c` (테스트 126 files / 1248 tests 통과, 마이그레이션 001~018)
 
 **결정 기록 (2026-11-24, 사용자):** ① 3번 구현 해석 39건(I01~I39) **현재 구현대로 일괄 승인**. ② E1 격리 테스트 DB **승인**(형태·비용 한도는 아래 E1 참고). ③ E2 서버 방식 **별도 백엔드**(Node.js + TypeScript). ④ E3 JWT **Supabase Auth 유지**. ⑤ P2 DEC-15 **Owner 전용 확정**. ⑥ E7 영속화 **권고안(a)** 승인. 나머지(E4~E6, P1·P3~P10, L, C)는 미결정이다.
 
@@ -34,6 +34,8 @@
 | E9 | **브라우저 클라이언트 허용 오리진(CORS)과 속도 제한** | 둘 다 없음(서버가 JSON API만 제공). 인증은 Bearer 토큰이라 쿠키 CSRF는 해당 없음 | 프런트엔드 도메인을 알려 주면 허용 오리진 목록으로 구현. 속도 제한은 앞단(게이트웨이·로드밸런서)에서 하는 것을 권고 | [ ] 오리진: ______ [ ] 앞단에서 처리 |
 
 **연결 필수화 정책:** 일부 검사는 선택 의존성이라 서버 조립에서 연결하지 않으면 조용히 꺼진다. (`requestRefund`의 `refundAttempts`·`refundAttemptResolutions`, `executeOrderReopening`의 `fulfillmentCorrections`, `evaluateOrderClosure`·`allocateSourcing`의 `supplierObligations`, `createOrderService`의 `books`) 권고: 서버 조립 단계에서 모두 필수로 바꾼다. [ ] 동의
+
+**현재 연결 상태(`0095c3c`):** `supplierObligations`(배정·주문 종결·주문 재개), `fulfillmentCorrections`(재개), `refundAttempts` 조회, 일반 주문의 `books`는 어댑터에서 연결했다. 환급 시도 **기록 명령**과 서비스 주문(`createOrderService`)은 영속화되지 않아 해당 검사는 동작하지 않는다. 도메인 타입에서 선택 의존성을 필수로 바꾸는 작업은 하지 않았다.
 
 ---
 
@@ -78,7 +80,7 @@
 | I11 | 같은 공급처 재연결 | 승인 없이 허용. **다른 공급처로 재조달은 Owner의 중복 위험 승인 필요**(BR-P05) | [ ] 유지 |
 | I12 | 배정 해제(ST-P02) | 배정 전량 단위로만. 미전달 발주(DRAFT/READY)에 묶인 배정은 거부, 전달된 발주에 묶인 배정은 발주를 바꾸지 않고 유지 의무를 기록. Owner·Staff 모두 가능 | [ ] 유지 |
 | I13 | 미전달 발주 취소(ST-P09) | 연결된 배정을 **자동 해제하지 않고 ACTIVE로 남김**(재연결 또는 ST-P02). 파일 출력 이력이 있어도 취소 가능 | [ ] 유지 [ ] 배정 자동 해제 |
-| I14 | 공급처 외부 의무 | 해제 기록과 발주 잔량에서 **파생**(`min(유지 수량, 발주 품목 잔량)`). 같은 품목에 다른 고객 물량이 있어도 열린 의무로 보므로 **과차단 가능**. 주문 종결을 `EXTERNAL_OBLIGATION_OPEN`으로 막음 | [ ] 유지 [ ] 고객별 귀속 규칙 정의 |
+| I14 | 공급처 외부 의무 | 해제 기록과 발주 잔량에서 **파생**(`min(유지 수량, 발주 품목 잔량)`). 같은 품목에 다른 고객 물량이 있어도 열린 의무로 보므로 **과차단 가능**. 주문 종결·재개 판정이 `EXTERNAL_OBLIGATION_OPEN`으로 막음(어댑터 연결 완료, §35) | [ ] 유지 [ ] 고객별 귀속 규칙 정의 |
 | I15 | 중복 위험 승인 | Owner 전용, 계획은 `STOCK_INTAKE`/`SUPPLIER_RETURN`, 기록만 하고 실제 업무는 만들지 않음 | [ ] 유지 |
 | I16 | 발주 종결(ST-P11) 차단 사유 | `OPEN_QUANTITY`·`EXCESS_UNDECIDED`·`DISPOSITION_OPEN`·`CANCELLATION_REQUEST_OPEN`·`DEFECT_UNRESOLVED`. 종결은 SYSTEM만 | [ ] 유지 |
 
