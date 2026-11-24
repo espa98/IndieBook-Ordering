@@ -8,10 +8,12 @@ import type { SourcingAllocationRepository } from "../procurement/allocateSourci
 import type { OrderRepository } from "../order/confirmOrderService";
 import { stockLevel } from "./stockLevel";
 import type { StockMovementRepository } from "./registerInitialStock";
-import type {
-  StockReservation,
-  StockReservationRepository,
+import {
+  readReservationLedger,
+  type StockReservation,
+  type StockReservationRepository,
 } from "./stockReservation";
+import type { StockReservationReleaseRepository } from "./releaseStockReservation";
 
 /** 예약 기록. 생성 근거(담당자·업무 시각·기록 시각)를 함께 남긴다. */
 export type StockReservationRecord = StockReservation & {
@@ -26,6 +28,7 @@ export type ReserveStockDeps = {
   sourcingAllocations: Pick<SourcingAllocationRepository, "list">;
   stockMovements: StockMovementRepository;
   stockReservations: StockReservationRepository;
+  stockReservationReleases: StockReservationReleaseRepository;
   idempotency: IdempotencyStore;
   now?: () => Date;
 };
@@ -81,10 +84,15 @@ export function reserveStock(
           "stock can only be reserved for a confirmed order",
         );
       }
-      const reservations = deps.stockReservations.list(request.tenantId, line.bookId);
+      const { reservations, releases } = readReservationLedger(
+        deps,
+        request.tenantId,
+        line.bookId,
+      );
       const { available } = stockLevel(
         deps.stockMovements.list(request.tenantId, line.bookId),
         reservations,
+        releases,
       );
       if (request.quantity > available) {
         throw new AppError(
@@ -93,9 +101,20 @@ export function reserveStock(
         );
       }
       // 미배정량 Unassigned = Need - Planned 를 넘을 수 없다 (BR-Q06~Q08)
-      const reservedForLine = reservations
-        .filter((r) => r.orderId === order.id && r.orderLineId === line.lineId)
-        .reduce((sum, r) => sum + r.quantity, 0);
+      const reservedForLine =
+        reservations
+          .filter((r) => r.orderId === order.id && r.orderLineId === line.lineId)
+          .reduce((sum, r) => sum + r.quantity, 0) -
+        releases
+          .filter((rel) =>
+            reservations.some(
+              (r) =>
+                r.id === rel.reservationId &&
+                r.orderId === order.id &&
+                r.orderLineId === line.lineId,
+            ),
+          )
+          .reduce((sum, rel) => sum + rel.quantity, 0);
       const planned = deps.sourcingAllocations
         .list(request.tenantId)
         .filter((a) => a.orderId === order.id && a.lineId === line.lineId && a.status === "ACTIVE")

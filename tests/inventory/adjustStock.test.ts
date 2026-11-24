@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { AppError } from "../../src/errors/AppError";
 import { adjustStock } from "../../src/inventory/adjustStock";
-import { adjustScene } from "../helpers/stockFixtures";
+import { releaseStockReservation } from "../../src/inventory/releaseStockReservation";
+import { adjustScene, reservationReleaseScene } from "../helpers/stockFixtures";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -172,5 +173,22 @@ describe("adjustStock: 재고 증감 조정 (ST-I02, UC-26, BR-Q09/Q22, DEC-19)"
     expect((thrown as AppError).code).toBe("IDEMPOTENCY_CONFLICT");
     expect((thrown as AppError).httpStatus).toBe(409);
     expect(stockMovements.list("tenant-a", "book-1")).toHaveLength(2);
+  });
+
+  it("예약을 해제하면 줄어든 예약량 기준으로 감소 조정할 수 있다", () => {
+    const { deps, adjustRequest, releaseRequest, reservation } = reservationReleaseScene(); // 보유 5, 예약 2
+    const out = (quantity: number) => {
+      try {
+        adjustStock(deps, adjustRequest({ direction: "OUT", quantity, reason: "분실" }));
+      } catch (error) {
+        return error;
+      }
+    };
+
+    expect(out(4)).toBeInstanceOf(AppError); // 보유 1 < 예약 2
+
+    releaseStockReservation(deps, releaseRequest({ reservationId: reservation.id, quantity: 2 }));
+
+    expect(out(4)).toBeUndefined(); // 보유 1 >= 예약 0
   });
 });

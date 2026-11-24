@@ -4,7 +4,8 @@ import { addOrderLine } from "../../src/order/addOrderLine";
 import { createDraftOrder } from "../../src/order/createDraftOrder";
 import { reserveStock } from "../../src/inventory/reserveStock";
 import { releaseScene } from "../helpers/inventoryFixtures";
-import { adjustScene, reservationScene } from "../helpers/stockFixtures";
+import { releaseStockReservation } from "../../src/inventory/releaseStockReservation";
+import { adjustScene, reservationReleaseScene, reservationScene } from "../helpers/stockFixtures";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -196,5 +197,47 @@ describe("reserveStock: 주문 품목의 매장 재고 예약 (ST-I03, UC-27, BR
     expect((thrown as AppError).code).toBe("IDEMPOTENCY_CONFLICT");
     expect((thrown as AppError).httpStatus).toBe(409);
     expect(stockReservations.list("tenant-a", "book-1")).toHaveLength(1);
+  });
+
+  it("예약을 해제하면 가용량이 돌아와 다른 주문이 그만큼 예약할 수 있다", () => {
+    const { deps, reserveRequest, releaseRequest, w, reservation } = reservationReleaseScene(); // 보유 5, 예약 2
+    const other = w.addOrder([{ bookId: "book-1", quantity: 4, unitPriceKrw: "15000" }]);
+    const reserveOther = (quantity: number) => {
+      try {
+        reserveStock(
+          deps,
+          reserveRequest({ orderId: other.id, orderLineId: other.lines[0]!.lineId, quantity }),
+        );
+      } catch (error) {
+        return error;
+      }
+    };
+
+    expect(reserveOther(4)).toBeInstanceOf(AppError); // 가용 3 < 4
+    expect(reserveOther(3)).toBeUndefined(); // 가용 0
+    expect(reserveOther(1)).toBeInstanceOf(AppError);
+
+    releaseStockReservation(deps, releaseRequest({ reservationId: reservation.id, quantity: 2 })); // 가용 2
+
+    expect(reserveOther(1)).toBeUndefined(); // 품목 한도 4 중 4번째 권
+  });
+
+  it("예약을 해제하면 같은 주문 품목의 미배정량도 되살아나 다시 예약할 수 있다", () => {
+    const { deps, reserveRequest, releaseRequest, reservation, stockReservations } =
+      reservationReleaseScene(); // 품목 2권을 전부 예약한 상태
+    const again = () => {
+      try {
+        reserveStock(deps, reserveRequest({ quantity: 1 }));
+      } catch (error) {
+        return error;
+      }
+    };
+
+    expect(again()).toBeInstanceOf(AppError); // 품목 2권이 이미 예약됨
+
+    releaseStockReservation(deps, releaseRequest({ reservationId: reservation.id, quantity: 1 }));
+
+    expect(again()).toBeUndefined();
+    expect(stockReservations.list("tenant-a", "book-1")).toHaveLength(2);
   });
 });

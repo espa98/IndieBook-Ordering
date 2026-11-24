@@ -5,7 +5,8 @@ import {
 } from "../idempotency/executeIdempotent";
 import { invalid, isNonEmptyString, parseUtcTimestamp } from "../procurement/validation";
 import { stockLevel } from "./stockLevel";
-import type { StockReservationRepository } from "./stockReservation";
+import type { StockReservationReleaseRepository } from "./releaseStockReservation";
+import { readReservationLedger, type StockReservationRepository } from "./stockReservation";
 import type {
   StockMovement,
   StockMovementRepository,
@@ -17,6 +18,7 @@ export type AdjustStockDeps = {
   /** 점주가 재고 조정을 명시적으로 위임한 직원만 조정할 수 있다 (DEC-19) */
   stockDelegations: { isDelegated(tenantId: string, userId: string): boolean };
   stockReservations: Pick<StockReservationRepository, "list">;
+  stockReservationReleases: Pick<StockReservationReleaseRepository, "list">;
   now?: () => Date;
 };
 
@@ -78,10 +80,12 @@ export function adjustStock(
           "initial stock must be registered before adjusting",
         );
       }
-      const { onHand, reserved } = stockLevel(
-        movements,
-        deps.stockReservations.list(request.tenantId, request.bookId),
+      const { reservations, releases } = readReservationLedger(
+        deps,
+        request.tenantId,
+        request.bookId,
       );
+      const { onHand, reserved } = stockLevel(movements, reservations, releases);
       // 조정 뒤에도 보유 >= 예약 >= 0 이어야 한다 (BR-Q09)
       if (request.direction === "OUT" && onHand - request.quantity < reserved) {
         throw new AppError(

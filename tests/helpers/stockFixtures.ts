@@ -1,4 +1,9 @@
 import type { ReserveStockRequest } from "../../src/inventory/reserveStock";
+import type {
+  ReleaseStockReservationRequest,
+  StockReservationRelease,
+} from "../../src/inventory/releaseStockReservation";
+import { reserveStock } from "../../src/inventory/reserveStock";
 import { world } from "./procurementWorld";
 import { createIdempotencyStore } from "../../src/idempotency/executeIdempotent";
 import type { StockReservation } from "../../src/inventory/stockReservation";
@@ -48,6 +53,9 @@ export function stockScene() {
 export function createInMemoryStockReservationRepository() {
   const all: StockReservation[] = [];
   return {
+    get(tenantId: string, id: string): StockReservation | undefined {
+      return all.find((r) => r.tenantId === tenantId && r.id === id);
+    },
     list(tenantId: string, bookId: string): StockReservation[] {
       return all.filter((r) => r.tenantId === tenantId && r.bookId === bookId);
     },
@@ -57,10 +65,23 @@ export function createInMemoryStockReservationRepository() {
   };
 }
 
+export function createInMemoryStockReservationReleaseRepository() {
+  const all: StockReservationRelease[] = [];
+  return {
+    list(tenantId: string, reservationId: string): StockReservationRelease[] {
+      return all.filter((r) => r.tenantId === tenantId && r.reservationId === reservationId);
+    },
+    save(release: StockReservationRelease): void {
+      all.push(release);
+    },
+  };
+}
+
 /** book-1 재고 5권이 Owner에 의해 초기 등록된 세계 */
 export function adjustScene() {
   const base = stockScene();
   const stockReservations = createInMemoryStockReservationRepository();
+  const stockReservationReleases = createInMemoryStockReservationReleaseRepository();
   // 점주가 재고 조정을 명시적으로 위임한 직원 (DEC-19)
   const delegated = new Set<string>();
   const stockDelegations = {
@@ -69,8 +90,9 @@ export function adjustScene() {
   };
   const s = {
     ...base,
-    deps: { ...base.deps, stockReservations, stockDelegations },
+    deps: { ...base.deps, stockReservations, stockReservationReleases, stockDelegations },
     stockReservations,
+    stockReservationReleases,
     stockDelegations,
   };
   registerInitialStock(s.deps, s.initialRequest({ quantity: 5 }));
@@ -112,4 +134,26 @@ export function reservationScene() {
     ...extra,
   });
   return { ...a, w, deps, order, reserveRequest };
+}
+
+/** reservationScene에서 주문(2권)이 재고 2권을 예약한 세계 (가용 3) */
+export function reservationReleaseScene() {
+  const s = reservationScene();
+  const { stockReservationReleases } = s;
+  const deps = s.deps;
+  const reservation = reserveStock(deps, s.reserveRequest({ quantity: 2 }));
+  let seq = 0;
+  const releaseRequest = (
+    extra: Partial<ReleaseStockReservationRequest> = {},
+  ): ReleaseStockReservationRequest => ({
+    tenantId: "tenant-a",
+    reservationId: reservation.id,
+    quantity: 1,
+    reason: "고객이 수량 1권 줄임",
+    releasedBy: "김직원",
+    releasedAt: "2026-03-04T06:50:00.000Z",
+    idempotencyKey: `rrel-${++seq}`,
+    ...extra,
+  });
+  return { ...s, deps, reservation, stockReservationReleases, releaseRequest };
 }
