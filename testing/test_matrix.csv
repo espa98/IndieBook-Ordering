@@ -34,7 +34,7 @@ ST-O08,requirement,취소 종결,domain,PARTIAL,tests/cancellation/closeCancelle
 ST-O09,requirement,초안 폐기,domain,NOT_IMPLEMENTED,,
 ST-O10,requirement,종결 후 정정·재개,domain,PARTIAL,tests/reopening 1 file / 6 tests passed,결제 보정·수령 정정을 근거로 인정
 ST-P01,requirement,조달 배정,domain,PASS,tests/procurement,06단계
-ST-P02,requirement,미이행 배정 해제,domain,NOT_IMPLEMENTED,,
+ST-P02,requirement,미이행 배정 해제,domain,PARTIAL,tests/procurement/releaseSourcing 4 tests,발주 미연결·전달된 발주 연결 배정 해제와 유지 의무 기록. 입고 배분·수령 이행분 검사와 공급처 의무 조정(BR-P05)은 미구현
 ST-P03,requirement,발주서 생성,domain,PASS,tests/procurement,06단계
 ST-P04,requirement,발주 READY 전환,domain,PASS,tests/procurement,06단계
 ST-P05,requirement,발주 파일 출력(CSV),domain,PASS,tests/procurement,XLSX 미구현
