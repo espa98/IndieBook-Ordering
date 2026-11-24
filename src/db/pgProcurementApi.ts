@@ -1,8 +1,13 @@
 import type { PoolClient } from "pg";
 import { authorizedActions } from "../auth/authorizedActions";
-import type { UserPrincipal } from "../auth/principal";
+import { createSystemPrincipal, type UserPrincipal } from "../auth/principal";
 import { AppError } from "../errors/AppError";
 import type { IdempotencyStore } from "../idempotency/executeIdempotent";
+import type { ReturnCompletion } from "../inventory/completeReturn";
+import type { ReturnException } from "../inventory/reportReturnException";
+import type { ReturnRequest } from "../inventory/requestReturn";
+import type { ReturnExceptionResolution } from "../inventory/resolveReturnException";
+import type { StockIntake } from "../inventory/transferCancelledToStock";
 import type { Order } from "../order/createDraftOrder";
 import type { ApproveDuplicateRiskRequest, DuplicateRiskApproval } from "../procurement/approveDuplicateRisk";
 import type { AllocateSourcingRequest, SourcingAllocation, Supplier } from "../procurement/allocateSourcing";
@@ -11,6 +16,7 @@ import type { CancelUndeliveredPurchaseOrderRequest } from "../procurement/cance
 import type { ConfirmPurchaseOrderCancellationRequest } from "../procurement/confirmPurchaseOrderCancellation";
 import type { CancellationRequest, CancellationResponse, CreateCancellationRequestRequest } from "../procurement/createCancellationRequest";
 import type { RespondToCancellationRequestRequest } from "../procurement/respondToCancellationRequest";
+import type { ExecutePurchaseOrderClosureRequest } from "../procurement/executePurchaseOrderClosure";
 import type { MarkPurchaseOrderReadyRequest } from "../procurement/markPurchaseOrderReady";
 import type { ReleaseSourcingRequest, SourcingRelease } from "../procurement/releaseSourcing";
 import type { RecordPurchaseOrderDeliveryRequest } from "../procurement/recordPurchaseOrderDelivery";
@@ -41,6 +47,7 @@ export type CancelUndeliveredPurchaseOrderBody = Omit<CancelUndeliveredPurchaseO
 export type CreateCancellationRequestBody = CreateCancellationRequestRequest;
 export type RespondToCancellationRequestBody = RespondToCancellationRequestRequest;
 export type ConfirmPurchaseOrderCancellationBody = ConfirmPurchaseOrderCancellationRequest;
+export type ExecutePurchaseOrderClosureBody = Omit<ExecutePurchaseOrderClosureRequest, "executedBy">;
 export type AllocateSourcingBody = AllocateSourcingRequest;
 export type ApproveDuplicateRiskBody = Omit<ApproveDuplicateRiskRequest, "actorRole" | "approvedBy">;
 export type ReleaseSourcingBody = Omit<ReleaseSourcingRequest, "releasedBy">;
@@ -149,8 +156,8 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
         const result = run(state, principal, idempotency, saved, rest);
         for (const po of saved.po) {
           const updated = await client.query(
-            "update public.ordering_purchase_orders set status = $3, version = $4, delivery = $5, cancelled_at = coalesce($7, cancelled_at), cancelled_by = coalesce($8, cancelled_by), cancel_reason = coalesce($9, cancel_reason) where tenant_id = $1 and id = $2 and version = $6",
-            [po.tenantId, po.id, po.status, po.version, po.delivery ?? null, state?.po?.version, po.cancelledAt ?? null, po.cancelledBy ?? null, po.cancelReason ?? null],
+            "update public.ordering_purchase_orders set status = $3, version = $4, delivery = $5, cancelled_at = coalesce($7, cancelled_at), cancelled_by = coalesce($8, cancelled_by), cancel_reason = coalesce($9, cancel_reason), closed_at = coalesce($10, closed_at) where tenant_id = $1 and id = $2 and version = $6",
+            [po.tenantId, po.id, po.status, po.version, po.delivery ?? null, state?.po?.version, po.cancelledAt ?? null, po.cancelledBy ?? null, po.cancelReason ?? null, po.closedAt ?? null],
           );
           if (updated.rowCount !== 1) throw new AppError("VERSION_CONFLICT");
         }
@@ -335,6 +342,74 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
       return result;
     });
 
+  /** 서버 내부 업무다. HTTP로 노출하지 않으며, 호출자는 서버 코드(작업 실행기)다. 종결 조건은 실행하는 지금 다시 계산한다 (BR-P06) */
+  const closeOnce = (request: ExecutePurchaseOrderClosureBody): Promise<PurchaseOrder> =>
+    withRetry(() =>
+      inTransaction(deps.pool, "service_role", "", async (client) => {
+        const principal = createSystemPrincipal(request.tenantId);
+        const exists = isUuid(request.tenantId) && isUuid(request.purchaseOrderId)
+          ? (await client.query("select 1 from public.ordering_purchase_orders where tenant_id = $1 and id = $2 for update", [request.tenantId, request.purchaseOrderId])).rowCount === 1
+          : false;
+        if (exists) {
+          const lineIds = (await client.query("select id from public.ordering_po_lines where tenant_id = $1 and purchase_order_id = $2 order by id", [request.tenantId, request.purchaseOrderId])).rows.map((r) => r.id as string);
+          for (const id of lineIds.sort()) await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [polLockKey(request.tenantId, id)]);
+        }
+        const state = exists ? await loadPoState(client, request.tenantId, request.purchaseOrderId) : undefined;
+        // 이 발주의 입고 배분에서 주문 취소로 풀린 물량의 처분 기록
+        const cancellationIds = (state?.cancellations ?? []).map((c) => c.id);
+        const all = async (table: string, column: string, ids: string[]) => (await client.query(`select * from public.${table} where tenant_id = $1 and ${column} = any($2::uuid[])`, [request.tenantId, ids])).rows;
+        const intakes = (await all("ordering_stock_intakes", "cancellation_id", cancellationIds)).map(
+          (i): StockIntake => ({ id: i.id, tenantId: i.tenant_id, bookId: "", cancellationId: i.cancellation_id, receiptId: "", orderId: "", orderLineId: "", quantity: i.quantity, actedBy: i.acted_by, actedAt: i.acted_at.toISOString(), recordedAt: i.recorded_at.toISOString() }),
+        );
+        const returnRequests = (await all("ordering_return_requests", "cancellation_id", cancellationIds)).map(
+          (r): ReturnRequest => ({ id: r.id, tenantId: r.tenant_id, bookId: "", cancellationId: r.cancellation_id, receiptId: "", supplierCode: "", quantity: r.quantity, requestedBy: r.requested_by, requestedAt: r.requested_at.toISOString(), recordedAt: r.recorded_at.toISOString() }),
+        );
+        const requestIds = returnRequests.map((r) => r.id);
+        const completions = (await all("ordering_return_completions", "return_request_id", requestIds)).map(
+          (c): ReturnCompletion => ({ id: c.id, tenantId: c.tenant_id, returnRequestId: c.return_request_id, quantity: c.quantity, evidence: c.evidence, confirmedBy: c.confirmed_by, confirmedAt: c.confirmed_at.toISOString(), recordedAt: c.recorded_at.toISOString() }),
+        );
+        const exceptions = (await all("ordering_return_exceptions", "return_request_id", requestIds)).map(
+          (e): ReturnException => ({ id: e.id, tenantId: e.tenant_id, returnRequestId: e.return_request_id, quantity: e.quantity, kind: e.kind, evidence: e.evidence, reportedBy: e.reported_by, reportedAt: e.reported_at.toISOString(), recordedAt: e.recorded_at.toISOString() }),
+        );
+        const resolutions = (await all("ordering_return_exception_resolutions", "return_exception_id", exceptions.map((e) => e.id))).map(
+          (r): ReturnExceptionResolution => ({ id: r.id, tenantId: r.tenant_id, returnExceptionId: r.return_exception_id, returnRequestId: exceptions.find((e) => e.id === r.return_exception_id)?.returnRequestId ?? "", outcome: r.outcome, quantity: r.quantity, evidence: r.evidence, resolvedBy: r.resolved_by, resolvedAt: r.resolved_at.toISOString(), recordedAt: r.recorded_at.toISOString() }),
+        );
+        const idempotency = await loadCommands(client, request.tenantId, request.idempotencyKey);
+        const known = new Set(idempotency.keys());
+        const saved: Saved = { po: [], replies: [], cancellationRequests: [], cancellationResponses: [] };
+        const { tenantId: _t, ...rest } = request;
+        void _t;
+        const result = authorizedActions.executePurchaseOrderClosure(
+          {
+            purchaseOrders: poRepo(state, saved),
+            receipts: { list: () => state?.receipts ?? [] },
+            receiptAllocations: { list: (_t2, receiptId) => (state?.allocations ?? []).filter((a) => a.receiptId === receiptId) },
+            allocationCancellations: { list: (_t2, allocationId) => (state?.cancellations ?? []).filter((c) => c.allocationId === allocationId) },
+            stockIntakes: { list: (_t2, id) => intakes.filter((i) => i.cancellationId === id) },
+            returnRequests: { list: (_t2, id) => returnRequests.filter((r) => r.cancellationId === id) },
+            returnCompletions: { list: (_t2, id) => completions.filter((c) => c.returnRequestId === id) },
+            returnExceptions: { list: (_t2, id) => exceptions.filter((e) => e.returnRequestId === id) },
+            returnExceptionResolutions: { list: (_t2, id) => resolutions.filter((r) => r.returnExceptionId === id) },
+            // 파손·오배송 해소와 초과입고 결정은 아직 영속화하지 않아 기록이 없다. 그런 입고가 있는 발주는 종결이 차단된다
+            receiptDefectResolutions: { list: () => [] },
+            excessDecisions: { list: () => [] },
+            receiptCorrections: { list: (_t2, receiptId) => (state?.corrections ?? []).filter((c) => c.receiptId === receiptId) },
+            replies: { list: () => state?.replies ?? [] },
+            cancellations: { listRequests: () => state?.requests ?? [], listResponses: () => state?.responses ?? [] },
+            idempotency,
+          },
+          principal,
+          rest,
+        );
+        for (const po of saved.po) {
+          const updated = await client.query("update public.ordering_purchase_orders set status = $3, version = $4, closed_at = $5 where tenant_id = $1 and id = $2 and version = $6", [po.tenantId, po.id, po.status, po.version, po.closedAt ?? null, state?.po?.version]);
+          if (updated.rowCount !== 1) throw new AppError("VERSION_CONFLICT");
+        }
+        await saveNewCommands(client, idempotency, known);
+        return result;
+      }),
+    );
+
   async function insertPurchaseOrder(client: PoolClient, po: PurchaseOrder) {
     await client.query("insert into public.ordering_purchase_orders (id, tenant_id, supplier_code, status, version) values ($1, $2, $3, $4, $5)", [po.id, po.tenantId, po.supplierCode, po.status, po.version]);
     for (const line of po.lines) {
@@ -348,6 +423,8 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
   void (undefined as unknown as IdempotencyStore);
   void (undefined as unknown as UserPrincipal);
   return {
+    /** 서버 내부 업무다. HTTP로 노출하지 않는다 */
+    executePurchaseOrderClosure: (request: ExecutePurchaseOrderClosureBody) => closeOnce(request),
     allocateSourcing: (actor: Actor, request: AllocateSourcingBody) => withRetry(() => allocateOnce(actor, request)),
     approveDuplicateRisk: (actor: Actor, request: ApproveDuplicateRiskBody) => withRetry(() => approveRiskOnce(actor, request)),
     releaseSourcing: (actor: Actor, request: ReleaseSourcingBody) => withRetry(() => releaseOnce(actor, request)),

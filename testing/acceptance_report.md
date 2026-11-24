@@ -637,3 +637,22 @@
 **한계**
 - 요청 가능 수량(유효 발주량 − 미응답 요청)과 "수락된 취소 + 품절 확정 ≤ 발주량" 불변식은 어댑터가 발주 품목 락 아래에서 지키고 DB는 검사하지 않는다(회신·입고와 같은 한계). 직접 SQL로 이 불변식을 어길 수 있다.
 - 발주 종결 실행과 발주 출력(CSV) 이력은 영속화하지 않았다.
+
+## 30. 발주 종결 실행 영속화 (`pgProcurementApi.ts`)
+
+테스트 3개 추가(`pgProcurementApi.test.ts`). 마이그레이션은 없다(발주 `closed_at`·상태 전이는 007·011이 이미 허용한다).
+
+**동작:** `executePurchaseOrderClosure`는 서버(SYSTEM) 전용이며 HTTP로 열지 않았다. 발주 행을 `FOR UPDATE`로, 모든 발주 품목 락(`pol:`, 정렬 순)을 잡은 뒤 **실행하는 지금** 종결 조건을 다시 계산한다(BR-P06). 차단 사유는 `OPEN_QUANTITY`(미입고 잔량), `CANCELLATION_REQUEST_OPEN`(응답 없는 취소 요청), `DISPOSITION_OPEN`(주문 취소로 풀린 입고 배분의 처분 미완), `EXCESS_UNDECIDED`, `DEFECT_UNRESOLVED`다. 종결된 발주는 입고·회신·취소 요청을 받지 않는다. 주문 취소 적용도 같은 발주 품목 락을 잡으므로 종결 계산과 새 처분 대기 발생이 경쟁하지 않는다.
+
+| 검증한 것 | 결과 |
+|---|---|
+| 입고 전 종결은 `OPEN_QUANTITY`, 응답 없는 취소 요청은 `CANCELLATION_REQUEST_OPEN`으로 차단, 응답 후 종결, 낡은 version·없는 발주 거부 | 통과 |
+| 종결 뒤 새 입고·회신·취소 요청·재종결 거부 | 통과 |
+| 입고 배분이 주문 취소로 풀린 뒤 `DISPOSITION_OPEN`으로 차단, 재고 편입 기록 뒤 종결 | 통과 |
+| **마지막 1권의 입고와 종결 실행 동시 → 일관된 결과 하나** | 통과 |
+
+**한계**
+- 파손·오배송 해소(`resolveReceiptDefect`)와 초과입고 결정(`decideExcessReceipt`)은 영속화하지 않아 기록이 없다. 그래서 파손·오배송·초과 수량이 있는 입고가 있는 발주는 종결이 항상 차단된다(보수적 실패). 이 명령들과 입고 정정(`correctReceipt`)·배분 취소(`cancelAllocation`)·재배정(`reallocateAllocation`)을 영속화해야 해소된다.
+- 종결 조건은 계산 값이라 DB가 검사하지 않는다. 직접 SQL로 `SENT`·`ACKNOWLEDGED` 발주를 `CLOSED`로 바꾸는 것은 막지 못한다.
+- 발주 종결을 호출하는 서버 작업 실행기(스케줄러)는 아직 없다.
+- 발주 출력(CSV) 이력과 전달 기록의 `fileVersion` 연결은 영속화하지 않았다.

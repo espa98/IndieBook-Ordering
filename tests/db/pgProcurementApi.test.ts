@@ -1,4 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createPgCancellationApi } from "../../src/db/pgCancellationApi";
+import { createPgDispositionApi } from "../../src/db/pgDispositionApi";
+import { createPgFulfillmentApi } from "../../src/db/pgFulfillmentApi";
 import { createPgOrderApi } from "../../src/db/pgOrderApi";
 import { createPgProcurementApi } from "../../src/db/pgProcurementApi";
 import { createPgReceivingApi } from "../../src/db/pgReceivingApi";
@@ -355,6 +358,83 @@ describe("발주 취소 (미전달 취소, 공급처 취소 요청·응답·확�
     expect(await confirmCancel(api, po.id, 3)).toMatchObject({ status: "CANCELLED", version: 4 });
     expect((await rows("select cancelled_at is not null as has_time from public.ordering_purchase_orders where id = $1", [po.id]))[0].has_time).toBe(true);
     expect(await codeOf(() => requestCancel(api, po.id, poLineId, 1))).toBe("BUSINESS_INVARIANT"); // 취소된 발주
+  });
+});
+
+const closePo = (api: Api, purchaseOrderId: string, expectedVersion: number) =>
+  api.executePurchaseOrderClosure({ tenantId: T_A, purchaseOrderId, expectedVersion, executedAt: "2026-03-04T08:00:00.000Z", idempotencyKey: key() });
+const blockersOf = async (run: () => Promise<unknown>) => {
+  try {
+    await run();
+  } catch (error) {
+    return error instanceof AppError ? `${error.code}:${error.detail ?? ""}` : `NON_APP_ERROR:${(error as Error).message}`;
+  }
+  return "OK";
+};
+const receiveAll = (po: { id: string }, poLineId: string, quantity: number) =>
+  createPgReceivingApi({ pool: db.pool() }).receiveGoods(staff, { tenantId: T_A, purchaseOrderId: po.id, poLineId, normalQuantity: quantity, damagedQuantity: 0, misdeliveredQuantity: 0, receivedAt: "2026-03-04T06:35:00.000Z", idempotencyKey: key() });
+
+describe("발주 종결 실행 (서버 전용, ST-P11)", () => {
+  it("모든 품목이 입고되고 취소 요청이 모두 응답되면 서버가 재계산해 종결하고, 종결된 발주에는 새 입고·회신이 막힌다", async () => {
+    const api = createPgProcurementApi({ pool: db.pool() });
+    const { po, poLineId } = await sentPo(5, 3, api);
+
+    expect(await blockersOf(() => closePo(api, po.id, 3))).toContain("OPEN_QUANTITY"); // 아직 입고 전
+    expect(await codeOf(() => closePo(api, "0a000000-0000-4000-8000-00000000ffff", 3))).toBe("NOT_FOUND");
+    await receiveAll(po, poLineId, 3);
+    const request = await requestCancel(api, po.id, poLineId, 1); // 입고가 끝나도 응답 없는 취소 요청이 있으면 종결할 수 없다
+    expect(await blockersOf(() => closePo(api, po.id, 3))).toContain("CANCELLATION_REQUEST_OPEN");
+    await respondCancel(api, po.id, request.id, 0, 1);
+
+    expect(await codeOf(() => closePo(api, po.id, 9))).toBe("VERSION_CONFLICT");
+    const closed = await closePo(api, po.id, 3);
+    expect(closed).toMatchObject({ status: "CLOSED", version: 4 });
+    expect((await rows("select status, closed_at is not null as has_time from public.ordering_purchase_orders where id = $1", [po.id]))[0]).toEqual({ status: "CLOSED", has_time: true });
+
+    expect(await codeOf(() => closePo(api, po.id, 4))).toBe("BUSINESS_INVARIANT"); // 이미 종결됨
+    expect(await codeOf(() => receiveAll(po, poLineId, 1))).toBe("BUSINESS_INVARIANT"); // 종결된 발주는 입고를 받지 않는다
+    expect(await codeOf(() => supplierReply(api, po.id, poLineId, "CONFIRM", 1))).toBe("BUSINESS_INVARIANT");
+    expect(await codeOf(() => requestCancel(api, po.id, poLineId, 1))).toBe("BUSINESS_INVARIANT");
+  });
+
+  it("주문 취소로 풀린 입고 배분의 처분이 끝나지 않았으면 DISPOSITION_OPEN으로 차단되고, 재고 편입이 기록되면 종결된다", async () => {
+    const api = createPgProcurementApi({ pool: db.pool() });
+    const { line, po, poLineId } = await sentPo(6, 2, api);
+    await rows(`insert into public.ordering_stock_movements (tenant_id, book_key, kind, direction, quantity, reason, acted_by, acted_at) values ($1, $2, 'INITIAL', 'IN', 1, '초기 재고', 'seed', now())`, [T_A, BOOK(6)]);
+    const receipt = await receiveAll(po, poLineId, 2);
+    await createPgReceivingApi({ pool: db.pool() }).allocateReceipt(staff, { tenantId: T_A, receiptId: receipt.id, orderId: line.orderId, orderLineId: line.lineId, quantity: 2, allocatedAt: "2026-03-04T06:40:00.000Z", idempotencyKey: key() });
+    const cancel = await createPgFulfillmentApi({ pool: db.pool() }).requestOrderCancellation(staff, { tenantId: T_A, orderId: line.orderId, orderLineId: line.lineId, quantity: 2, reason: "고객 취소", expectedVersion: 2, requestedAt: "2026-03-04T06:45:00.000Z", idempotencyKey: key() });
+    const cancellations = createPgCancellationApi({ pool: db.pool() });
+    await cancellations.decideOrderCancellation(owner, { tenantId: T_A, requestId: cancel.id, decision: "APPROVED", decidedAt: "2026-03-04T06:47:00.000Z", idempotencyKey: key() });
+    await cancellations.applyOrderCancellation(owner, { tenantId: T_A, requestId: cancel.id, appliedAt: "2026-03-04T06:49:00.000Z", idempotencyKey: key() });
+
+    expect(await blockersOf(() => closePo(api, po.id, 3))).toContain("DISPOSITION_OPEN");
+    const cancellationId = (await rows("select id from public.ordering_allocation_cancellations where order_id = $1", [line.orderId]))[0].id as string;
+    await createPgDispositionApi({ pool: db.pool() }).transferCancelledToStock(owner, { tenantId: T_A, cancellationId, quantity: 2, actedAt: "2026-03-04T06:55:00.000Z", idempotencyKey: key() });
+    expect((await closePo(api, po.id, 3)).status).toBe("CLOSED");
+  });
+});
+
+describe("발주 종결의 실제 동시성 (두 독립 세션)", () => {
+  it("마지막 1권의 입고와 종결 실행이 동시에 들어와도 일관된 결과 하나만 나온다 (입고가 먼저면 종결되고, 종결이 먼저면 입고가 거부된다)", async () => {
+    const api = createPgProcurementApi({ pool: db.pool() });
+    const { po, poLineId } = await sentPo(7, 2, api);
+    await receiveAll(po, poLineId, 1);
+
+    const results = await Promise.allSettled([closePo(createPgProcurementApi({ pool: db.pool() }), po.id, 3), receiveAll(po, poLineId, 1)]);
+
+    const status = (await poRow(po.id)).status as string;
+    const received = (await rows("select coalesce(sum(normal_quantity), 0)::int as n from public.ordering_goods_receipts where purchase_order_id = $1", [po.id]))[0].n as number;
+    const [closure, receipt] = results;
+    if (status === "CLOSED") {
+      expect(closure!.status).toBe("fulfilled");
+      expect(received).toBe(2); // 종결된 발주는 모두 입고된 상태다
+    } else {
+      expect(closure!.status).toBe("rejected"); // 입고가 아직 끝나지 않아 종결이 차단됐다
+      expect(receipt!.status).toBe("fulfilled");
+      expect(received).toBe(2);
+    }
+    expect(received).toBeLessThanOrEqual(2);
   });
 });
 
