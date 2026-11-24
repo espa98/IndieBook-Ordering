@@ -6,6 +6,7 @@ import { createPgOrderApi } from "../db/pgOrderApi";
 import { createPgPaymentApi } from "../db/pgPaymentApi";
 import { createPgProcurementApi } from "../db/pgProcurementApi";
 import { createPgReceivingApi } from "../db/pgReceivingApi";
+import { createPgCatalogApi } from "../db/pgCatalogApi";
 import { createPgStaffApi } from "../db/pgStaffApi";
 import { createPgStockApi } from "../db/pgStockApi";
 import { createPgSupplierApi } from "../db/pgSupplierApi";
@@ -70,6 +71,7 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
   const procurement = createPgProcurementApi({ pool: deps.pool });
   const suppliers = createPgSupplierApi({ pool: deps.pool });
   const staffAdmin = createPgStaffApi({ pool: deps.pool });
+  const catalog = createPgCatalogApi({ pool: deps.pool });
   const cancellations = createPgCancellationApi({ pool: deps.pool });
   const dispositions = createPgDispositionApi({ pool: deps.pool });
   const actor = (c: Ctx) => ({ userId: c.userId });
@@ -231,6 +233,16 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
       success: 201,
       fields: ["paymentId", "amountKrw", "evidence", "requestedAt"],
       run: (c) => payments.requestRefund(actor(c), merge(c, { tenantId: t(c), refundTaskId: c.params.taskId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/books", {
+      success: 201,
+      fields: ["source", "title", "authors", "isbn", "listPriceKrw", "externalId", "fetchedAt", "reason", "acknowledgeDuplicateOf", "registeredAt"],
+      run: (c) => catalog.registerBook(actor(c), merge(c, { tenantId: t(c), idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/books/(?<bookId>[^/]+)/updates", {
+      success: 200,
+      fields: ["expectedVersion", "changes", "reason", "acknowledgeDuplicateOf", "changedAt"],
+      run: (c) => catalog.updateBook(actor(c), merge(c, { tenantId: t(c), bookId: c.params.bookId!, idempotencyKey: c.idempotencyKey })),
     }),
     route("POST", "/staff-invitations", {
       success: 201,

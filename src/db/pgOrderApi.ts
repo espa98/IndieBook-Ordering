@@ -13,6 +13,7 @@ import {
   saveNewCommands,
   type PoolLike,
 } from "./pgSupport";
+import { toBook } from "./pgCatalogApi";
 
 export type { PoolLike } from "./pgSupport";
 
@@ -24,25 +25,7 @@ async function loadBooks(client: PoolClient, tenantId: string, bookIds: string[]
       [tenantId, bookIds],
     )
   ).rows;
-  return rows.map(
-    (b): Book => ({
-      id: b.id,
-      tenantId: b.tenant_id,
-      title: b.title,
-      authors: b.authors,
-      ...(b.isbn === null ? {} : { isbn: b.isbn }),
-      listPriceKrw: b.list_price_krw,
-      source: b.source,
-      ...(b.external_id === null ? {} : { externalId: b.external_id }),
-      ...(b.fetched_at === null ? {} : { fetchedAt: b.fetched_at.toISOString() }),
-      ...(b.manual_reason === null ? {} : { manualReason: b.manual_reason }),
-      status: b.status,
-      version: Number(b.version),
-      createdBy: b.created_by,
-      createdAt: b.created_at.toISOString(),
-      recordedAt: b.recorded_at.toISOString(),
-    }),
-  );
+  return rows.map(toBook);
 }
 
 export async function saveOrder(client: PoolClient, order: Order, before: Order | undefined): Promise<void> {

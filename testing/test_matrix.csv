@@ -7,7 +7,7 @@ G4,gate,재고/인도 예약·배분·해제·인도 원장 대사,domain,PARTIA
 G5,gate,결제/환급 수동 사실 확인·원장 반영·외부 환급 증빙,domain,PARTIAL,tests/payment 11 files / 59 tests passed(메모리) + tests/db/pgPaymentApi 13 tests(Postgres 영속화·동시성),입력·확인·환급 업무·요청·승인은 DB 영속화·동시성 검증. 무효·보정·시도 보고·해소의 어댑터와 읽기 API 없음. PG 연동 없음(P2)
 G6,gate,원자적 종결 검사 및 Staff 요청 분리,domain,PARTIAL,tests/closure 4 files / 15 tests passed,원자성은 검증 후 연속 저장이며 DB 트랜잭션 아님
 G7,gate,기존 19개 테스트+2세션 경쟁+배포 승인,regression,BLOCKED,"기존 19개 테스트는 ordering-dev DB 측 테스트로 이 저장소에 없음, 2세션 경쟁은 DB 필요",배포 승인 없음
-TEST-UNIT,test-layer,단위/도메인 테스트,unit,PASS,npx vitest run → 128 files 1259 tests passed 0 failed,Node v24.18.0 / vitest 5.1.1 / base commit ac366ed + 인증 계층 변경
+TEST-UNIT,test-layer,단위/도메인 테스트,unit,PASS,npx vitest run → 129 files 1265 tests passed 0 failed,Node v24.18.0 / vitest 5.1.1 / base commit ac366ed + 인증 계층 변경
 TEST-TYPE,test-layer,타입 검사,static,PASS,npx tsc --noEmit → 출력 0줄(오류 없음),TypeScript 7.0.2
 TEST-OPENAPI,test-layer,OpenAPI 스키마 검사,contract,PARTIAL,tests/openapi 2 files / 26 tests passed,openapi/ordering.yaml은 05단계 주문 API만 다룸. 조달·입고·재고·결제·안내·종결 API는 명세·구현 없음
 TEST-HTTP,test-layer,HTTP 핸들러 테스트,http-handler,PARTIAL,tests/http 4 files / 55 tests passed(핸들러 단위 41 + 실제 서버 14),실제 node:http 서버 테스트 포함. OpenAPI 계약 테스트는 주문 엔드포인트만
@@ -87,5 +87,5 @@ ST-Y08,requirement,결제 승인 실행(P2),domain,NOT_IMPLEMENTED,P2 PG 계약 
 ST-Y09,requirement,결제 승인 결과(P2),domain,NOT_IMPLEMENTED,P2,
 ST-A,requirement,인증·서점 개설·초대·직원 비활성(ST-A01~A08),jwt-http,PARTIAL,tests/auth/resolvePrincipal + bindActor + authorizedActions 18 tests + inviteStaff·acceptInvitation·revokeInvitation·setMembershipStatus 11 tests + accounts·openStore·acceptInvitationAsAccount 9 tests,주체 도출(A05 즉시 차단·A08 세션 만료 판정)과 역할·행위자·테넌트 주입(70개 함수). 주문 API 진입점을 모음 경유로 통일. 초대·수락·철회(A03/A04)·직원 비활성화/복구와 마지막 Owner 보호(A05) 구현. 이메일 인증(A01)·서점 개설(A02) 구현(토큰 재발급·롤백 없음). A06/A07·JWT 검증 미구현
 ST-B,requirement,도서·공급처·템플릿 관리(ST-B01~B05),domain,PARTIAL,tests/catalog 5 files / 18 tests passed,YES24 검색·조회 연동 없음(DEC-17 권한 검증 필요). 도서 비활성·검색·제목 기반 중복 후보 없음. 주문 생성의 도서 검증은 createOrderApi에서 필수·createOrderService에서는 선택 의존성. 문구 변수 목록은 승인 필요 해석
-G-PERSIST,gate,도메인 명령의 Postgres 영속화 범위,db,PARTIAL,"authorizedActions 바인딩 70개 중 58개 영속화(어댑터 직접 53 + 간접 5), 12개 미영속화(환급 시도·도서·템플릿·고객 안내·서비스 주문)","release/go_no_go.md §2.1. 미영속화 명령은 메모리 저장소 도메인 테스트로만 검증된다"
+G-PERSIST,gate,도메인 명령의 Postgres 영속화 범위,db,PARTIAL,"authorizedActions 바인딩 70개 중 60개 영속화(어댑터 직접 55 + 간접 5), 10개 미영속화(환급 시도·템플릿·고객 안내·서비스 주문)","release/go_no_go.md §2.1. 미영속화 명령은 메모리 저장소 도메인 테스트로만 검증된다"
 G-OPENAPI,gate,OpenAPI 계약 범위,http,PARTIAL,"HTTP 엔드포인트 47개, openapi/ordering.yaml에는 주문 경로 3개","나머지 44개 엔드포인트의 요청·응답 계약 문서 없음"

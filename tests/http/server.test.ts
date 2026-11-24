@@ -750,3 +750,24 @@ describe("HTTP 서버: 멱등과 실제 동시성 (HTTP 요청)", () => {
     expect(rejected.every((r) => r.status === 422 && r.json.error.code === "BUSINESS_INVARIANT")).toBe(true);
   });
 });
+
+describe("HTTP 서버: 도서 등록·수정", () => {
+  it("직원도 수기 도서를 등록·수정하고 행위자는 토큰의 사용자로 기록되며, 중복 ISBN은 422, 오래된 버전은 409이다", async () => {
+    const books = `/v1/tenants/${T_A}/books`;
+    const registeredAt = new Date().toISOString();
+    const body = { source: "MANUAL", title: "HTTP 도서", authors: ["저자"], isbn: "9788900001111", listPriceKrw: "9000", reason: "수기 등록", registeredAt };
+    expect((await call(books, { method: "POST", sub: "33333333-0000-4000-8000-0000000000ff", body })).status).toBe(403);
+    expect((await call(books, { method: "POST", sub: STAFF_A, body: { ...body, registeredBy: OWNER_A } })).status).toBe(400); // 행위자 위조
+    const created = await call(books, { method: "POST", sub: STAFF_A, body });
+    expect(created.status).toBe(201);
+    expect(created.json.data).toMatchObject({ title: "HTTP 도서", isbn: "9788900001111", version: 1, createdBy: STAFF_A });
+    expect((await call(books, { method: "POST", sub: OWNER_A, body })).status).toBe(422); // 중복 ISBN
+
+    const path = `${books}/${created.json.data.id}/updates`;
+    const changedAt = new Date().toISOString();
+    expect((await call(path, { method: "POST", sub: OWNER_A, body: { expectedVersion: 5, changes: { listPriceKrw: "9500" }, reason: "인상", changedAt } })).status).toBe(409);
+    const updated = await call(path, { method: "POST", sub: OWNER_A, body: { expectedVersion: 1, changes: { listPriceKrw: "9500" }, reason: "인상", changedAt } });
+    expect(updated.status).toBe(200);
+    expect(updated.json.data).toMatchObject({ listPriceKrw: "9500", version: 2 });
+  });
+});
