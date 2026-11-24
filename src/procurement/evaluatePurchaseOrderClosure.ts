@@ -7,6 +7,7 @@ import type { ReturnExceptionResolutionRepository } from "../inventory/resolveRe
 import type { ReturnRequestRepository } from "../inventory/requestReturn";
 import type { StockIntakeRepository } from "../inventory/transferCancelledToStock";
 import type { ExcessDecisionRepository } from "../inventory/decideExcessReceipt";
+import type { ReceiptDefectResolutionRepository } from "../inventory/resolveReceiptDefect";
 import type { ReceiptCorrectionRepository } from "../inventory/correctReceipt";
 import type { GoodsReceiptRepository } from "../inventory/receiveGoods";
 import type { CancellationRepository } from "./createCancellationRequest";
@@ -15,7 +16,7 @@ import { cancellationRequestState } from "./cancellationRequestState";
 import { poLineOpenQuantity } from "./poLineOpenQuantity";
 import type { PoReplyRepository } from "./recordSupplierReply";
 
-export type PurchaseOrderClosureBlocker = "OPEN_QUANTITY" | "EXCESS_UNDECIDED" | "DISPOSITION_OPEN" | "CANCELLATION_REQUEST_OPEN";
+export type PurchaseOrderClosureBlocker = "OPEN_QUANTITY" | "EXCESS_UNDECIDED" | "DISPOSITION_OPEN" | "CANCELLATION_REQUEST_OPEN" | "DEFECT_UNRESOLVED";
 
 export type PurchaseOrderClosureEvaluation = {
   closable: boolean;
@@ -31,6 +32,7 @@ export type EvaluatePurchaseOrderClosureDeps = {
   returnCompletions: Pick<ReturnCompletionRepository, "list">;
   returnExceptions: Pick<ReturnExceptionRepository, "list">;
   returnExceptionResolutions: Pick<ReturnExceptionResolutionRepository, "list">;
+  receiptDefectResolutions: Pick<ReceiptDefectResolutionRepository, "list">;
   excessDecisions: Pick<ExcessDecisionRepository, "list">;
   receiptCorrections: Pick<ReceiptCorrectionRepository, "list">;
   replies: Pick<PoReplyRepository, "list">;
@@ -79,5 +81,13 @@ export function evaluatePurchaseOrderClosure(
         ).unanswered > 0,
     );
   if (requestOpen) blockers.push("CANCELLATION_REQUEST_OPEN");
+  // 검수에서 기록된 파손·오배송 수량이 모두 처리되어야 한다 (BR-P06)
+  const defectUnresolved = receipts.some((r) => {
+    const resolved = deps.receiptDefectResolutions.list(tenantId, r.id);
+    const done = (kind: "DAMAGED" | "MISDELIVERED") =>
+      resolved.filter((x) => x.kind === kind).reduce((sum, x) => sum + x.quantity, 0);
+    return r.damagedQuantity > done("DAMAGED") || r.misdeliveredQuantity > done("MISDELIVERED");
+  });
+  if (defectUnresolved) blockers.push("DEFECT_UNRESOLVED");
   return { closable: blockers.length === 0, blockers };
 }

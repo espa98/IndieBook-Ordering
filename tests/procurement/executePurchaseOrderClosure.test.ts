@@ -2,10 +2,12 @@ import { describe, it, expect } from "vitest";
 import { AppError } from "../../src/errors/AppError";
 import { transferCancelledToStock } from "../../src/inventory/transferCancelledToStock";
 import { decideExcessReceipt } from "../../src/inventory/decideExcessReceipt";
+import { resolveReceiptDefect } from "../../src/inventory/resolveReceiptDefect";
 import { receiveGoods } from "../../src/inventory/receiveGoods";
 import { createCancellationRequest } from "../../src/procurement/createCancellationRequest";
 import { respondToCancellationRequest } from "../../src/procurement/respondToCancellationRequest";
 import { executePurchaseOrderClosure } from "../../src/procurement/executePurchaseOrderClosure";
+import { createInMemoryReceiptDefectResolutionRepository } from "../helpers/defectFixtures";
 import { cancellationScene, createInMemoryExcessDecisionRepository, intakeScene } from "../helpers/inventoryFixtures";
 import {
   createInMemoryReturnCompletionRepository,
@@ -29,6 +31,7 @@ function closureScene<T extends ReturnType<typeof cancellationScene>>(
     returnExceptionResolutions: createInMemoryReturnExceptionResolutionRepository(),
     ...s.deps,
     excessDecisions: createInMemoryExcessDecisionRepository(),
+    receiptDefectResolutions: createInMemoryReceiptDefectResolutionRepository(),
     returnCompletions: createInMemoryReturnCompletionRepository(),
     now: () => new Date("2026-03-04T07:00:00.000Z"),
   };
@@ -207,6 +210,47 @@ describe("executePurchaseOrderClosure: 발주 종결 (ST-P11, BR-P06)", () => {
     expect(detailOf()).toContain("CANCELLATION_REQUEST_OPEN");
     expect(detailOf()).not.toContain("OPEN_QUANTITY");
     respond(0, 1, "cr-resp-2");
+    expect(detailOf()).toBeUndefined();
+  });
+
+  it("처리되지 않은 파손·오배송 수량이 있으면 종결을 거부하고(DEFECT_UNRESOLVED), 모두 처리되면 종결할 수 있다 (BR-P06)", () => {
+    const { deps, sent, poLineId, closeRequest } = closureScene();
+    const receipt = receiveGoods(deps, {
+      tenantId: "tenant-a",
+      purchaseOrderId: sent.id,
+      poLineId,
+      normalQuantity: 2, // 남은 정상 수량을 채운다
+      damagedQuantity: 2,
+      misdeliveredQuantity: 1,
+      inspectedBy: "김검수",
+      receivedAt: "2026-03-04T06:35:00.000Z",
+      idempotencyKey: "recv-defect",
+    });
+    const resolve = (kind: "DAMAGED" | "MISDELIVERED", quantity: number, key: string) =>
+      resolveReceiptDefect(deps, {
+        tenantId: "tenant-a",
+        receiptId: receipt.id,
+        kind,
+        quantity,
+        outcome: "RETURNED_TO_SUPPLIER",
+        evidence: "공급처 반품 접수 확인서",
+        actorRole: "STAFF",
+        resolvedBy: "김직원",
+        resolvedAt: "2026-03-04T06:50:00.000Z",
+        idempotencyKey: key,
+      });
+    const detailOf = () => {
+      try {
+        executePurchaseOrderClosure(deps, closeRequest());
+      } catch (error) {
+        return (error as AppError).detail;
+      }
+    };
+
+    expect(detailOf()).toContain("DEFECT_UNRESOLVED");
+    resolve("DAMAGED", 2, "rd-1");
+    expect(detailOf()).toContain("DEFECT_UNRESOLVED"); // 오배송 1권 남음
+    resolve("MISDELIVERED", 1, "rd-2");
     expect(detailOf()).toBeUndefined();
   });
 });
