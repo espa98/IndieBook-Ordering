@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { createAnyBookRepository } from "../helpers/anyBookRepository";
 import { createOrderApi } from "../../src/order/orderApi";
 import { createDraftOrder } from "../../src/order/createDraftOrder";
 import { createIdempotencyStore } from "../../src/idempotency/executeIdempotent";
@@ -18,6 +19,7 @@ function setup() {
   let nextNumber = 0;
   const issueDisplayNumber = vi.fn((_tenantId: string) => ++nextNumber);
   const api = createOrderApi({
+    books: createAnyBookRepository(),
     orders,
     memberships,
     idempotency: createIdempotencyStore(),
@@ -118,6 +120,7 @@ describe("createOrderApi (권한이 적용된 진입점)", () => {
     const request = { tenantId: "tenant-a", idempotencyKey: "k-1", lines };
     const apiWith = (status: "ACTIVE" | "INACTIVE") =>
       createOrderApi({
+        books: createAnyBookRepository(),
         orders,
         idempotency,
         issueDisplayNumber: () => 1,

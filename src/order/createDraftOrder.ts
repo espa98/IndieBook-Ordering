@@ -8,7 +8,13 @@ export type NewOrderLine = {
 };
 
 /** 저장되는 품목. lineId는 N:M 배분 등에서 품목을 식별한다. */
-export type OrderLine = NewOrderLine & { lineId: string };
+export type OrderLine = NewOrderLine & {
+  lineId: string;
+  /** 주문 시점의 도서 정보 스냅샷. 카탈로그를 연결해 만든 주문에만 있다 (BOOK-007) */
+  bookTitle?: string;
+  bookIsbn?: string;
+  listPriceKrw?: string;
+};
 
 export type Order = {
   id: string;

@@ -8,7 +8,7 @@
 
 | 영역 | 판정 | 한 줄 근거 |
 |---|---|---|
-| 도메인 단위·통합(메모리 저장소) | **PASS** | `npx vitest run` 100 files / 1052 tests 통과, 실패 0 |
+| 도메인 단위·통합(메모리 저장소) | **PASS** | `npx vitest run` 102 files / 1055 tests 통과, 실패 0 |
 | 타입 검사 | **PASS** | `npx tsc --noEmit` 출력 없음 |
 | OpenAPI 스키마·계약 | **PARTIAL** | 주문 API(05단계)만 명세가 있고 26개 통과. 나머지 영역은 명세·구현 없음 |
 | HTTP | **PARTIAL** | 핸들러 단위 41개 통과. 실제 서버·라우터·JWT 없음 |
@@ -25,7 +25,7 @@
 
 | 명령 | 결과 |
 |---|---|
-| `npx vitest run` | files 100, tests 1052, passed 1052, failed 0 (진입점 통일 후 재실행. 디렉터리별 표는 직전 JSON 집계이며 auth만 +2) |
+| `npx vitest run` | files 102, tests 1055, passed 1055, failed 0 (주문 도서 검증 추가 후 재실행. 디렉터리별 표도 이 실행의 JSON 집계) |
 | `npx tsc --noEmit` | 출력 없음(오류 0) |
 | 정적 점검: `git ls-files` 파일명(.env·secret·credential·pem·key) | 해당 없음 |
 | 정적 점검: `src tests openapi implementation package.json`에서 JWT·키 패턴, `ordering-dev`·`testBookshare` 프로젝트 ID, `service_role` grep | 해당 없음 |
@@ -41,7 +41,7 @@
 | http | 3 | 41 |
 | idempotency | 2 | 53 |
 | openapi | 2 | 26 |
-| order | 8 | 108 |
+| order | 10 | 111 |
 | procurement | 16 | 362 |
 | inventory | 26 | 244 |
 | payment | 11 | 59 |
@@ -50,7 +50,7 @@
 | closure | 4 | 15 |
 | cancellation | 5 | 25 |
 | reopening | 1 | 6 |
-| **합계** | **100** | **1052** |
+| **합계** | **102** | **1055** |
 
 (`tests/helpers`는 테스트 파일이 없는 공용 픽스처다.)
 
@@ -139,7 +139,7 @@
 | 6d9bb13 | 해제 후 남는 공급처 의무 파생, 주문 종결 차단, 재조달 중복 위험 승인 | BR-P05 |
 | 21e22e3 | 파손·오배송 처리 기록과 발주 종결 차단 | BR-P06, ST-R01 |
 
-테스트는 968 → 1005개(+37), 파일은 76 → 88개(+12)다. 그 뒤 인증·권한 계층(§10)으로 1052개, 100 files가 되었다(직원 관리 §10.1, 카탈로그 §11, 진입점 §12).
+테스트는 968 → 1005개(+37), 파일은 76 → 88개(+12)다. 그 뒤 인증·권한 계층(§10)으로 1052개, 100 files가 되었다(직원 관리 §10.1, 카탈로그 §11, 진입점 §12, 주문 도서 검증 §13).
 
 ### 9.1 이번 갱신에서 새로 생긴 위험·주의
 
@@ -226,4 +226,18 @@
 - `createOrderApi`는 세션 만료를 검사하지 않는다(`Actor`에 만료 시각이 없다). 토큰 검증 계층이 `resolvePrincipal`로 먼저 거르는 구조가 필요하다.
 - 조회성 함수(예: 향후 목록·상세)의 모음 등록 누락을 잡는 구조 테스트는 없다. 명령은 멱등 키로 식별해 감시하지만 조회는 식별 기준이 없다.
 - HTTP 라우터·JWT 서명 검증·서버는 여전히 없다.
+
+## 13. 주문 생성의 도서 검증과 스냅샷 (BOOK-007)
+
+테스트 3개(`tests/order/createOrderCatalog`·`orderApiCatalog`).
+
+- `createOrderService`에 선택 의존성 `books`를 추가했다. 연결하면 모든 품목의 `bookId`가 이 테넌트의 카탈로그에 있어야 하고(없거나 다른 테넌트의 도서는 존재 여부를 구별할 수 없는 같은 400 VALIDATION_ERROR), 주문 품목에 `bookTitle`·`bookIsbn`(있을 때)·`listPriceKrw` 스냅샷이 저장된다. 이후 도서를 수정해도 기존 주문은 바뀌지 않는다.
+- 운영 진입점 `createOrderApi`는 `books`를 **필수**로 받는다. 연결을 빠뜨리면 컴파일 오류다. 응답의 품목에 스냅샷이 포함되며 `openapi/ordering.yaml`의 `OrderLine`에 선택 필드로 반영했다(계약 테스트 통과).
+- 기존 `createOrderService` 테스트(4필드 `lines`를 `toEqual`로 확인)는 `books`를 연결하지 않은 경로라 수정 없이 그대로 통과한다. 기존 http·orderApi·계약 테스트의 설정에만 `books`를 연결했고(`tests/helpers/anyBookRepository.ts`: 어떤 `bookId`도 있는 것으로 보는 시험용 저장소) 검증 내용은 바꾸지 않았다.
+
+**한계**
+- `books`가 선택이라 `createOrderService`를 직접 쓰면 검증이 꺼진다. 진입점은 `createOrderApi`(필수)이며, `authorizedActions.createOrderService`를 `books` 없이 호출하는 경로는 막지 못한다.
+- `unitPriceKrw`는 호출자가 보낸 값 그대로다. 정가와 달라도 허용하며(할인·배송비는 미결정), 정가는 스냅샷으로만 남는다. 가격 변경 규칙(DEC-08)은 다루지 않았다.
+- 도서 비활성화가 없어 "비활성 도서 주문 차단"은 없다. 이미 만들어진 주문에는 소급하지 않는다.
+- 주문 확정(`confirmOrderService`)은 도서를 다시 확인하지 않는다.
 

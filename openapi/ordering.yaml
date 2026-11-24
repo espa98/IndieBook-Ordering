@@ -22,6 +22,8 @@ info:
 
     **요청 제약 중 도메인 계층이 400으로 강제하는 것 (테스트로 확인됨):**
     - `lines`는 객체 배열이어야 한다(누락·비배열·원소가 객체가 아님 → 400)
+    - `lines`의 모든 `bookId`는 이 테넌트의 도서 카탈로그에 있어야 한다. 없거나 다른 테넌트의 도서면 400(존재 여부를 구별할 수 없는 같은 오류).
+      성공하면 품목에 `bookTitle`·`bookIsbn`·`listPriceKrw` 스냅샷이 저장된다. `unitPriceKrw`는 호출자가 보낸 값 그대로이며 정가와 같을 필요는 없다
     - `lines` 원소는 `bookId`(문자열)·`quantity`·`unitPriceKrw`만 가질 수 있다. 알 수 없는 필드는 저장하지 않고 400
       (오류 메시지에 클라이언트가 보낸 필드 이름은 되돌리지 않는다)
     - `Idempotency-Key`는 비어 있지 않은 문자열이어야 한다(빈 값·누락 → 400)
@@ -274,6 +276,14 @@ components:
           type: integer
           minimum: 1
         unitPriceKrw:
+          $ref: "#/components/schemas/KrwAmount"
+        bookTitle:
+          type: string
+          description: 주문 시점의 도서 제목 스냅샷(BOOK-007). 이후 도서를 수정해도 바뀌지 않는다.
+        bookIsbn:
+          type: string
+          description: 주문 시점의 ISBN 스냅샷(숫자만). ISBN이 없는 도서에는 없다.
+        listPriceKrw:
           $ref: "#/components/schemas/KrwAmount"
 
     CreateOrderRequest:

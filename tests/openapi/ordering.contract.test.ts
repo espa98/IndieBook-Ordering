@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 import SwaggerParser from "@apidevtools/swagger-parser";
 import { handle } from "../../src/http/handle";
+import { createAnyBookRepository } from "../helpers/anyBookRepository";
 import { createOrderApi } from "../../src/order/orderApi";
 import { createIdempotencyStore } from "../../src/idempotency/executeIdempotent";
 import { createInMemoryOrderRepository } from "../helpers/inMemoryOrderRepository";
@@ -45,6 +46,7 @@ function expectConforms(
 function setup() {
   let n = 0;
   const api = createOrderApi({
+    books: createAnyBookRepository(),
     orders: createInMemoryOrderRepository(),
     idempotency: createIdempotencyStore(),
     issueDisplayNumber: () => ++n,
@@ -67,6 +69,7 @@ function brokenApi() {
     throw new Error("db down: password=hunter2");
   };
   return createOrderApi({
+    books: createAnyBookRepository(),
     orders: { get: down, list: down, save: down },
     idempotency: createIdempotencyStore(),
     issueDisplayNumber: () => 1,

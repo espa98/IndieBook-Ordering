@@ -3,6 +3,7 @@ import {
   authorizeTenantAccess,
   type MembershipRepository,
 } from "../auth/authorizeTenantAccess";
+import type { BookRepository } from "../catalog/registerBook";
 import type { UserPrincipal } from "../auth/principal";
 import type { IdempotencyStore } from "../idempotency/executeIdempotent";
 import type { ConfirmOrderRequest, OrderRepository } from "./confirmOrderService";
@@ -12,6 +13,8 @@ import type { listOrders } from "./listOrders";
 
 export type OrderApiDeps = {
   orders: OrderRepository;
+  /** 주문은 이 테넌트 카탈로그의 도서만 담을 수 있다. 필수이므로 연결을 빠뜨리면 컴파일 단계에서 알 수 있다 */
+  books: Pick<BookRepository, "get">;
   memberships: MembershipRepository;
   idempotency: IdempotencyStore;
   issueDisplayNumber: (tenantId: string) => number;
@@ -53,7 +56,7 @@ export function createOrderApi(deps: OrderApiDeps) {
     createOrder: guarded((principal, request: Omit<CreateOrderRequest, "tenantId">) =>
       toOrderDetail(
         authorizedActions.createOrderService(
-          { orders: deps.orders, idempotency: deps.idempotency },
+          { orders: deps.orders, books: deps.books, idempotency: deps.idempotency },
           principal,
           request,
         ),

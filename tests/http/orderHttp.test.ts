@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { handle } from "../../src/http/handle";
+import { createAnyBookRepository } from "../helpers/anyBookRepository";
 import { createOrderApi } from "../../src/order/orderApi";
 import { createIdempotencyStore } from "../../src/idempotency/executeIdempotent";
 import { createInMemoryOrderRepository } from "../helpers/inMemoryOrderRepository";
@@ -9,6 +10,7 @@ import { createInMemoryMembershipRepository } from "../helpers/inMemoryMembershi
 function setup() {
   let nextNumber = 0;
   const api = createOrderApi({
+    books: createAnyBookRepository(),
     orders: createInMemoryOrderRepository(),
     idempotency: createIdempotencyStore(),
     issueDisplayNumber: () => ++nextNumber,
