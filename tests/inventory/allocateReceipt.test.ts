@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import { AppError } from "../../src/errors/AppError";
 import { allocateReceipt } from "../../src/inventory/allocateReceipt";
 import { receiveGoods } from "../../src/inventory/receiveGoods";
-import { allocationScene } from "../helpers/inventoryFixtures";
+import { releaseAllocation } from "../../src/inventory/releaseAllocation";
+import { allocationScene, releaseScene } from "../helpers/inventoryFixtures";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -206,5 +207,27 @@ describe("allocateReceipt: 입고 수량의 고객별 배분 (ST-R04, UC-11, BR-
     expect((thrown as AppError).code).toBe("IDEMPOTENCY_CONFLICT");
     expect((thrown as AppError).httpStatus).toBe(409);
     expect(deps.receiptAllocations.list("tenant-a", receipt.id)).toHaveLength(1);
+  });
+
+  it("배분을 해제하면 해제한 만큼 입고량과 주문 품목 한도가 다시 열려 재배분할 수 있다", () => {
+    const { deps, request, allocateRequest, receipt, orders } = releaseScene();
+    const toB = (quantity: number) => {
+      try {
+        allocateReceipt(
+          deps,
+          allocateRequest({ orderId: orders[1]!.id, orderLineId: orders[1]!.lines[0]!.lineId, quantity }),
+        );
+      } catch (error) {
+        return error;
+      }
+    };
+    allocateReceipt(deps, allocateRequest({ quantity: 1 })); // 주문 A 1권: 입고 4권 모두 배분됨 (A1 + B3)
+    expect(toB(1)).toBeInstanceOf(AppError); // 입고량 소진
+
+    releaseAllocation(deps, request({ quantity: 2 }));
+
+    expect(toB(2)).toBeUndefined(); // 순배분 B 1 -> 3, 입고 순배분 2 -> 4
+    expect(toB(1)).toBeInstanceOf(AppError); // B의 연결 수량 3 소진
+    expect(deps.receiptAllocations.list("tenant-a", receipt.id)).toHaveLength(3);
   });
 });

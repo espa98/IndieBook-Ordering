@@ -4,6 +4,8 @@ import {
   type IdempotencyStore,
 } from "../idempotency/executeIdempotent";
 import { invalid, isNonEmptyString, parseUtcTimestamp } from "../procurement/validation";
+import { allocationState } from "./allocationState";
+import type { AllocationReleaseRepository } from "./releaseAllocation";
 import type { PurchaseOrderRepository } from "../procurement/createPurchaseOrder";
 import type { GoodsReceiptRepository } from "./receiveGoods";
 
@@ -21,6 +23,7 @@ export type ReceiptAllocation = {
 };
 
 export type ReceiptAllocationRepository = {
+  get(tenantId: string, id: string): ReceiptAllocation | undefined;
   list(tenantId: string, receiptId: string): ReceiptAllocation[];
   save(allocation: ReceiptAllocation): void;
 };
@@ -29,6 +32,7 @@ export type AllocateReceiptDeps = {
   purchaseOrders: PurchaseOrderRepository;
   receipts: GoodsReceiptRepository;
   receiptAllocations: ReceiptAllocationRepository;
+  allocationReleases: AllocationReleaseRepository;
   idempotency: IdempotencyStore;
   now?: () => Date;
 };
@@ -89,20 +93,33 @@ export function allocateReceipt(
           "order line is not linked to the receipt's purchase order line",
         );
       }
-      const existing = deps.receiptAllocations.list(request.tenantId, receipt.id);
-      const allocated = existing.reduce((sum, a) => sum + a.quantity, 0);
+      // 해제된 만큼은 다시 배분할 수 있으므로 순배분(잔량)으로 센다 (BR-Q16)
+      const netOf = (allocations: ReceiptAllocation[]) =>
+        allocations.reduce(
+          (sum, a) =>
+            sum +
+            allocationState(
+              a,
+              deps.allocationReleases.list(request.tenantId, a.id),
+            ).remaining,
+          0,
+        );
+      const allocated = netOf(deps.receiptAllocations.list(request.tenantId, receipt.id));
       if (allocated + request.quantity > receipt.normalQuantity) {
         throw new AppError(
           "BUSINESS_INVARIANT",
           "allocated quantity must not exceed the receipt's normal quantity",
         );
       }
-      const forLine = deps.receipts
-        .list(request.tenantId, po.id)
-        .filter((r) => r.poLineId === receipt.poLineId)
-        .flatMap((r) => deps.receiptAllocations.list(request.tenantId, r.id))
-        .filter((a) => a.orderId === request.orderId && a.orderLineId === request.orderLineId)
-        .reduce((sum, a) => sum + a.quantity, 0);
+      const forLine = netOf(
+        deps.receipts
+          .list(request.tenantId, po.id)
+          .filter((r) => r.poLineId === receipt.poLineId)
+          .flatMap((r) => deps.receiptAllocations.list(request.tenantId, r.id))
+          .filter(
+            (a) => a.orderId === request.orderId && a.orderLineId === request.orderLineId,
+          ),
+      );
       if (forLine + request.quantity > link.quantity) {
         throw new AppError(
           "BUSINESS_INVARIANT",

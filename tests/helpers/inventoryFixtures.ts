@@ -7,6 +7,11 @@ import type {
   AllocateReceiptRequest,
   ReceiptAllocation,
 } from "../../src/inventory/allocateReceipt";
+import type {
+  AllocationRelease,
+  ReleaseAllocationRequest,
+} from "../../src/inventory/releaseAllocation";
+import { allocateReceipt } from "../../src/inventory/allocateReceipt";
 import { receiveGoods } from "../../src/inventory/receiveGoods";
 import { sentScene } from "./procurementWorld";
 
@@ -45,9 +50,62 @@ export function createInMemoryReceiptAllocationRepository() {
     list(tenantId: string, receiptId: string): ReceiptAllocation[] {
       return all.filter((a) => a.tenantId === tenantId && a.receiptId === receiptId);
     },
+    get(tenantId: string, id: string): ReceiptAllocation | undefined {
+      return all.find((a) => a.tenantId === tenantId && a.id === id);
+    },
     save(allocation: ReceiptAllocation): void {
       all.push(allocation);
     },
+  };
+}
+
+export function createInMemoryAllocationReleaseRepository() {
+  const all: AllocationRelease[] = [];
+  return {
+    list(tenantId: string, allocationId: string): AllocationRelease[] {
+      return all.filter((r) => r.tenantId === tenantId && r.allocationId === allocationId);
+    },
+    save(release: AllocationRelease): void {
+      all.push(release);
+    },
+  };
+}
+
+/** 4권 입고 중 주문 B(연결 3권)에 3권이 배분되어 OPEN인 세계 */
+export function releaseScene() {
+  const s = allocationScene();
+  const allocation = allocateReceipt(
+    s.deps,
+    s.request({
+      orderId: s.orders[1]!.id,
+      orderLineId: s.orders[1]!.lines[0]!.lineId,
+      quantity: 3,
+    }),
+  );
+  const { allocationReleases } = s.deps;
+  const deps = s.deps;
+  let seq = 0;
+  const request = (
+    extra: Partial<ReleaseAllocationRequest> = {},
+  ): ReleaseAllocationRequest => ({
+    tenantId: "tenant-a",
+    allocationId: allocation.id,
+    quantity: 1,
+    reason: "고객이 다른 도서로 변경 요청",
+    releasedBy: "김직원",
+    releasedAt: "2026-03-04T06:50:00.000Z",
+    idempotencyKey: `rel-${++seq}`,
+    ...extra,
+  });
+  return {
+    ...s,
+    deps,
+    allocation,
+    allocationReleases,
+    /** 해제 요청 */
+    request,
+    /** 추가 배분 요청 */
+    allocateRequest: s.request,
   };
 }
 
@@ -56,7 +114,8 @@ export function allocationScene() {
   const s = receivingScene();
   const receipt = receiveGoods(s.deps, s.request() as never);
   const receiptAllocations = createInMemoryReceiptAllocationRepository();
-  const deps = { ...s.deps, orders: s.w.deps.orders, receiptAllocations };
+  const allocationReleases = createInMemoryAllocationReleaseRepository();
+  const deps = { ...s.deps, orders: s.w.deps.orders, receiptAllocations, allocationReleases };
   let seq = 0; // 호출마다 다른 작업이므로 기본 멱등 키는 고유해야 한다
   const request = (
     extra: Partial<AllocateReceiptRequest> = {},
