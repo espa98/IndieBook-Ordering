@@ -1,0 +1,89 @@
+id,category,item,layer,status,evidence,notes
+G0,gate,문서/계약 차이 확정,document,PARTIAL,implementation/05~09 결과 보고서의 충돌·미결정 목록,OPDS·STBR 충돌과 해석을 단계별 보고서에 기록했으나 API V2.2·RLS V2.2와의 대조는 하지 않음
+G1,gate,격리 DB 복제 및 신규 DDL/FK/RLS 실행,db,BLOCKED,저장소에 DB 구성(supabase/마이그레이션/컨테이너) 없음,격리 테스트 DB 없음. 신규 생성·비용은 사전 승인 필요
+G2,gate,실제 Owner/Staff JWT·비활성·교차 tenant,jwt-http,BLOCKED,저장소에 인증 서버·JWT 검증 없음. tests/auth 15개는 순수 함수 단위 테스트,authorizeTenantAccess는 요청 값 기반이라 실제 JWT 검증 아님
+G3,gate,주문/발주 생성·확정·PO 전송·입고·수량,domain,PARTIAL,vitest 76 files / 968 tests passed (메모리 저장소),도메인 로직만. DB 트랜잭션·제약 없음
+G4,gate,재고/인도 예약·배분·해제·인도 원장 대사,domain,PARTIAL,tests/inventory 25 files / 241 tests passed,도메인 로직만. 원장 대사(DB) 없음
+G5,gate,결제/환급 수동 사실 확인·원장 반영·외부 환급 증빙,domain,PARTIAL,tests/payment 9 files / 53 tests passed,도메인 로직만. PG 연동 없음(P2)
+G6,gate,원자적 종결 검사 및 Staff 요청 분리,domain,PARTIAL,tests/closure 3 files / 14 tests passed,원자성은 검증 후 연속 저장이며 DB 트랜잭션 아님
+G7,gate,기존 19개 테스트+2세션 경쟁+배포 승인,regression,BLOCKED,"기존 19개 테스트는 ordering-dev DB 측 테스트로 이 저장소에 없음, 2세션 경쟁은 DB 필요",배포 승인 없음
+TEST-UNIT,test-layer,단위/도메인 테스트,unit,PASS,npx vitest run → 76 files 968 tests passed 0 failed,Node v24.18.0 / vitest 5.1.1 / commit 4ece379
+TEST-TYPE,test-layer,타입 검사,static,PASS,npx tsc --noEmit → 출력 0줄(오류 없음),TypeScript 7.0.2
+TEST-OPENAPI,test-layer,OpenAPI 스키마 검사,contract,PARTIAL,tests/openapi 2 files / 26 tests passed,openapi/ordering.yaml은 05단계 주문 API만 다룸. 조달·입고·재고·결제·안내·종결 API는 명세·구현 없음
+TEST-HTTP,test-layer,HTTP 핸들러 테스트,http-handler,PARTIAL,tests/http 3 files / 41 tests passed,핸들러 함수 단위. 실제 서버·라우터·JWT 없음
+TEST-INTEGRATION,test-layer,통합 테스트(여러 모듈 결합),integration,PARTIAL,tests/fulfillment·notification·closure·cancellation·reopening 장면이 inventory/payment/order를 결합,메모리 저장소 기반 결합이며 실제 DB 통합 아님
+TEST-DB,test-layer,DB 테스트(제약·트리거·원장),db,BLOCKED,격리 DB 없음,
+TEST-RLS,test-layer,RLS 정책 테스트,rls,BLOCKED,격리 DB와 실제 JWT 없음,
+TEST-JWT-HTTP,test-layer,실제 JWT+HTTP 테스트,jwt-http,BLOCKED,서버·인증 없음,
+TEST-CONCURRENCY,test-layer,두 독립 세션 동시성,concurrency,BLOCKED,"순차 경쟁(같은 프로세스)으로만 검증: 마지막 1권 예약·인도, 환급 요청 한도, 취소 잠금",진짜 동시 실행은 독립 연결과 DB 잠금이 필요
+TEST-REGRESSION19,test-layer,기존 19개 회귀 테스트,regression,BLOCKED,저장소에 해당 테스트 없음(DB 측),
+SEC-ADVISOR,security,Supabase Security Advisor,db,BLOCKED,미실행: 이 세션은 ordering-dev에 연결하지 않았고 변경·접속은 사전 승인 필요,
+SEC-EXECUTE-GRANT,security,함수 EXECUTE/GRANT 확대 점검,db,BLOCKED,미실행(읽기 전용 조회도 하지 않음),구현현황표 B절의 has_function_privilege 기록은 2026-11-22 문서 값이며 이번에 재확인하지 않음
+SEC-RLS-POLICY,security,RLS 정책 확대 여부,db,BLOCKED,미실행,
+SEC-SECRET-SCAN,security,저장소 시크릿·프로젝트 ID 정적 점검,static,PASS,"git ls-files에 .env/secret/key 파일명 없음, src·tests·openapi·implementation에서 JWT·키·ordering-dev/testBookshare 프로젝트 ID·service_role 패턴 없음",정규식 정적 점검이며 완전한 시크릿 스캐너가 아님
+SEC-NETWORK,security,도메인 코드의 외부 호출·환경변수 사용,static,PASS,src에서 process.env·fetch(·http(s):// grep 결과 없음,PG 승인·환불·알림 발송을 호출하지 않음
+SEC-FORBIDDEN-DB,security,testBookshare 접근 금지 준수,process,PASS,이 세션에서 testBookshare·ordering-dev에 접속하지 않음,
+ST-O01,requirement,주문 초안 생성,domain,PASS,tests/order,05단계
+ST-O02,requirement,주문 보류/재개,domain,NOT_IMPLEMENTED,openapi/ordering.yaml이 HELD를 범위 밖으로 명시,
+ST-O03,requirement,주문 확정,domain,PASS,tests/order + tests/http,05단계
+ST-O04,requirement,가격/품목 변경,domain,NOT_IMPLEMENTED,DEC-08 승인 전 비활성,릴리스 차단 조건(미승인 정책)
+ST-O05,requirement,부분 취소(요청·승인·적용),domain,PARTIAL,tests/cancellation 3 files / 21 tests passed,공급처 발주 의무 조정·조달 배정 해제 미구현
+ST-O06,requirement,전량 취소 확정(CANCELLING),domain,NOT_IMPLEMENTED,,
+ST-O07,requirement,주문 종결(요청+서버 실행),domain,PARTIAL,tests/closure 3 files / 14 tests passed,공급처 외부 의무(미입고 발주량)를 차단 사유에 포함하지 않음
+ST-O08,requirement,취소 종결,domain,NOT_IMPLEMENTED,,
+ST-O09,requirement,초안 폐기,domain,NOT_IMPLEMENTED,,
+ST-O10,requirement,종결 후 정정·재개,domain,PARTIAL,tests/reopening 1 file / 6 tests passed,결제 보정만 근거로 인정. 수령 정정(역거래) 미구현
+ST-P01,requirement,조달 배정,domain,PASS,tests/procurement,06단계
+ST-P02,requirement,미이행 배정 해제,domain,NOT_IMPLEMENTED,,
+ST-P03,requirement,발주서 생성,domain,PASS,tests/procurement,06단계
+ST-P04,requirement,발주 READY 전환,domain,PASS,tests/procurement,06단계
+ST-P05,requirement,발주 파일 출력(CSV),domain,PASS,tests/procurement,XLSX 미구현
+ST-P06,requirement,실제 전달 기록,domain,PASS,tests/procurement,06단계
+ST-P07,requirement,공급처 회신,domain,PASS,tests/procurement,06단계
+ST-P08,requirement,공급처 취소 요청·회신,domain,PASS,tests/procurement,06단계
+ST-P09,requirement,미전달 발주 취소,domain,NOT_IMPLEMENTED,,
+ST-P10,requirement,공급처 전량 취소 확정,domain,PASS,tests/procurement,06단계
+ST-P11,requirement,발주 종결,domain,NOT_IMPLEMENTED,,
+ST-R01,requirement,검수 입고,domain,PASS,tests/inventory/receiveGoods,07단계
+ST-R02,requirement,초과입고 Owner 결정,domain,PASS,tests/inventory/decideExcessReceipt,07단계
+ST-R03,requirement,입고 정정,domain,PASS,tests/inventory/correctReceipt,Owner 전용으로 해석
+ST-R04,requirement,고객별 배분,domain,PASS,tests/inventory/allocateReceipt,07단계
+ST-R05,requirement,배분 해제,domain,PASS,tests/inventory/releaseAllocation,07단계
+ST-R06,requirement,배분 인도,domain,PASS,tests/inventory/deliverAllocation,07단계
+ST-R07,requirement,재배분,domain,PASS,tests/inventory/reallocateAllocation,다른 고객 재배분은 Owner 전용(DEC-15 승인 필요)
+ST-I01,requirement,초기 재고 등록,domain,PASS,tests/inventory/registerInitialStock,07단계
+ST-I02,requirement,재고 증감 조정,domain,PASS,tests/inventory/adjustStock,07단계
+ST-I03,requirement,주문 재고 예약,domain,PASS,tests/inventory/reserveStock,07단계
+ST-I04,requirement,예약 해제,domain,PASS,tests/inventory/releaseStockReservation,07단계
+ST-I05,requirement,예약 인도,domain,PASS,tests/inventory/deliverStockReservation,07단계
+ST-I06,requirement,취소 도서 재고 편입,domain,PASS,tests/inventory/transferCancelledToStock,07단계
+ST-C01,requirement,취소 확정(처분 대기),domain,PASS,tests/inventory/cancelAllocation,07단계
+ST-C02,requirement,반품 선택,domain,PASS,tests/inventory/requestReturn,07단계
+ST-C03,requirement,공급처 반품 회신,domain,PASS,tests/inventory/recordReturnReply,07단계
+ST-C04,requirement,반품 출고,domain,PASS,tests/inventory/dispatchReturn,07단계
+ST-C05,requirement,반품 완료,domain,PASS,tests/inventory/completeReturn,07단계
+ST-C06,requirement,재고 편입,domain,PASS,tests/inventory/transferCancelledToStock,07단계
+ST-C07,requirement,재협의,domain,PASS,tests/inventory/renegotiateReturn,07단계
+ST-C08,requirement,반송·분실 예외,domain,PASS,tests/inventory/reportReturnException,STBR 추가 전이(제안)
+ST-C09,requirement,예외 해소,domain,PASS,tests/inventory/resolveReturnException,STBR 추가 전이(제안)
+ST-M01,requirement,안내 대상 생성,domain,PASS,tests/notification/createNotificationTarget,08단계
+ST-M02,requirement,문구 복사·공유,domain,PASS,tests/notification/recordNotificationCopy,08단계
+ST-M03,requirement,외부 발송 시도 기록,domain,PASS,tests/notification/recordNotificationAttempt,08단계
+ST-M04,requirement,직원 결과 기록,domain,PASS,tests/notification/recordNotificationResult,08단계
+ST-M05,requirement,재안내,domain,PASS,tests/notification/renotify,08단계
+ST-M06,requirement,obsolete 대상,domain,PASS,tests/notification/recordNotificationAttempt,저장 상태 SUPERSEDED 없이 파생
+ST-M07,requirement,공식 API 발송(P1),domain,NOT_IMPLEMENTED,P1,
+ST-F01,requirement,수령(인도) 등록,domain,PASS,tests/fulfillment,08단계. 부분 인도 금액 배분은 승인 필요 해석
+ST-F02,requirement,수령 정정,domain,NOT_IMPLEMENTED,역거래·출처 복원 설계 필요,
+ST-F03,requirement,택배 배송(P1),domain,NOT_IMPLEMENTED,P1,
+ST-Y01,requirement,결제 거래 입력,domain,PASS,tests/payment/recordPayment,08단계
+ST-Y02,requirement,증빙 확인,domain,PASS,tests/payment/confirmPayment,제공사 검증 표시 없음
+ST-Y03,requirement,미확인 거래 무효,domain,PASS,tests/payment/voidPayment,08단계
+ST-Y04,requirement,결제 오기록 보정,domain,PASS,tests/payment/correctPayment,Owner 전용
+ST-Y05,requirement,환급 필요 업무,domain,PARTIAL,tests/payment/openRefundTask,과수납 사유만. 취소 사유는 취소 적용에서 연결
+ST-Y06,requirement,환급 확인(요청·승인),domain,PASS,tests/payment/requestRefund + decideRefundRequest + confirmRefund,외부 환급 증빙 필수
+ST-Y07,requirement,환급 실패/UNKNOWN,domain,NOT_IMPLEMENTED,,
+ST-Y08,requirement,결제 승인 실행(P2),domain,NOT_IMPLEMENTED,P2 PG 계약 필요,
+ST-Y09,requirement,결제 승인 결과(P2),domain,NOT_IMPLEMENTED,P2,
+ST-A,requirement,인증·서점 개설·초대·직원 비활성(ST-A01~A08),jwt-http,NOT_IMPLEMENTED,authorizeTenantAccess 순수 함수만 존재,
+ST-B,requirement,도서·공급처·템플릿 관리(ST-B01~B05),domain,NOT_IMPLEMENTED,공급처는 테스트용 최소 모델만,YES24 이용권한 검증 필요
