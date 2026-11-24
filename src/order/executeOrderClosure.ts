@@ -17,6 +17,8 @@ export type OrderClosure = {
   orderVersionBefore: number;
   orderVersionAfter: number;
   executedBy: "SYSTEM";
+  /** 전량 취소된 주문의 종결이면 CANCELLED (ST-O08). 정상 종결은 생략한다 */
+  outcome?: "CANCELLED";
   closedAt: string;
   recordedAt: string;
 };
@@ -93,6 +95,7 @@ export function executeOrderClosure(
         orderVersionBefore: order.version,
         orderVersionAfter: order.version + 1,
         executedBy: "SYSTEM",
+        ...(order.cancelledAt !== undefined ? { outcome: "CANCELLED" as const } : {}),
         closedAt: request.executedAt,
         recordedAt: now.toISOString(),
       };

@@ -28,9 +28,9 @@ ST-O02,requirement,주문 보류/재개,domain,NOT_IMPLEMENTED,openapi/ordering.
 ST-O03,requirement,주문 확정,domain,PASS,tests/order + tests/http,05단계
 ST-O04,requirement,가격/품목 변경,domain,NOT_IMPLEMENTED,DEC-08 승인 전 비활성,릴리스 차단 조건(미승인 정책)
 ST-O05,requirement,부분 취소(요청·승인·적용),domain,PARTIAL,tests/cancellation 3 files / 21 tests passed,공급처 발주 의무 조정·조달 배정 해제 미구현
-ST-O06,requirement,전량 취소 확정(CANCELLING),domain,NOT_IMPLEMENTED,,
+ST-O06,requirement,전량 취소 확정(CANCELLING),domain,PARTIAL,tests/cancellation/cancellingOrder·applyOrderCancellation,공급처 발주 의무 조정·조달 배정 해제 미구현
 ST-O07,requirement,주문 종결(요청+서버 실행),domain,PARTIAL,tests/closure 3 files / 14 tests passed,공급처 외부 의무(미입고 발주량)를 차단 사유에 포함하지 않음
-ST-O08,requirement,취소 종결,domain,NOT_IMPLEMENTED,,
+ST-O08,requirement,취소 종결,domain,PARTIAL,tests/cancellation/closeCancelledOrder 2 tests,기존 종결 판정 재사용·outcome=CANCELLED 기록. 공급처 외부 의무는 차단 사유에 미포함
 ST-O09,requirement,초안 폐기,domain,NOT_IMPLEMENTED,,
 ST-O10,requirement,종결 후 정정·재개,domain,PARTIAL,tests/reopening 1 file / 6 tests passed,결제 보정만 근거로 인정. 수령 정정(역거래) 미구현
 ST-P01,requirement,조달 배정,domain,PASS,tests/procurement,06단계
