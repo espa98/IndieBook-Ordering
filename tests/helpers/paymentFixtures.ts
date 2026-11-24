@@ -34,6 +34,9 @@ import type {
 import { confirmPayment } from "../../src/payment/confirmPayment";
 import { recordPayment } from "../../src/payment/recordPayment";
 import { world } from "./procurementWorld";
+import type { RefundAttempt, ReportRefundAttemptRequest } from "../../src/payment/reportRefundAttempt";
+import type { RefundAttemptResolution, ResolveRefundAttemptRequest } from "../../src/payment/resolveRefundAttempt";
+import { reportRefundAttempt } from "../../src/payment/reportRefundAttempt";
 
 export function createInMemoryPaymentRepository() {
   const all: Payment[] = [];
@@ -377,4 +380,76 @@ export function refundDecisionScene() {
     ...extra,
   });
   return { ...s, refundRequestRecord: refundRequest, decideRefundRequest };
+}
+
+export function createInMemoryRefundAttemptRepository() {
+  const all: RefundAttempt[] = [];
+  return {
+    get(tenantId: string, id: string): RefundAttempt | undefined {
+      return all.find((a) => a.tenantId === tenantId && a.id === id);
+    },
+    list(tenantId: string, refundTaskId: string): RefundAttempt[] {
+      return all.filter((a) => a.tenantId === tenantId && a.refundTaskId === refundTaskId);
+    },
+    save(attempt: RefundAttempt): void {
+      all.push(attempt);
+    },
+  };
+}
+
+/** refundRequestScene(환급 필요 5,000원)에서 외부 환급 시도의 실패·불명확 결과를 보고하는 세계 */
+export function refundAttemptScene() {
+  const s = refundRequestScene();
+  const refundAttempts = createInMemoryRefundAttemptRepository();
+  const deps = { ...s.deps, refundAttempts };
+  let seq = 0;
+  const reportAttemptRequest = (
+    extra: Partial<ReportRefundAttemptRequest> = {},
+  ): ReportRefundAttemptRequest => ({
+    tenantId: "tenant-a",
+    refundTaskId: s.task.id,
+    paymentId: s.second.id,
+    amountKrw: "3000",
+    result: "UNKNOWN",
+    reason: "카드사 응답 시간 초과, 취소 여부 불명",
+    reportedBy: "김직원",
+    reportedAt: "2026-03-04T06:49:00.000Z",
+    idempotencyKey: `rat-${++seq}`,
+    ...extra,
+  });
+  return { ...s, deps, refundAttempts, reportAttemptRequest };
+}
+
+export function createInMemoryRefundAttemptResolutionRepository() {
+  const all: RefundAttemptResolution[] = [];
+  return {
+    list(tenantId: string, attemptId: string): RefundAttemptResolution[] {
+      return all.filter((r) => r.tenantId === tenantId && r.attemptId === attemptId);
+    },
+    save(resolution: RefundAttemptResolution): void {
+      all.push(resolution);
+    },
+  };
+}
+
+/** refundAttemptScene에서 3,000원 UNKNOWN 시도가 보고된 세계 */
+export function unknownAttemptScene() {
+  const s = refundAttemptScene();
+  const refundAttemptResolutions = createInMemoryRefundAttemptResolutionRepository();
+  const deps = { ...s.deps, refundAttemptResolutions };
+  const attempt = reportRefundAttempt(deps, s.reportAttemptRequest({ idempotencyKey: "rat-scene" }));
+  let seq = 0;
+  const resolveAttemptRequest = (
+    extra: Partial<ResolveRefundAttemptRequest> = {},
+  ): ResolveRefundAttemptRequest => ({
+    tenantId: "tenant-a",
+    attemptId: attempt.id,
+    outcome: "FAILED",
+    evidence: "카드사 조회 결과 취소 내역 없음 2026-03-05",
+    resolvedBy: "김직원",
+    resolvedAt: "2026-03-04T06:50:00.000Z",
+    idempotencyKey: `rar-${++seq}`,
+    ...extra,
+  });
+  return { ...s, deps, attempt, refundAttemptResolutions, resolveAttemptRequest };
 }

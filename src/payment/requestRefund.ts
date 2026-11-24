@@ -8,6 +8,8 @@ import type { PaymentConfirmationRepository } from "./confirmPayment";
 import type { RefundConfirmationRepository } from "./confirmRefund";
 import type { PaymentCorrectionRepository } from "./correctPayment";
 import type { PaymentVoidRepository } from "./voidPayment";
+import type { RefundAttemptRepository } from "./reportRefundAttempt";
+import type { RefundAttemptResolutionRepository } from "./resolveRefundAttempt";
 import type { RefundTaskRepository } from "./openRefundTask";
 import type { PaymentRepository } from "./recordPayment";
 
@@ -67,6 +69,9 @@ export type RequestRefundDeps = {
   refundConfirmations: Pick<RefundConfirmationRepository, "list" | "listByPayment">;
   refundRequests: RefundRequestRepository;
   refundRequestDecisions: Pick<RefundRequestDecisionRepository, "list">;
+  /** 불명확(UNKNOWN) 환급 시도의 예약을 한도에 반영한다 (BR-Y07/Y08) */
+  refundAttempts?: Pick<RefundAttemptRepository, "list">;
+  refundAttemptResolutions?: Pick<RefundAttemptResolutionRepository, "list">;
   idempotency: IdempotencyStore;
   now?: () => Date;
 };
@@ -137,10 +142,16 @@ export function requestRefund(
           (r) =>
             refundRequestStatus(deps.refundRequestDecisions.list(request.tenantId, r.id)) === "REQUESTED",
         );
+      const unknown = (deps.refundAttempts?.list(request.tenantId, task.id) ?? []).filter(
+        (a) =>
+          a.result === "UNKNOWN" &&
+          (deps.refundAttemptResolutions?.list(request.tenantId, a.id) ?? []).length === 0,
+      );
       const taskRemaining =
         BigInt(task.requiredKrw) -
         sumAmount(deps.refundConfirmations.list(request.tenantId, task.id)) -
-        sumAmount(active);
+        sumAmount(active) -
+        sumAmount(unknown);
       const corrected = deps.paymentCorrections
         .list(request.tenantId, payment.id)
         .reduce((total, c) => total + BigInt(c.reducedKrw), 0n);
@@ -148,7 +159,8 @@ export function requestRefund(
         BigInt(payment.amountKrw) -
         corrected -
         sumAmount(deps.refundConfirmations.listByPayment(request.tenantId, payment.id)) -
-        sumAmount(active.filter((r) => r.paymentId === payment.id));
+        sumAmount(active.filter((r) => r.paymentId === payment.id)) -
+        sumAmount(unknown.filter((a) => a.paymentId === payment.id));
       if (BigInt(request.amountKrw) > taskRemaining || BigInt(request.amountKrw) > paymentAvailable) {
         throw new AppError(
           "BUSINESS_INVARIANT",

@@ -82,7 +82,7 @@ ST-Y03,requirement,미확인 거래 무효,domain,PASS,tests/payment/voidPayment
 ST-Y04,requirement,결제 오기록 보정,domain,PASS,tests/payment/correctPayment,Owner 전용
 ST-Y05,requirement,환급 필요 업무,domain,PARTIAL,tests/payment/openRefundTask,과수납 사유만. 취소 사유는 취소 적용에서 연결
 ST-Y06,requirement,환급 확인(요청·승인),domain,PASS,tests/payment/requestRefund + decideRefundRequest + confirmRefund,외부 환급 증빙 필수
-ST-Y07,requirement,환급 실패/UNKNOWN,domain,NOT_IMPLEMENTED,,
+ST-Y07,requirement,환급 실패/UNKNOWN,domain,PARTIAL,tests/payment/reportRefundAttempt + resolveRefundAttempt 5 tests,수동 증빙 모델의 시도 결과 기록·UNKNOWN 예약·조회 해소만. 권한 검증·PG 연동(P2)·대사 큐 없음
 ST-Y08,requirement,결제 승인 실행(P2),domain,NOT_IMPLEMENTED,P2 PG 계약 필요,
 ST-Y09,requirement,결제 승인 결과(P2),domain,NOT_IMPLEMENTED,P2,
 ST-A,requirement,인증·서점 개설·초대·직원 비활성(ST-A01~A08),jwt-http,NOT_IMPLEMENTED,authorizeTenantAccess 순수 함수만 존재,
