@@ -8,7 +8,7 @@
 
 | 영역 | 판정 | 한 줄 근거 |
 |---|---|---|
-| 도메인 단위·통합(메모리 저장소) | **PASS** | `npx vitest run` 113 files / 1132 tests 통과, 실패 0 (DB 테스트 68개 포함) |
+| 도메인 단위·통합(메모리 저장소) | **PASS** | `npx vitest run` 116 files / 1153 tests 통과, 실패 0 (DB 테스트 68개, HTTP 서버 테스트 14개 포함) |
 | 타입 검사 | **PASS** | `npx tsc --noEmit` 출력 없음 |
 | OpenAPI 스키마·계약 | **PARTIAL** | 주문 API(05단계)만 명세가 있고 26개 통과. 나머지 영역은 명세·구현 없음 |
 | HTTP | **PARTIAL** | 핸들러 단위 41개 통과. 실제 서버·라우터·JWT 없음 |
@@ -25,7 +25,7 @@
 
 | 명령 | 결과 |
 |---|---|
-| `npx vitest run` | files 113, tests 1132, passed 1132, failed 0 (수령 영속화 추가 후 재실행. 디렉터리별 표도 이 실행의 JSON 집계) |
+| `npx vitest run` | files 116, tests 1153, passed 1153, failed 0 (HTTP 서버 추가 후 재실행. 디렉터리별 표도 이 실행의 JSON 집계) |
 | `npx tsc --noEmit` | 출력 없음(오류 0) |
 | 정적 점검: `git ls-files` 파일명(.env·secret·credential·pem·key) | 해당 없음 |
 | 정적 점검: `src tests openapi implementation package.json`에서 JWT·키 패턴, `ordering-dev`·`testBookshare` 프로젝트 ID, `service_role` grep | 해당 없음 |
@@ -35,10 +35,10 @@
 
 | 디렉터리 | 파일 | 테스트 |
 |---|---|---|
-| auth | 11 | 53 |
+| auth | 12 | 57 |
 | catalog | 5 | 18 |
 | errors | 1 | 8 |
-| http | 3 | 41 |
+| http | 4 | 55 |
 | idempotency | 2 | 53 |
 | openapi | 2 | 26 |
 | order | 10 | 111 |
@@ -51,7 +51,8 @@
 | cancellation | 5 | 25 |
 | reopening | 1 | 6 |
 | db | 8 | 68 |
-| **합계** | **113** | **1132** |
+| server | 1 | 3 |
+| **합계** | **116** | **1153** |
 
 (`tests/helpers`는 테스트 파일이 없는 공용 픽스처다.)
 
@@ -401,4 +402,41 @@
 - 수령 가드의 결제 충당은 도메인과 같이 확인된 결제 합계만 보며 환급·보정을 빼지 않는다(도메인의 현재 규칙을 그대로 따름).
 - 한도 계산이 도메인(메모리)과 DB 트리거(SQL)에 이중으로 있다. 어긋나면 DB가 `BUSINESS_INVARIANT`로 거부한다.
 - 수령은 주문의 열림 상태(초안·종결·전량 취소)를 도메인이 검사하고, DB는 취소 요청 쪽만 강제한다.
+
+## 20. HTTP 서버와 실제 JWT 검증 (`src/auth/jwt.ts`, `src/http/app.ts`·`server.ts`, `server/`)
+
+테스트 21개(`tests/auth/jwt` 4, `tests/http/server` 14, `tests/server/config` 3). E2 결정(별도 백엔드, Node.js + TypeScript)에 따라 프레임워크 없이 `node:http`로 만들었다. 실제 서버를 포트 0으로 띄우고 격리 Postgres와 **실제로 서명한 JWT**로 `fetch` 요청을 보내 검증한다.
+
+**JWT 검증(`verifyJwt`, T2):** Supabase 액세스 토큰을 `node:crypto`만으로 검증한다(HS256 비밀, RS256·ES256 공개 키 JWK/PEM). 알고리즘은 **구성된 키에 못 박아** 토큰 헤더가 고르지 못한다(공개 키를 HMAC 비밀로 쓴 HS256 위조 차단, `alg: none`·미지원 알고리즘·`crit` 헤더 거부). `exp`(필수)·`nbf`·`aud`(authenticated)·선택 `iss`·`sub`가 UUID인지 검증하고 시계 허용 오차는 기본 5초다. 모든 실패는 이유를 구별할 수 없는 같은 401이며 토큰 길이 상한(8KiB)이 있다.
+
+**라우트(`/v1/tenants/{tenantId}/…`, 모두 `authorizedActions` 경유 어댑터 호출):** 주문 목록·생성·상세·확정, 재고 예약, 수령(인도), 취소 요청, 결제 입력·확인, 환급 업무·요청·결정. `GET /healthz`만 인증 없이 응답한다. 경로의 서점 ID는 선택자일 뿐이고 인증 근거는 토큰의 `sub`와 DB 멤버십이다.
+
+| 방어 | 동작 |
+|---|---|
+| 인증 우선 | 존재하는 경로와 없는 경로 모두 토큰이 없거나 틀리면 같은 401(경로 탐색 방지) |
+| 경로·메서드 | UUID가 아닌 경로 ID는 404, 없는 경로 404, 허용되지 않은 메서드는 405와 `Allow` |
+| 본문 | `application/json` 객체만(415·400), 허용 필드 목록 외 필드는 400(`recordedBy`·`actorRole`·`tenantId` 위조 시도 포함, 보낸 필드 이름은 되돌리지 않음), 상한 초과 413 |
+| 멱등 | POST는 `Idempotency-Key` 필수(1~128자) |
+| 응답 | `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `X-Request-Id`, 오류는 고정 문구, 처리하지 못한 오류는 500 `INTERNAL_ERROR`이고 원본은 로그 훅으로만 전달 |
+
+| 검증한 것(HTTP) | 결과 |
+|---|---|
+| 토큰 없음·위조·만료·aud 불일치·잘못된 스킴 → 401 | 통과 |
+| 비멤버·비활성 직원·다른 서점의 Owner → 403 | 통과 |
+| 주문 생성·확정·조회·목록 → 재고 예약 → 결제 입력·확인 → 인도, 행위자는 토큰의 사용자 | 통과 |
+| 환급: Staff 요청, Staff 승인 403, Owner 승인 200, 재결정 422 | 통과 |
+| 다른 서점의 주문 ID와 없는 ID가 같은 404 응답 | 통과 |
+| 같은 키·같은 본문 → 같은 주문(201 두 번), 다른 본문 409, 같은 키 동시 요청 → 같은 주문 | 통과 |
+| **마지막 3권에 6개 HTTP 요청이 동시에 예약 → 정확히 3건 201, 나머지 422** | 통과 |
+| DB 오류 → 500 고정 문구, 로그 훅 호출 | 통과 |
+
+**테스트 안정화(발견한 간헐 실패 두 가지):** 전체 실행 부하에서 (1) DB 테스트 하나가 기본 5초 제한을 넘는 시간 초과(논리 오류 아님), (2) 격리 Postgres 기동 단계에서 포트를 고른 뒤 다른 서버와 겹쳐 스위트가 실패. `vitest.config.ts`로 테스트 시간 제한을 30초로 올리고, 시험용 풀의 유휴 연결을 1초 뒤 닫으며, Postgres 기동을 새 포트·새 폴더로 최대 4회 재시도하게 했다. 전체 스위트를 연속 5회 실행해 매번 116 files / 1153 tests가 통과했다.
+
+**한계**
+- **실행 파일이 없다:** `server/main.ts`와 `server/config.ts`는 있으나 빌드 단계(번들·컴파일)가 없어 `node`로 바로 실행할 수 없다(소스가 확장자 없는 import를 쓴다). 배포 방식(번들러·컨테이너)은 사용자 결정이 필요하다(`release/approval_items.md` E8).
+- **OpenAPI 미반영:** 재고 예약·수령·취소 요청·결제·환급 엔드포인트는 서버에 있으나 `openapi/ordering.yaml`에는 주문 4개만 있다. 계약 테스트도 주문 엔드포인트만 검증한다. 서버 허용 필드 목록과 명세의 대조는 수작업이다.
+- **CORS·속도 제한·TLS 종단·요청 로그 구조화는 없다**(브라우저 클라이언트 허용 오리진은 결정이 필요, E9). 한 요청 안의 문자열·품목 수 상한(E4)도 본문 크기 상한 외에는 없다.
+- 실제 Supabase 프로젝트의 JWT(서명 키 형식, `iss`)로 검증하지는 않았다. 구성한 키로 직접 서명한 토큰으로만 시험했다. Supabase의 비대칭 서명 키 사용 여부에 따라 `SUPABASE_JWT_KEYS`(공개 키)로 구성해야 한다.
+- 접근 토큰 폐기(로그아웃 즉시 무효)는 검증하지 않는다. 직원 비활성화는 매 요청 DB 멤버십 재조회로 즉시 반영된다.
+- 읽기 API는 주문 목록·상세뿐이다. 재고·결제·수령 조회 엔드포인트는 없다.
 
