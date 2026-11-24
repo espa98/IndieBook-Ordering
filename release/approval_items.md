@@ -35,7 +35,7 @@
 
 **연결 필수화 정책:** 일부 검사는 선택 의존성이라 서버 조립에서 연결하지 않으면 조용히 꺼진다. (`requestRefund`의 `refundAttempts`·`refundAttemptResolutions`, `executeOrderReopening`의 `fulfillmentCorrections`, `evaluateOrderClosure`·`allocateSourcing`의 `supplierObligations`, `createOrderService`의 `books`) 권고: 서버 조립 단계에서 모두 필수로 바꾼다. [ ] 동의
 
-**현재 연결 상태(`0095c3c`):** `supplierObligations`(배정·주문 종결·주문 재개), `fulfillmentCorrections`(재개), `refundAttempts` 조회, 일반 주문의 `books`는 어댑터에서 연결했다. 환급 시도 기록 명령은 022에서 영속화했고, 서비스 주문(`createOrderService`)은 영속화되지 않아 해당 검사는 동작하지 않는다. 도메인 타입에서 선택 의존성을 필수로 바꾸는 작업은 하지 않았다.
+**현재 연결 상태(`0095c3c`):** `supplierObligations`(배정·주문 종결·주문 재개), `fulfillmentCorrections`(재개), `refundAttempts` 조회, 일반 주문의 `books`는 어댑터에서 연결했다. 환급 시도 기록 명령은 022에서 영속화했고, 서비스 주문(`createOrderService`)은 `createOrder`가 실행하며 `books`가 연결되어 있다. 도메인 타입에서 선택 의존성을 필수로 바꾸는 작업은 하지 않았다.
 
 ---
 
