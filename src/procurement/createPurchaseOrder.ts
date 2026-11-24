@@ -46,7 +46,7 @@ export type PurchaseOrder = {
   id: string;
   tenantId: string;
   supplierCode: string;
-  status: "DRAFT" | "READY" | "SENT" | "ACKNOWLEDGED" | "CANCELLED";
+  status: "DRAFT" | "READY" | "SENT" | "ACKNOWLEDGED" | "CANCELLED" | "CLOSED";
   version: number;
   lines: PoLine[];
   delivery?: PoDelivery;
@@ -55,6 +55,8 @@ export type PurchaseOrder = {
   /** 미전달 발주를 취소한 담당자와 사유 (ST-P09) */
   cancelledBy?: string;
   cancelReason?: string;
+  /** 서버가 종결 조건을 재계산해 발주를 종결한 시각 (ST-P11) */
+  closedAt?: string;
 };
 
 export type PurchaseOrderRepository = {
