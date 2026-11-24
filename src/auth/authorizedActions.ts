@@ -58,6 +58,9 @@ import { markPurchaseOrderReady } from "../procurement/markPurchaseOrderReady";
 import { recordSupplierReply } from "../procurement/recordSupplierReply";
 import { respondToCancellationRequest } from "../procurement/respondToCancellationRequest";
 import { bindActor } from "./bindActor";
+import { inviteStaff } from "./inviteStaff";
+import { revokeInvitation } from "./revokeInvitation";
+import { setMembershipStatus } from "./setMembershipStatus";
 
 const BOTH = ["OWNER", "STAFF"] as const;
 const OWNER = ["OWNER"] as const;
@@ -88,6 +91,10 @@ export const authorizedActions = {
   resolveReceiptDefect: bindActor(resolveReceiptDefect, { roleField: "actorRole", nameField: "resolvedBy", allow: BOTH }),
   decideOrderCancellation: bindActor(decideOrderCancellation, { roleField: "actorRole", nameField: "decidedBy", allow: BOTH }),
   decideRefundRequest: bindActor(decideRefundRequest, { roleField: "actorRole", nameField: "decidedBy", allow: BOTH }),
+  // 직원 관리(ST-A03~A05): Owner 전용
+  inviteStaff: bindActor(inviteStaff, { roleField: "actorRole", nameField: "invitedBy", allow: OWNER }),
+  revokeInvitation: bindActor(revokeInvitation, { roleField: "actorRole", nameField: "revokedBy", allow: OWNER }),
+  setMembershipStatus: bindActor(setMembershipStatus, { roleField: "actorRole", nameField: "changedBy", allow: OWNER }),
   // Owner·Staff 모두 호출하는 명령: 행위자 이름과 테넌트만 주체에서 주입한다
   postFulfillment: bindActor(postFulfillment, { nameField: "receivedBy", allow: BOTH }),
   allocateReceipt: bindActor(allocateReceipt, { nameField: "allocatedBy", allow: BOTH }),

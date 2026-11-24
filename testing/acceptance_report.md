@@ -8,7 +8,7 @@
 
 | 영역 | 판정 | 한 줄 근거 |
 |---|---|---|
-| 도메인 단위·통합(메모리 저장소) | **PASS** | `npx vitest run` 91 files / 1021 tests 통과, 실패 0 |
+| 도메인 단위·통합(메모리 저장소) | **PASS** | `npx vitest run` 95 files / 1032 tests 통과, 실패 0 |
 | 타입 검사 | **PASS** | `npx tsc --noEmit` 출력 없음 |
 | OpenAPI 스키마·계약 | **PARTIAL** | 주문 API(05단계)만 명세가 있고 26개 통과. 나머지 영역은 명세·구현 없음 |
 | HTTP | **PARTIAL** | 핸들러 단위 41개 통과. 실제 서버·라우터·JWT 없음 |
@@ -25,7 +25,7 @@
 
 | 명령 | 결과 |
 |---|---|
-| `npx vitest run` | files 91, tests 1021, passed 1021, failed 0 (인증 계층 추가 후 재실행. 아래 디렉터리별 표는 21e22e3 기준 JSON 집계에 auth 변경만 반영) |
+| `npx vitest run` | files 95, tests 1032, passed 1032, failed 0 (인증 계층 추가 후 재실행. 아래 디렉터리별 표는 21e22e3 기준 JSON 집계에 auth 변경만 반영) |
 | `npx tsc --noEmit` | 출력 없음(오류 0) |
 | 정적 점검: `git ls-files` 파일명(.env·secret·credential·pem·key) | 해당 없음 |
 | 정적 점검: `src tests openapi implementation package.json`에서 JWT·키 패턴, `ordering-dev`·`testBookshare` 프로젝트 ID, `service_role` grep | 해당 없음 |
@@ -35,7 +35,7 @@
 
 | 디렉터리 | 파일 | 테스트 |
 |---|---|---|
-| auth | 4 | 31 |
+| auth | 8 | 42 |
 | errors | 1 | 8 |
 | http | 3 | 41 |
 | idempotency | 2 | 53 |
@@ -49,7 +49,7 @@
 | closure | 4 | 15 |
 | cancellation | 5 | 25 |
 | reopening | 1 | 6 |
-| **합계** | **91** | **1021** |
+| **합계** | **95** | **1032** |
 
 (`tests/helpers`는 테스트 파일이 없는 공용 픽스처다.)
 
@@ -66,7 +66,7 @@
 | 안내 ST-M | M01~M06 | — | M07(P1) |
 | 수령 ST-F | F01 | F02 | F03(P1) |
 | 결제·환급 ST-Y | Y01~Y04, Y06 | Y05, Y07 | Y08·Y09(P2) |
-| 인증·계정 ST-A | — | A05·A08 일부(주체 도출·행위자 주입) | A01~A04, A06, A07 |
+| 인증·계정 ST-A | — | A03·A04·A05·A08 일부 | A01, A02, A06, A07 |
 | 도서·공급처 ST-B | — | — | 전부 |
 
 **PARTIAL의 의미:** 도메인 규칙은 구현·테스트했으나 아래 한계 중 하나가 남은 것이다. 항목별 한계는 `testing/test_matrix.csv`의 notes에 있다.
@@ -138,7 +138,7 @@
 | 6d9bb13 | 해제 후 남는 공급처 의무 파생, 주문 종결 차단, 재조달 중복 위험 승인 | BR-P05 |
 | 21e22e3 | 파손·오배송 처리 기록과 발주 종결 차단 | BR-P06, ST-R01 |
 
-테스트는 968 → 1005개(+37), 파일은 76 → 88개(+12)다. 그 뒤 인증·권한 계층(§10)으로 1021개, 91 files가 되었다.
+테스트는 968 → 1005개(+37), 파일은 76 → 88개(+12)다. 그 뒤 인증·권한 계층(§10)으로 1032개, 95 files가 되었다(직원 관리 ST-A03~A05 포함, §10.1).
 
 ### 9.1 이번 갱신에서 새로 생긴 위험·주의
 
@@ -167,5 +167,25 @@
 - 외부 진입점이 `authorizedActions` 대신 도메인 함수를 직접 호출하면 우회된다. 진입점 규약과 서버 조립에서 강제해야 한다.
 - 멱등 키가 없는 조회 함수(`getOrder`, `listOrders` 등)와 `createOrderApi`의 내부 인가(`authorizeTenantAccess`)는 이 모음에 포함하지 않았다. 조회의 `tenantId`는 호출자가 넘기는 값이다.
 - JWT 서명 검증·키 관리·서버가 없다. `resolvePrincipal`은 검증이 끝난 신원을 입력으로 받는다고 가정한다.
-- ST-A01~A04(이메일 인증·서점 개설·초대·만료/철회), 직원 비활성화·복구 명령 자체, ST-A06/A07은 구현하지 않았다. 마지막 Owner 보호도 없다.
+- ST-A01(이메일 인증)·ST-A02(서점 개설)·ST-A06/A07(중지·해지)은 구현하지 않았다. 직원 관리(A03~A05)는 §10.1.
+
+### 10.1 직원 초대·비활성화·복구 (ST-A03~A05)
+
+테스트 11개(`tests/auth/inviteStaff`·`acceptInvitation`·`revokeInvitation`·`setMembershipStatus`).
+
+| 명령 | 규칙 |
+|---|---|
+| `inviteStaff` (Owner) | 이메일 정규화·형식 검증, 만료는 지금 이후 30일 이내, 같은 이메일의 유효 초대가 있으면 BUSINESS_INVARIANT. 토큰은 한 번만 반환하고 SHA-256 해시만 저장. 초대는 STAFF만(Owner 추가 정책 미정) |
+| `acceptInvitation` | 토큰 해시·확인된 이메일·만료·철회·재사용을 검증. 틀린 토큰·다른 이메일·만료·철회·재사용은 이유를 구별할 수 없는 같은 FORBIDDEN. 이미 멤버십이 있으면 BUSINESS_INVARIANT. 성공하면 활성 Staff 멤버십 생성 |
+| `revokeInvitation` (Owner) | INVITED만 철회. 수락·철회·만료된 초대는 BUSINESS_INVARIANT |
+| `setMembershipStatus` (Owner) | ACTIVE↔INACTIVE, 변경 기록(추가 전용). 비활성화는 `resolvePrincipal` 재조회로 즉시 반영. 마지막 활성 Owner는 비활성화 불가(BR-T06) |
+
+초대 상태(INVITED/ACCEPTED/REVOKED/EXPIRED)는 사건 기록과 만료 시각에서 파생한다. 만료는 별도 기록 없이 시각으로 판정한다.
+
+**한계**
+- 확인된 이메일(`verifiedEmail`)은 인증 제공자가 보증한다고 가정한다. 이메일 인증(ST-A01) 자체는 없다.
+- 이미 멤버인 사용자의 이메일로 초대하는 것은 막지 못한다(멤버십이 이메일을 갖지 않는다).
+- 멱등 재생은 같은 응답(토큰 포함)을 돌려준다. 멱등 저장소에 평문 토큰이 남는 점에 유의해야 한다.
+- Owner 추가·강등·역할 변경·탈퇴는 없다. 초대 수락에는 `authorizedActions`를 쓰지 않는다(테넌트가 토큰에서 정해지고 주체가 아직 없음).
+- 중복 초대 검사는 `invitations.list`를 전수 조회한다(메모리 저장소 가정).
 

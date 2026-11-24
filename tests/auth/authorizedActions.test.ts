@@ -18,6 +18,10 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
+// 바인딩 인프라 자체(모음·바인더)만 제외한다. 직원 관리처럼 src/auth 안의 명령은 검사 대상이다
+const INFRASTRUCTURE = ["src/auth/authorizedActions.ts", "src/auth/bindActor.ts"];
+const isCommandSource = (path: string) => !INFRASTRUCTURE.includes(path.split(sep).join("/"));
+
 describe("authorizedActions: 신원 필드를 주체에서 주입한 명령 모음 (T7)", () => {
   it("Staff 주체가 요청에 actorRole OWNER를 위조해도 Owner 전용 명령은 FORBIDDEN이고 아무것도 기록되지 않는다", () => {
     const { deps, correctPaymentRequest, paymentCorrections, first: payment } = paymentCorrectionScene();
@@ -60,7 +64,7 @@ describe("authorizedActions: 신원 필드를 주체에서 주입한 명령 모�
 
   it("역할 또는 SYSTEM 실행자를 요청으로 받는 모든 명령 파일이 이 모음에 바인딩되어 있다 (누락 방지)", () => {
     const needsBinding = sourceFiles("src")
-      .filter((path) => !path.split(sep).join("/").startsWith("src/auth/"))
+      .filter(isCommandSource)
       .filter((path) => {
         const text = readFileSync(path, "utf8");
         return /actorRole: "OWNER" \| "STAFF"/.test(text) || /executedBy: "SYSTEM";/.test(text);
@@ -75,7 +79,7 @@ describe("authorizedActions: 신원 필드를 주체에서 주입한 명령 모�
 
   it("명령 입력에 행위자 이름 필드(...By)가 있는 모든 명령 파일도 이 모음에 바인딩되어 있다 (감사 귀속 위조 방지)", () => {
     const needsBinding = sourceFiles("src")
-      .filter((path) => !path.split(sep).join("/").startsWith("src/auth/"))
+      .filter(isCommandSource)
       .filter((path) => {
         const text = readFileSync(path, "utf8");
         // 멱등 키가 있는 요청 타입 = 외부에서 호출되는 명령 입력
@@ -102,7 +106,7 @@ describe("authorizedActions: 신원 필드를 주체에서 주입한 명령 모�
 
   it("테넌트와 멱등 키를 요청으로 받는 모든 명령 파일이 이 모음에 바인딩되어 있다 (행위자 필드가 없어도 tenantId 위조 방지)", () => {
     const needsBinding = sourceFiles("src")
-      .filter((path) => !path.split(sep).join("/").startsWith("src/auth/"))
+      .filter(isCommandSource)
       .filter((path) => {
         const text = readFileSync(path, "utf8");
         return [...text.matchAll(/export type \w+ = \{([\s\S]*?)\n\};/g)].some(
