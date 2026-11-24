@@ -5,6 +5,7 @@ import {
 } from "../idempotency/executeIdempotent";
 import { invalid, isNonEmptyString, parseUtcTimestamp } from "../procurement/validation";
 import type { OrderRepository } from "../order/confirmOrderService";
+import type { PaymentCorrectionRepository } from "./correctPayment";
 import type { RefundConfirmationRepository } from "./confirmRefund";
 import { refundTaskState } from "./refundTaskState";
 import type { PaymentConfirmationRepository } from "./confirmPayment";
@@ -37,6 +38,7 @@ export type OpenRefundTaskDeps = {
   payments: PaymentRepository;
   paymentConfirmations: Pick<PaymentConfirmationRepository, "list">;
   paymentVoids: Pick<PaymentVoidRepository, "list">;
+  paymentCorrections: Pick<PaymentCorrectionRepository, "listByOrder">;
   refundTasks: RefundTaskRepository;
   refundConfirmations: Pick<RefundConfirmationRepository, "list" | "listByOrder">;
   idempotency: IdempotencyStore;
@@ -84,6 +86,7 @@ export function openRefundTask(
         payments.flatMap((p) => deps.paymentConfirmations.list(request.tenantId, p.id)),
         payments.flatMap((p) => deps.paymentVoids.list(request.tenantId, p.id)),
         deps.refundConfirmations.listByOrder(request.tenantId, order.id),
+        deps.paymentCorrections.listByOrder(request.tenantId, order.id),
       );
       if (BigInt(summary.refundRequiredKrw) < 1n) {
         throw new AppError("BUSINESS_INVARIANT", "there is no overpayment to refund");

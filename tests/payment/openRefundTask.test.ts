@@ -4,6 +4,7 @@ import { confirmPayment } from "../../src/payment/confirmPayment";
 import { confirmRefund } from "../../src/payment/confirmRefund";
 import { recordPayment } from "../../src/payment/recordPayment";
 import { openRefundTask } from "../../src/payment/openRefundTask";
+import { correctPayment } from "../../src/payment/correctPayment";
 import { confirmationScene, overpaidScene, refundScene } from "../helpers/paymentFixtures";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -35,6 +36,7 @@ describe("openRefundTask: 과수납 환급 필요 업무 개설 (ST-Y05, DEC-14,
           ...exact.deps,
           refundTasks: { get: () => undefined, list: () => [], save() {} },
           refundConfirmations: { list: () => [], listByOrder: () => [] },
+          paymentCorrections: { listByOrder: () => [] },
         },
         { tenantId: "tenant-a", orderId: exact.order.id, openedBy: "김직원", openedAt: "2026-03-04T06:45:00.000Z", idempotencyKey: "x" },
       );
@@ -115,5 +117,25 @@ describe("openRefundTask: 과수납 환급 필요 업무 개설 (ST-Y05, DEC-14,
 
     expect(second.requiredKrw).toBe("4000");
     expect(refundTasks.list("tenant-a", order.id)).toHaveLength(2);
+  });
+
+  it("결제 오기록 보정으로 확인 금액이 줄면 환급 필요액도 줄어(0이면 업무를 열 수 없다) 보정을 반영해 계산한다", () => {
+    const { deps, openRequest, first, order, refundTasks } = overpaidScene(); // 확인 35,000, 총액 30,000
+    correctPayment(deps, {
+      tenantId: "tenant-a",
+      paymentId: first.id,
+      reducedKrw: "2000",
+      reason: "입금액 오입력",
+      evidence: "입금 내역 재확인",
+      actorRole: "OWNER",
+      correctedBy: "점주",
+      correctedAt: "2026-03-04T06:55:00.000Z",
+      idempotencyKey: "pcr-open",
+    }); // 확인 33,000 → 과수납 3,000
+
+    const task = openRefundTask(deps, openRequest());
+
+    expect(task.requiredKrw).toBe("3000");
+    expect(refundTasks.list("tenant-a", order.id)).toEqual([task]);
   });
 });

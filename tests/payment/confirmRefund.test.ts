@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { AppError } from "../../src/errors/AppError";
+import { correctPayment } from "../../src/payment/correctPayment";
 import { recordPayment } from "../../src/payment/recordPayment";
 import { confirmRefund } from "../../src/payment/confirmRefund";
 import { heavilyOverpaidScene, refundScene } from "../helpers/paymentFixtures";
@@ -141,5 +142,30 @@ describe("confirmRefund: 외부 환급 완료 사실 기록 (ST-Y06, DEC-06/09, 
 
     expect(replay).toEqual(first);
     expect(refundConfirmations.list("tenant-a", task.id)).toEqual([first]);
+  });
+
+  it("원 결제가 오기록 보정으로 줄었으면 환급 상한도 보정 후 금액(거래액-보정-기환급)이다", () => {
+    const { deps, refundRequest, payments: [p1] } = heavilyOverpaidScene(); // 20,000원 결제 3건, 필요 30,000원
+    correctPayment(deps, {
+      tenantId: "tenant-a",
+      paymentId: p1!.id,
+      reducedKrw: "5000",
+      reason: "입금액 오입력",
+      evidence: "입금 내역 재확인",
+      actorRole: "OWNER",
+      correctedBy: "점주",
+      correctedAt: "2026-03-04T06:55:00.000Z",
+      idempotencyKey: "pcr-refund",
+    }); // 결제 1 유효액 15,000원
+    const attempt = (amountKrw: string) => {
+      try {
+        confirmRefund(deps, refundRequest({ paymentId: p1!.id, amountKrw, idempotencyKey: `r-${amountKrw}` }));
+      } catch (error) {
+        return error as AppError;
+      }
+    };
+
+    expect(attempt("15001")?.code).toBe("BUSINESS_INVARIANT");
+    expect(attempt("15000")).toBeUndefined();
   });
 });

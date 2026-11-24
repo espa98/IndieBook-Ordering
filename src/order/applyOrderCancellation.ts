@@ -183,6 +183,7 @@ export function applyOrderCancellation(
         payments.flatMap((p) => deps.paymentConfirmations.list(request.tenantId, p.id)),
         payments.flatMap((p) => deps.paymentVoids.list(request.tenantId, p.id)),
         deps.refundConfirmations.listByOrder(request.tenantId, order.id),
+        deps.paymentCorrections.listByOrder(request.tenantId, order.id),
       );
       const hasActiveTask = deps.refundTasks
         .list(request.tenantId, order.id)

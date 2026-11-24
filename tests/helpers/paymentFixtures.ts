@@ -1,4 +1,11 @@
 import { createIdempotencyStore } from "../../src/idempotency/executeIdempotent";
+import type { DecideRefundRequestRequest } from "../../src/payment/decideRefundRequest";
+import { requestRefund } from "../../src/payment/requestRefund";
+import type {
+  RefundRequest,
+  RefundRequestDecision,
+  RequestRefundRequest,
+} from "../../src/payment/requestRefund";
 import type {
   CorrectPaymentRequest,
   PaymentCorrection,
@@ -159,7 +166,8 @@ export function overpaidScene() {
   const s = voidScene();
   const refundTasks = createInMemoryRefundTaskRepository();
   const refundConfirmations = createInMemoryRefundConfirmationRepository();
-  const deps = { ...s.deps, refundTasks, refundConfirmations };
+  const paymentCorrections = createInMemoryPaymentCorrectionRepository();
+  const deps = { ...s.deps, refundTasks, refundConfirmations, paymentCorrections };
   confirmPayment(deps, s.confirmRequest({ paymentId: s.payment.id }));
   const second = recordPayment(
     deps,
@@ -177,7 +185,7 @@ export function overpaidScene() {
     idempotencyKey: `rft-${++seq}`,
     ...extra,
   });
-  return { ...s, deps, refundTasks, refundConfirmations, first: s.payment, second, openRequest };
+  return { ...s, deps, refundTasks, refundConfirmations, paymentCorrections, first: s.payment, second, openRequest };
 }
 
 export function createInMemoryRefundConfirmationRepository() {
@@ -226,7 +234,8 @@ export function heavilyOverpaidScene() {
   const s = confirmationScene();
   const refundTasks = createInMemoryRefundTaskRepository();
   const refundConfirmations = createInMemoryRefundConfirmationRepository();
-  const deps = { ...s.deps, refundTasks, refundConfirmations };
+  const paymentCorrections = createInMemoryPaymentCorrectionRepository();
+  const deps = { ...s.deps, refundTasks, refundConfirmations, paymentCorrections };
   const payments = [1, 2, 3].map((n) => {
     const payment = recordPayment(
       deps,
@@ -278,8 +287,7 @@ export function createInMemoryPaymentCorrectionRepository() {
 /** overpaidScene(확인 결제 10,000원 + 25,000원)에서 확인된 거래를 정정하는 세계 */
 export function paymentCorrectionScene() {
   const s = overpaidScene();
-  const paymentCorrections = createInMemoryPaymentCorrectionRepository();
-  const deps = { ...s.deps, paymentCorrections };
+  const { paymentCorrections, deps } = s;
   let seq = 0;
   const correctPaymentRequest = (
     extra: Partial<CorrectPaymentRequest> = {},
@@ -296,4 +304,74 @@ export function paymentCorrectionScene() {
     ...extra,
   });
   return { ...s, deps, paymentCorrections, correctPaymentRequest };
+}
+
+export function createInMemoryRefundRequestRepository() {
+  const all: RefundRequest[] = [];
+  return {
+    get(tenantId: string, id: string): RefundRequest | undefined {
+      return all.find((r) => r.tenantId === tenantId && r.id === id);
+    },
+    list(tenantId: string, refundTaskId: string): RefundRequest[] {
+      return all.filter((r) => r.tenantId === tenantId && r.refundTaskId === refundTaskId);
+    },
+    save(request: RefundRequest): void {
+      all.push(request);
+    },
+  };
+}
+
+export function createInMemoryRefundRequestDecisionRepository() {
+  const all: RefundRequestDecision[] = [];
+  return {
+    list(tenantId: string, requestId: string): RefundRequestDecision[] {
+      return all.filter((d) => d.tenantId === tenantId && d.requestId === requestId);
+    },
+    save(decision: RefundRequestDecision): void {
+      all.push(decision);
+    },
+  };
+}
+
+/** refundScene(환급 필요 5,000원)에서 Staff가 환급을 요청하는 세계 */
+export function refundRequestScene() {
+  const s = refundScene();
+  const refundRequests = createInMemoryRefundRequestRepository();
+  const refundRequestDecisions = createInMemoryRefundRequestDecisionRepository();
+  const deps = { ...s.deps, refundRequests, refundRequestDecisions };
+  let seq = 0;
+  const requestRefundRequest = (
+    extra: Partial<RequestRefundRequest> = {},
+  ): RequestRefundRequest => ({
+    tenantId: "tenant-a",
+    refundTaskId: s.task.id,
+    paymentId: s.second.id,
+    amountKrw: "3000",
+    evidence: "카드사 부분 취소 승인 내역 2026-03-05",
+    requestedBy: "김직원",
+    requestedAt: "2026-03-04T06:48:00.000Z",
+    idempotencyKey: `rrq-${++seq}`,
+    ...extra,
+  });
+  return { ...s, deps, refundRequests, refundRequestDecisions, requestRefundRequest };
+}
+
+/** refundRequestScene에서 Staff가 3,000원 환급을 요청한(REQUESTED) 세계 */
+export function refundDecisionScene() {
+  const s = refundRequestScene();
+  const refundRequest = requestRefund(s.deps, s.requestRefundRequest({ amountKrw: "3000", idempotencyKey: "rrq-scene" }));
+  let seq = 0;
+  const decideRefundRequest = (
+    extra: Partial<DecideRefundRequestRequest> = {},
+  ): DecideRefundRequestRequest => ({
+    tenantId: "tenant-a",
+    requestId: refundRequest.id,
+    decision: "APPROVED",
+    actorRole: "OWNER",
+    decidedBy: "점주",
+    decidedAt: "2026-03-04T06:52:00.000Z",
+    idempotencyKey: `rrd-${++seq}`,
+    ...extra,
+  });
+  return { ...s, refundRequestRecord: refundRequest, decideRefundRequest };
 }

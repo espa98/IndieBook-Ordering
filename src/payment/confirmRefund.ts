@@ -4,6 +4,7 @@ import {
   type IdempotencyStore,
 } from "../idempotency/executeIdempotent";
 import { invalid, isNonEmptyString, parseUtcTimestamp } from "../procurement/validation";
+import type { PaymentCorrectionRepository } from "./correctPayment";
 import type { PaymentConfirmationRepository } from "./confirmPayment";
 import type { PaymentVoidRepository } from "./voidPayment";
 import type { RefundTaskRepository } from "./openRefundTask";
@@ -24,6 +25,8 @@ export type RefundConfirmation = {
   evidence: string;
   confirmedBy: string;
   confirmedAt: string;
+  /** 요청·승인 경로로 생긴 기록이면 원 요청 참조 */
+  refundRequestId?: string;
   verificationSource: "STAFF_MANUAL_EVIDENCE";
   recordedAt: string;
 };
@@ -40,6 +43,7 @@ export type ConfirmRefundDeps = {
   payments: PaymentRepository;
   paymentConfirmations: Pick<PaymentConfirmationRepository, "list">;
   paymentVoids: Pick<PaymentVoidRepository, "list">;
+  paymentCorrections: Pick<PaymentCorrectionRepository, "list">;
   refundConfirmations: RefundConfirmationRepository;
   idempotency: IdempotencyStore;
   now?: () => Date;
@@ -54,6 +58,7 @@ export type ConfirmRefundRequest = {
   actorRole: "OWNER" | "STAFF";
   confirmedBy: string;
   confirmedAt: string;
+  refundRequestId?: string;
   idempotencyKey: string;
 };
 
@@ -116,7 +121,11 @@ export function confirmRefund(
       const taskRemaining =
         BigInt(task.requiredKrw) - sum(deps.refundConfirmations.list(request.tenantId, task.id));
       const paymentAvailable =
-        BigInt(payment.amountKrw) - sum(deps.refundConfirmations.listByPayment(request.tenantId, payment.id));
+        BigInt(payment.amountKrw) -
+        deps.paymentCorrections
+          .list(request.tenantId, payment.id)
+          .reduce((total, c) => total + BigInt(c.reducedKrw), 0n) -
+        sum(deps.refundConfirmations.listByPayment(request.tenantId, payment.id));
       if (amount > taskRemaining || amount > paymentAvailable) {
         throw new AppError(
           "BUSINESS_INVARIANT",
@@ -133,6 +142,7 @@ export function confirmRefund(
         evidence: request.evidence,
         confirmedBy: request.confirmedBy,
         confirmedAt: request.confirmedAt,
+        ...(request.refundRequestId === undefined ? {} : { refundRequestId: request.refundRequestId }),
         verificationSource: "STAFF_MANUAL_EVIDENCE",
         recordedAt: now.toISOString(),
       };
