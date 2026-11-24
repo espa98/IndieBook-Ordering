@@ -19,6 +19,16 @@ import type {
   CorrectReceiptRequest,
   ReceiptCorrection,
 } from "../../src/inventory/correctReceipt";
+import type {
+  AllocationCancellation,
+  CancelAllocationRequest,
+} from "../../src/inventory/cancelAllocation";
+import type {
+  StockIntake,
+  TransferCancelledToStockRequest,
+} from "../../src/inventory/transferCancelledToStock";
+import { registerInitialStock } from "../../src/inventory/registerInitialStock";
+import { cancelAllocation } from "../../src/inventory/cancelAllocation";
 import type { ReallocateAllocationRequest } from "../../src/inventory/reallocateAllocation";
 import { allocateReceipt } from "../../src/inventory/allocateReceipt";
 import { receiveGoods } from "../../src/inventory/receiveGoods";
@@ -92,6 +102,21 @@ export function createInMemoryAllocationDeliveryRepository() {
   };
 }
 
+export function createInMemoryAllocationCancellationRepository() {
+  const all: AllocationCancellation[] = [];
+  return {
+    get(tenantId: string, id: string): AllocationCancellation | undefined {
+      return all.find((c) => c.tenantId === tenantId && c.id === id);
+    },
+    list(tenantId: string, allocationId: string): AllocationCancellation[] {
+      return all.filter((c) => c.tenantId === tenantId && c.allocationId === allocationId);
+    },
+    save(cancellation: AllocationCancellation): void {
+      all.push(cancellation);
+    },
+  };
+}
+
 /** 4권 입고 중 주문 B(연결 3권)에 3권이 배분되어 OPEN인 세계 */
 export function releaseScene() {
   const s = allocationScene();
@@ -143,6 +168,7 @@ export function allocationScene() {
     receiptAllocations,
     allocationReleases,
     allocationDeliveries,
+    allocationCancellations: createInMemoryAllocationCancellationRepository(),
   };
   let seq = 0; // 호출마다 다른 작업이므로 기본 멱등 키는 고유해야 한다
   const request = (
@@ -289,4 +315,76 @@ export function correctionScene() {
     ...extra,
   });
   return { ...s, deps, receiptCorrections, correctRequest, allocateRequest: s.request };
+}
+
+/** releaseScene(주문 B에 3권 배분, OPEN)에서 주문 취소에 따른 처분 요청을 만드는 세계 */
+export function cancellationScene() {
+  const s = releaseScene();
+  let seq = 0;
+  const cancelRequest = (
+    extra: Partial<CancelAllocationRequest> = {},
+  ): CancelAllocationRequest => ({
+    tenantId: "tenant-a",
+    allocationId: s.allocation.id,
+    quantity: 2,
+    reason: "고객 B 주문 일부 취소",
+    actorRole: "OWNER",
+    cancelledBy: "점주",
+    cancelledAt: "2026-03-04T06:52:00.000Z",
+    idempotencyKey: `can-${++seq}`,
+    ...extra,
+  });
+  return { ...s, cancelRequest };
+}
+
+export function createInMemoryStockIntakeRepository() {
+  const all: StockIntake[] = [];
+  return {
+    list(tenantId: string, cancellationId: string): StockIntake[] {
+      return all.filter((i) => i.tenantId === tenantId && i.cancellationId === cancellationId);
+    },
+    save(intake: StockIntake): void {
+      all.push(intake);
+    },
+  };
+}
+
+/** book-1 매장 재고 5권(초기 등록)이 있고, 주문 B의 배분 3권 중 2권이 취소되어 처분 대기인 세계 */
+export function intakeScene() {
+  const s = cancellationScene();
+  const stockMovements = {
+    all: [] as import("../../src/inventory/registerInitialStock").StockMovement[],
+    list(tenantId: string, bookId: string) {
+      return this.all.filter((m) => m.tenantId === tenantId && m.bookId === bookId);
+    },
+    save(m: import("../../src/inventory/registerInitialStock").StockMovement) {
+      this.all.push(m);
+    },
+  };
+  const stockIntakes = createInMemoryStockIntakeRepository();
+  const deps = { ...s.deps, stockMovements, stockIntakes };
+  registerInitialStock(deps, {
+    tenantId: "tenant-a",
+    bookId: "book-1",
+    quantity: 5,
+    actorRole: "OWNER",
+    actedBy: "점주",
+    actedAt: "2026-03-04T06:00:00.000Z",
+    idempotencyKey: "init-intake",
+  });
+  const cancellation = cancelAllocation(deps, s.cancelRequest({ quantity: 2 }));
+  let seq = 0;
+  const intakeRequest = (
+    extra: Partial<TransferCancelledToStockRequest> = {},
+  ): TransferCancelledToStockRequest => ({
+    tenantId: "tenant-a",
+    cancellationId: cancellation.id,
+    quantity: 1,
+    actorRole: "OWNER",
+    actedBy: "점주",
+    actedAt: "2026-03-04T06:58:00.000Z",
+    idempotencyKey: `int-${++seq}`,
+    ...extra,
+  });
+  return { ...s, deps, cancellation, stockMovements, stockIntakes, intakeRequest };
 }

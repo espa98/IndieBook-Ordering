@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
+import { transferCancelledToStock } from "../../src/inventory/transferCancelledToStock";
+import { cancelAllocation } from "../../src/inventory/cancelAllocation";
 import { correctReceipt } from "../../src/inventory/correctReceipt";
 import { deliverAllocation } from "../../src/inventory/deliverAllocation";
 import { allocateReceipt } from "../../src/inventory/allocateReceipt";
 import { receiptBalances } from "../../src/inventory/receiptBalances";
 import { releaseAllocation } from "../../src/inventory/releaseAllocation";
-import { allocationScene, correctionScene, deliveryScene, releaseScene } from "../helpers/inventoryFixtures";
+import { allocationScene, cancellationScene, intakeScene, correctionScene, deliveryScene, releaseScene } from "../helpers/inventoryFixtures";
 
 describe("receiptBalances: 입고 기록과 배분 기록에서 버킷 잔량 산출 (BR-Q14, BR-Q17)", () => {
   it("배분하지 않으면 정상 입고량 전부가 UNALLOCATED이고, 배분하면 그만큼 ALLOCATED_OPEN으로 옮겨진다", () => {
@@ -79,5 +81,44 @@ describe("receiptBalances: 입고 기록과 배분 기록에서 버킷 잔량 �
     );
     expect(balances.UNALLOCATED).toBe(3);
     expect(Object.values(balances).reduce((a, b) => a + b, 0)).toBe(3);
+  });
+
+  it("주문 취소 처분은 UNALLOCATED가 아니라 DISPOSITION_PENDING으로 직접 이동한다 (BR-Q21)", () => {
+    const { deps, cancelRequest, receipt, allocation } = cancellationScene(); // 4권 중 3권 배분
+    cancelAllocation(deps, cancelRequest({ quantity: 2 }));
+
+    const balances = receiptBalances(
+      receipt,
+      deps.receiptAllocations.list("tenant-a", receipt.id),
+      [],
+      [],
+      [],
+      deps.allocationCancellations.list("tenant-a", allocation.id),
+    );
+
+    expect(balances).toMatchObject({
+      UNALLOCATED: 1,
+      ALLOCATED_OPEN: 1,
+      DISPOSITION_PENDING: 2,
+    });
+    expect(Object.values(balances).reduce((a, b) => a + b, 0)).toBe(4);
+  });
+
+  it("재고 편입하면 그만큼 DISPOSITION_PENDING에서 STOCK_TRANSFERRED로 옮겨지고 버킷 합계는 보존된다", () => {
+    const { deps, intakeRequest, cancellation, receipt } = intakeScene(); // 처분 대기 2
+    transferCancelledToStock(deps, intakeRequest({ quantity: 1 }));
+
+    const balances = receiptBalances(
+      receipt,
+      deps.receiptAllocations.list("tenant-a", receipt.id),
+      [],
+      [],
+      [],
+      deps.allocationCancellations.list("tenant-a", cancellation.allocationId),
+      deps.stockIntakes.list("tenant-a", cancellation.id),
+    );
+
+    expect(balances).toMatchObject({ DISPOSITION_PENDING: 1, STOCK_TRANSFERRED: 1 });
+    expect(Object.values(balances).reduce((a, b) => a + b, 0)).toBe(4);
   });
 });

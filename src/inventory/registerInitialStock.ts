@@ -13,12 +13,14 @@ export type StockMovement = {
   id: string;
   tenantId: string;
   bookId: string;
-  kind: "INITIAL" | "ADJUST" | "DELIVERY";
+  kind: "INITIAL" | "ADJUST" | "DELIVERY" | "CANCEL_TO_STOCK";
   direction: "IN" | "OUT";
   quantity: number;
   reason: string;
   /** 예약 인도로 생긴 항목의 원 예약 참조 (정정·감사 추적용) */
   reservationId?: string;
+  /** 취소 물량 재고 편입으로 생긴 항목의 원 취소 처분 참조 (ST-C06) */
+  cancellationId?: string;
   actedBy: string;
   actedAt: string;
   recordedAt: string;

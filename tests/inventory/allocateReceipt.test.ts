@@ -2,10 +2,11 @@ import { describe, it, expect } from "vitest";
 import { AppError } from "../../src/errors/AppError";
 import { allocateReceipt } from "../../src/inventory/allocateReceipt";
 import { receiveGoods } from "../../src/inventory/receiveGoods";
+import { cancelAllocation } from "../../src/inventory/cancelAllocation";
 import { correctReceipt } from "../../src/inventory/correctReceipt";
 import { deliverAllocation } from "../../src/inventory/deliverAllocation";
 import { releaseAllocation } from "../../src/inventory/releaseAllocation";
-import { allocationScene, correctionScene, deliveryScene, releaseScene } from "../helpers/inventoryFixtures";
+import { allocationScene, cancellationScene, correctionScene, deliveryScene, releaseScene } from "../helpers/inventoryFixtures";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -271,5 +272,22 @@ describe("allocateReceipt: 입고 수량의 고객별 배분 (ST-R04, UC-11, BR-
     expect(over).toBeInstanceOf(AppError);
     expect((over as AppError).code).toBe("BUSINESS_INVARIANT");
     expect(deps.receiptAllocations.list("tenant-a", receipt.id)).toHaveLength(1);
+  });
+
+  it("주문 취소로 처분 대기가 된 수량은 다른 고객에게 재배분할 수 없다 (미배분으로 돌아오지 않는다)", () => {
+    const { deps, cancelRequest, allocateRequest, receipt } = cancellationScene(); // 4권 중 B에 3권
+    cancelAllocation(deps, cancelRequest({ quantity: 2 })); // 처분 대기 2, B 잔량 1, 미배분 1
+
+    let thrown: unknown;
+    try {
+      allocateReceipt(deps, allocateRequest({ quantity: 2 })); // 주문 A에 2권: 미배분은 1뿐
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AppError);
+    expect((thrown as AppError).code).toBe("BUSINESS_INVARIANT");
+    expect(allocateReceipt(deps, allocateRequest({ quantity: 1 })).quantity).toBe(1); // 미배분 1은 가능
+    expect(deps.receiptAllocations.list("tenant-a", receipt.id)).toHaveLength(2);
   });
 });

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { AppError } from "../../src/errors/AppError";
+import { cancelAllocation } from "../../src/inventory/cancelAllocation";
 import { deliverAllocation } from "../../src/inventory/deliverAllocation";
 import { releaseAllocation } from "../../src/inventory/releaseAllocation";
 import { deliveryScene, releaseScene } from "../helpers/inventoryFixtures";
@@ -137,5 +138,30 @@ describe("releaseAllocation: 입고 배분 해제 (ST-R05, BR-Q16)", () => {
     expect(thrown).toBeInstanceOf(AppError);
     expect((thrown as AppError).code).toBe("BUSINESS_INVARIANT");
     expect(releaseAllocation(deps, releaseRequest({ quantity: 1 })).quantity).toBe(1);
+  });
+
+  it("주문 취소로 처분 대기가 된 수량은 일반 해제(UNALLOCATED 복귀)할 수 없다", () => {
+    const { deps, request, allocation } = releaseScene(); // 배분 3
+    cancelAllocation(deps, {
+      tenantId: "tenant-a",
+      allocationId: allocation.id,
+      quantity: 2,
+      reason: "고객 주문 일부 취소",
+      actorRole: "OWNER",
+      cancelledBy: "점주",
+      cancelledAt: "2026-03-04T06:52:00.000Z",
+      idempotencyKey: "can-1",
+    }); // 잔량 1
+
+    let thrown: unknown;
+    try {
+      releaseAllocation(deps, request({ quantity: 2 }));
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AppError);
+    expect((thrown as AppError).code).toBe("BUSINESS_INVARIANT");
+    expect(releaseAllocation(deps, request({ quantity: 1 })).quantity).toBe(1);
   });
 });

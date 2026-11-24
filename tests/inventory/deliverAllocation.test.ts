@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { AppError } from "../../src/errors/AppError";
+import { cancelAllocation } from "../../src/inventory/cancelAllocation";
 import { deliverAllocation } from "../../src/inventory/deliverAllocation";
 import { releaseAllocation } from "../../src/inventory/releaseAllocation";
 import { deliveryScene } from "../helpers/inventoryFixtures";
@@ -123,5 +124,30 @@ describe("deliverAllocation: 입고 배분 인도 (ST-R06, UC-13, BR-Q16)", () =
     expect((thrown as AppError).code).toBe("IDEMPOTENCY_CONFLICT");
     expect((thrown as AppError).httpStatus).toBe(409);
     expect(deps.allocationDeliveries.list("tenant-a", allocation.id)).toHaveLength(1);
+  });
+
+  it("주문 취소로 처분 대기가 된 수량은 인도할 수 없다(미취소 잔량만 인도)", () => {
+    const { deps, request, allocation } = deliveryScene(); // 배분 3
+    cancelAllocation(deps, {
+      tenantId: "tenant-a",
+      allocationId: allocation.id,
+      quantity: 2,
+      reason: "고객 주문 일부 취소",
+      actorRole: "OWNER",
+      cancelledBy: "점주",
+      cancelledAt: "2026-03-04T06:52:00.000Z",
+      idempotencyKey: "can-1",
+    }); // 잔량 1
+
+    let thrown: unknown;
+    try {
+      deliverAllocation(deps, request({ quantity: 2 }));
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AppError);
+    expect((thrown as AppError).code).toBe("BUSINESS_INVARIANT");
+    expect(deliverAllocation(deps, request({ quantity: 1 })).quantity).toBe(1);
   });
 });

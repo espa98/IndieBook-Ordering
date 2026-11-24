@@ -5,6 +5,7 @@ import {
 } from "../idempotency/executeIdempotent";
 import { invalid, isNonEmptyString, parseUtcTimestamp } from "../procurement/validation";
 import { allocationState } from "./allocationState";
+import type { AllocationCancellationRepository } from "./cancelAllocation";
 import type { AllocationReleaseRepository } from "./releaseAllocation";
 import type { ReceiptAllocationRepository } from "./allocateReceipt";
 
@@ -34,6 +35,7 @@ export type DeliverAllocationDeps = {
   receiptAllocations: ReceiptAllocationRepository;
   allocationReleases: AllocationReleaseRepository;
   allocationDeliveries: AllocationDeliveryRepository;
+  allocationCancellations: Pick<AllocationCancellationRepository, "list">;
   idempotency: IdempotencyStore;
   now?: () => Date;
 };
@@ -81,6 +83,7 @@ export function deliverAllocation(
         allocation,
         deps.allocationReleases.list(request.tenantId, allocation.id),
         deps.allocationDeliveries.list(request.tenantId, allocation.id),
+        deps.allocationCancellations.list(request.tenantId, allocation.id),
       );
       if (request.quantity > remaining) {
         throw new AppError(
