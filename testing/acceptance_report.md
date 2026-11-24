@@ -8,7 +8,7 @@
 
 | 영역 | 판정 | 한 줄 근거 |
 |---|---|---|
-| 도메인 단위·통합(메모리 저장소) | **PASS** | `npx vitest run` 100 files / 1050 tests 통과, 실패 0 |
+| 도메인 단위·통합(메모리 저장소) | **PASS** | `npx vitest run` 100 files / 1052 tests 통과, 실패 0 |
 | 타입 검사 | **PASS** | `npx tsc --noEmit` 출력 없음 |
 | OpenAPI 스키마·계약 | **PARTIAL** | 주문 API(05단계)만 명세가 있고 26개 통과. 나머지 영역은 명세·구현 없음 |
 | HTTP | **PARTIAL** | 핸들러 단위 41개 통과. 실제 서버·라우터·JWT 없음 |
@@ -25,7 +25,7 @@
 
 | 명령 | 결과 |
 |---|---|
-| `npx vitest run` | files 100, tests 1050, passed 1050, failed 0 (직원 관리·카탈로그 추가 후 재실행. 디렉터리별 표도 이 실행의 JSON 집계) |
+| `npx vitest run` | files 100, tests 1052, passed 1052, failed 0 (진입점 통일 후 재실행. 디렉터리별 표는 직전 JSON 집계이며 auth만 +2) |
 | `npx tsc --noEmit` | 출력 없음(오류 0) |
 | 정적 점검: `git ls-files` 파일명(.env·secret·credential·pem·key) | 해당 없음 |
 | 정적 점검: `src tests openapi implementation package.json`에서 JWT·키 패턴, `ordering-dev`·`testBookshare` 프로젝트 ID, `service_role` grep | 해당 없음 |
@@ -35,7 +35,7 @@
 
 | 디렉터리 | 파일 | 테스트 |
 |---|---|---|
-| auth | 8 | 42 |
+| auth | 8 | 44 |
 | catalog | 5 | 18 |
 | errors | 1 | 8 |
 | http | 3 | 41 |
@@ -50,7 +50,7 @@
 | closure | 4 | 15 |
 | cancellation | 5 | 25 |
 | reopening | 1 | 6 |
-| **합계** | **100** | **1050** |
+| **합계** | **100** | **1052** |
 
 (`tests/helpers`는 테스트 파일이 없는 공용 픽스처다.)
 
@@ -105,7 +105,7 @@
 | 저장소 시크릿 | PASS(정적, 한계 있음) | 위 정적 점검 3종. 완전한 시크릿 스캐너가 아님 |
 | 외부 호출 | PASS(정적) | 도메인 코드가 PG·알림·네트워크를 호출하지 않음 |
 | 금지된 DB 접근 | PASS | `testBookshare`와 `ordering-dev`에 접속하지 않음 |
-| 권한 모델 | **부분 완화** | `src/auth`의 `resolvePrincipal`·`bindActor`·`authorizedActions`가 역할·행위자·테넌트·SYSTEM 실행자를 주체에서 주입한다(요청 값은 무시, 구조 테스트로 누락 방지). 단 외부 진입점이 도메인 함수를 직접 호출하면 우회되고, 조회 함수의 `tenantId`는 아직 주체에서 주입하지 않았으며, JWT 서명 검증·서버가 없다. 원래 위험(`actorRole`·`executedBy`가 요청 값이라 위조 가능)은 도메인 함수 자체에는 그대로 남아 있다. `SYSTEM` 전용 명령도 동일 |
+| 권한 모델 | **부분 완화** | `src/auth`의 `resolvePrincipal`·`bindActor`·`authorizedActions`가 역할·행위자·테넌트·SYSTEM 실행자를 주체에서 주입한다(요청 값은 무시, 구조 테스트로 누락 방지). 단 외부 진입점이 도메인 함수를 직접 호출하면 우회되고, 조회 함수 중 `getOrder`·`listOrders` 외에는 주체에서 주입하지 않았으며, JWT 서명 검증·서버가 없다. 원래 위험(`actorRole`·`executedBy`가 요청 값이라 위조 가능)은 도메인 함수 자체에는 그대로 남아 있다. `SYSTEM` 전용 명령도 동일 |
 
 ## 5. 동시성에 대한 정직한 기록
 
@@ -139,7 +139,7 @@
 | 6d9bb13 | 해제 후 남는 공급처 의무 파생, 주문 종결 차단, 재조달 중복 위험 승인 | BR-P05 |
 | 21e22e3 | 파손·오배송 처리 기록과 발주 종결 차단 | BR-P06, ST-R01 |
 
-테스트는 968 → 1005개(+37), 파일은 76 → 88개(+12)다. 그 뒤 인증·권한 계층(§10)으로 1050개, 100 files가 되었다(직원 관리 §10.1, 카탈로그 §11).
+테스트는 968 → 1005개(+37), 파일은 76 → 88개(+12)다. 그 뒤 인증·권한 계층(§10)으로 1052개, 100 files가 되었다(직원 관리 §10.1, 카탈로그 §11, 진입점 §12).
 
 ### 9.1 이번 갱신에서 새로 생긴 위험·주의
 
@@ -162,11 +162,11 @@
 | `resolvePrincipal` | 검증이 끝난 신원(userId·tenantId·sessionExpiresAt)에서 USER 주체를 만든다. 역할은 멤버십에서 온다. 세션 만료·형식 오류는 UNAUTHENTICATED, 비활성·타 테넌트·비멤버는 같은 FORBIDDEN. 멤버십은 매 호출 다시 읽어 직원 비활성화가 즉시 반영된다(ST-A05, ST-A08) |
 | `createSystemPrincipal` | 서버 내부 업무용 SYSTEM 주체 |
 | `bindActor` | 명령의 `tenantId`·역할·행위자 이름·`executedBy`를 요청 본문이 아니라 주체에서 주입하고(위조 값은 덮어씀), 허용되지 않은 주체는 명령을 호출하기 전에 FORBIDDEN으로 거부 |
-| `authorizedActions` | 역할·SYSTEM 실행자·행위자 이름(`...By`)·테넌트를 요청으로 받는 68개 명령을 바인딩한 모음(역할/SYSTEM 19개 + 행위자 이름 31개 + 테넌트만 주입 9개 + 직원 관리 3개 + 카탈로그 6개). 구조 테스트 3개가 `actorRole`·`executedBy`를 받거나, 멱등 키와 `...By` 필드를 가졌거나, 멱등 키와 `tenantId`를 가진 명령 파일이 이 모음에서 빠지면 실패시킨다 |
+| `authorizedActions` | 역할·SYSTEM 실행자·행위자 이름(`...By`)·테넌트를 요청으로 받는 70개 함수를 바인딩한 모음(역할/SYSTEM 19개 + 행위자 이름 31개 + 테넌트만 주입 9개 + 직원 관리 3개 + 카탈로그 6개 + 조회 2개). 구조 테스트 3개가 `actorRole`·`executedBy`를 받거나, 멱등 키와 `...By` 필드를 가졌거나, 멱등 키와 `tenantId`를 가진 명령 파일이 이 모음에서 빠지면 실패시킨다 |
 
 **남은 한계**
 - 외부 진입점이 `authorizedActions` 대신 도메인 함수를 직접 호출하면 우회된다. 진입점 규약과 서버 조립에서 강제해야 한다.
-- 멱등 키가 없는 조회 함수(`getOrder`, `listOrders` 등)와 `createOrderApi`의 내부 인가(`authorizeTenantAccess`)는 이 모음에 포함하지 않았다. 조회의 `tenantId`는 호출자가 넘기는 값이다.
+- 조회는 `getOrder`·`listOrders`만 모음에 있다. 다른 조회성 함수가 생기면 같은 방식으로 추가해야 하며, 조회 누락을 잡는 구조 테스트는 없다(§12).
 - JWT 서명 검증·키 관리·서버가 없다. `resolvePrincipal`은 검증이 끝난 신원을 입력으로 받는다고 가정한다.
 - ST-A01(이메일 인증)·ST-A02(서점 개설)·ST-A06/A07(중지·해지)은 구현하지 않았다. 직원 관리(A03~A05)는 §10.1.
 
@@ -212,4 +212,18 @@
 - 도서 비활성화·삭제, 서점별 취급·가격·메모 분리(BOOK-008, P1), 도서 검색(BOOK-005)은 구현하지 않았다.
 - 공급처 코드는 영문 소문자·숫자·하이픈이며 기존 공급처 모델에 `name`·`orderChannel`·`version`을 선택 필드로 추가했다(기존 데이터는 `version` 없음을 1로 본다).
 - 주문 생성(`createOrderService`)은 도서 레코드를 조회하지 않는다. 존재하지 않는 `bookId`도 주문에 담긴다.
+
+## 12. 진입점 규약 (§10의 "우회 가능" 한계 부분 해소)
+
+**규약:** 외부 진입점(`*Api.ts`, `src/http/`)은 도메인 함수를 직접 호출하지 않고 `authorizedActions`로만 호출한다. 호출 전에 `resolvePrincipal`(세션 만료·활성 멤버십) 또는 `authorizeTenantAccess`로 주체를 만든다.
+
+- `createOrderApi`를 이 규약으로 옮겼다. 공개 계약(`Actor = { userId }`, 응답·오류 형태)은 그대로이며 기존 http·OpenAPI·orderApi 테스트가 수정 없이 통과한다. 요청의 `tenantId`는 호출자가 그 테넌트의 활성 멤버일 때만 주체의 테넌트가 되고, 도메인 함수에는 주체의 값만 전달된다.
+- `getOrder`·`listOrders`를 모음에 추가했다. 요청이 다른 테넌트를 주장해도 주체의 테넌트만 조회된다.
+- 구조 테스트가 `*Api.ts`·`src/http/` 파일이 모음의 어떤 함수도 `authorizedActions.` 없이 직접 호출하면 실패시킨다.
+
+**남은 한계**
+- 구조 테스트는 현재 있는 진입점 파일 이름 규칙(`*Api.ts`, `src/http/`)만 감시한다. 다른 이름의 진입점이 생기면 규칙을 따르도록 리뷰해야 한다.
+- `createOrderApi`는 세션 만료를 검사하지 않는다(`Actor`에 만료 시각이 없다). 토큰 검증 계층이 `resolvePrincipal`로 먼저 거르는 구조가 필요하다.
+- 조회성 함수(예: 향후 목록·상세)의 모음 등록 누락을 잡는 구조 테스트는 없다. 명령은 멱등 키로 식별해 감시하지만 조회는 식별 기준이 없다.
+- HTTP 라우터·JWT 서명 검증·서버는 여전히 없다.
 

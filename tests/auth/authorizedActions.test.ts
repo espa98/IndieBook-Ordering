@@ -137,4 +137,33 @@ describe("authorizedActions: 신원 필드를 주체에서 주입한 명령 모�
     expect(allocation.tenantId).toBe("tenant-a");
     expect(w.deps.allocations.list("tenant-b")).toEqual([]);
   });
+
+  it("조회도 주체의 테넌트로만 수행된다: 요청이 다른 테넌트를 주장해도 그 테넌트의 주문은 보이지 않는다", () => {
+    const w = world();
+    const mine = w.addOrder([{ bookId: "book-1", quantity: 1, unitPriceKrw: "1000" }]);
+    const deps = { orders: w.deps.orders };
+
+    expect(authorizedActions.getOrder(deps, staff, { orderId: mine.id }).id).toBe(mine.id);
+    expect(
+      authorizedActions.listOrders(deps, staff, { tenantId: "tenant-b" } as never).items.map((i) => i.id),
+    ).toEqual([mine.id]); // tenant-b를 주장해도 tenant-a의 목록
+    const otherTenant: UserPrincipal = { kind: "USER", userId: "owner-b", tenantId: "tenant-b", role: "OWNER" };
+    expect(() => authorizedActions.getOrder(deps, otherTenant, { orderId: mine.id })).toThrow(AppError); // 타 테넌트 주문은 404
+    expect(authorizedActions.listOrders(deps, otherTenant, {}).items).toEqual([]);
+  });
+
+  it("외부 진입점 파일(*Api.ts, src/http)은 이 모음에 있는 도메인 함수를 모음 밖에서 직접 호출하지 않는다 (우회 방지)", () => {
+    const entryPoints = sourceFiles("src").filter((path) => {
+      const norm = path.split(sep).join("/");
+      return /Api\.ts$/.test(norm) || norm.startsWith("src/http/");
+    });
+    expect(entryPoints.length).toBeGreaterThan(0);
+    for (const path of entryPoints) {
+      const text = readFileSync(path, "utf8");
+      for (const name of Object.keys(authorizedActions)) {
+        const direct = new RegExp(String.raw`(?<!authorizedActions\.)\b` + name + String.raw`\(`);
+        expect(direct.test(text), `${path} calls ${name}() directly`).toBe(false);
+      }
+    }
+  });
 });

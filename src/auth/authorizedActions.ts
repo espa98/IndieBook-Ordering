@@ -8,6 +8,8 @@ import { registerInitialStock } from "../inventory/registerInitialStock";
 import { requestReturn } from "../inventory/requestReturn";
 import { resolveReceiptDefect } from "../inventory/resolveReceiptDefect";
 import { transferCancelledToStock } from "../inventory/transferCancelledToStock";
+import { getOrder } from "../order/getOrder";
+import { listOrders } from "../order/listOrders";
 import { applyOrderCancellation } from "../order/applyOrderCancellation";
 import { decideOrderCancellation } from "../order/decideOrderCancellation";
 import { executeOrderClosure } from "../order/executeOrderClosure";
@@ -152,6 +154,9 @@ export const authorizedActions = {
   markPurchaseOrderReady: bindActor(markPurchaseOrderReady, { allow: BOTH }),
   recordSupplierReply: bindActor(recordSupplierReply, { allow: BOTH }),
   respondToCancellationRequest: bindActor(respondToCancellationRequest, { allow: BOTH }),
+  // 조회: 테넌트를 주체에서 주입한다
+  getOrder: bindActor(getOrder, { allow: BOTH }),
+  listOrders: bindActor(listOrders, { allow: BOTH }),
   // 서버 내부 업무
   executeOrderClosure: bindActor(executeOrderClosure, { systemField: "executedBy", allow: SYSTEM }),
   executeOrderReopening: bindActor(executeOrderReopening, { systemField: "executedBy", allow: SYSTEM }),
