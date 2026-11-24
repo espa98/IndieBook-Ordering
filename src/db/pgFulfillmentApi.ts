@@ -37,7 +37,7 @@ const iso = (value: Date) => value.toISOString();
 export type PostFulfillmentBody = Omit<PostFulfillmentRequest, "receivedBy">;
 export type RequestOrderCancellationBody = Omit<RequestOrderCancellationRequest, "requestedBy">;
 
-async function loadFulfillments(client: PoolClient, tenantId: string, orderId: string): Promise<Fulfillment[]> {
+export async function loadFulfillments(client: PoolClient, tenantId: string, orderId: string): Promise<Fulfillment[]> {
   return (
     await client.query("select * from public.ordering_fulfillments where tenant_id = $1 and order_id = $2 order by recorded_at, id", [tenantId, orderId])
   ).rows.map(
@@ -58,7 +58,7 @@ async function loadFulfillments(client: PoolClient, tenantId: string, orderId: s
   );
 }
 
-async function loadCancellations(client: PoolClient, tenantId: string, orderId: string) {
+export async function loadCancellations(client: PoolClient, tenantId: string, orderId: string) {
   const requests = (
     await client.query("select * from public.ordering_order_cancellation_requests where tenant_id = $1 and order_id = $2 order by recorded_at, id", [tenantId, orderId])
   ).rows.map(

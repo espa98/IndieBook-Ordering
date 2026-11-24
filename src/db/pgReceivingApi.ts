@@ -98,7 +98,7 @@ export async function loadAllocationLedger(client: PoolClient, tenantId: string,
 }
 
 /** 발주 하나의 입고·배분 상태 전체를 적재한다 */
-async function loadPoState(client: PoolClient, tenantId: string, poId: string) {
+export async function loadPoState(client: PoolClient, tenantId: string, poId: string) {
   const po = await loadPurchaseOrder(client, tenantId, poId);
   const replies = (await client.query("select * from public.ordering_po_replies where tenant_id = $1 and purchase_order_id = $2 order by seq", [tenantId, poId])).rows.map(
     (r): PoReply => ({

@@ -45,7 +45,7 @@ async function loadBooks(client: PoolClient, tenantId: string, bookIds: string[]
   );
 }
 
-async function saveOrder(client: PoolClient, order: Order, before: Order | undefined): Promise<void> {
+export async function saveOrder(client: PoolClient, order: Order, before: Order | undefined): Promise<void> {
   if (before === undefined) {
     await client.query(
       `insert into public.ordering_orders (id, tenant_id, status, version, display_number, total_krw, created_at, closed_at, cancelled_at)
