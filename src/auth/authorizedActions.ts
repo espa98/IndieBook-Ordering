@@ -48,6 +48,15 @@ import { voidPayment } from "../payment/voidPayment";
 import { cancelUndeliveredPurchaseOrder } from "../procurement/cancelUndeliveredPurchaseOrder";
 import { recordPurchaseOrderDelivery } from "../procurement/recordPurchaseOrderDelivery";
 import { releaseSourcing } from "../procurement/releaseSourcing";
+import { confirmOrderService } from "../order/confirmOrderService";
+import { createOrderService } from "../order/createOrderService";
+import { allocateSourcing } from "../procurement/allocateSourcing";
+import { confirmPurchaseOrderCancellation } from "../procurement/confirmPurchaseOrderCancellation";
+import { createCancellationRequest } from "../procurement/createCancellationRequest";
+import { createPurchaseOrder } from "../procurement/createPurchaseOrder";
+import { markPurchaseOrderReady } from "../procurement/markPurchaseOrderReady";
+import { recordSupplierReply } from "../procurement/recordSupplierReply";
+import { respondToCancellationRequest } from "../procurement/respondToCancellationRequest";
 import { bindActor } from "./bindActor";
 
 const BOTH = ["OWNER", "STAFF"] as const;
@@ -111,6 +120,16 @@ export const authorizedActions = {
   cancelUndeliveredPurchaseOrder: bindActor(cancelUndeliveredPurchaseOrder, { nameField: "cancelledBy", allow: BOTH }),
   recordPurchaseOrderDelivery: bindActor(recordPurchaseOrderDelivery, { nameField: "deliveredBy", allow: BOTH }),
   releaseSourcing: bindActor(releaseSourcing, { nameField: "releasedBy", allow: BOTH }),
+  // 행위자 필드가 없는 명령: 테넌트만 주체에서 주입한다
+  confirmOrderService: bindActor(confirmOrderService, { allow: BOTH }),
+  createOrderService: bindActor(createOrderService, { allow: BOTH }),
+  allocateSourcing: bindActor(allocateSourcing, { allow: BOTH }),
+  confirmPurchaseOrderCancellation: bindActor(confirmPurchaseOrderCancellation, { allow: BOTH }),
+  createCancellationRequest: bindActor(createCancellationRequest, { allow: BOTH }),
+  createPurchaseOrder: bindActor(createPurchaseOrder, { allow: BOTH }),
+  markPurchaseOrderReady: bindActor(markPurchaseOrderReady, { allow: BOTH }),
+  recordSupplierReply: bindActor(recordSupplierReply, { allow: BOTH }),
+  respondToCancellationRequest: bindActor(respondToCancellationRequest, { allow: BOTH }),
   // 서버 내부 업무
   executeOrderClosure: bindActor(executeOrderClosure, { systemField: "executedBy", allow: SYSTEM }),
   executeOrderReopening: bindActor(executeOrderReopening, { systemField: "executedBy", allow: SYSTEM }),

@@ -5,6 +5,7 @@ import { AppError } from "../../src/errors/AppError";
 import { authorizedActions } from "../../src/auth/authorizedActions";
 import { createSystemPrincipal, type UserPrincipal } from "../../src/auth/principal";
 import { executionScene } from "../helpers/closureFixtures";
+import { world } from "../helpers/procurementWorld";
 import { paymentCorrectionScene, paymentScene } from "../helpers/paymentFixtures";
 
 const owner: UserPrincipal = { kind: "USER", userId: "owner-1", tenantId: "tenant-a", role: "OWNER" };
@@ -97,5 +98,38 @@ describe("authorizedActions: 신원 필드를 주체에서 주입한 명령 모�
 
     expect(payment.recordedBy).toBe("staff-1");
     expect(payments.list("tenant-a", payment.orderId)).toEqual([payment]);
+  });
+
+  it("테넌트와 멱등 키를 요청으로 받는 모든 명령 파일이 이 모음에 바인딩되어 있다 (행위자 필드가 없어도 tenantId 위조 방지)", () => {
+    const needsBinding = sourceFiles("src")
+      .filter((path) => !path.split(sep).join("/").startsWith("src/auth/"))
+      .filter((path) => {
+        const text = readFileSync(path, "utf8");
+        return [...text.matchAll(/export type \w+ = \{([\s\S]*?)\n\};/g)].some(
+          (m) => /^\s+tenantId: string/m.test(m[1]!) && /idempotencyKey: string/.test(m[1]!),
+        );
+      })
+      .map((path) => (path.split(sep).join("/").split("/").pop() ?? "").replace(".ts", ""));
+
+    expect(needsBinding.length).toBeGreaterThan(50);
+    const missing = needsBinding.filter((name) => !Object.keys(authorizedActions).includes(name));
+    expect(missing).toEqual([]);
+  });
+
+  it("Staff 주체가 조달 배정을 만들 때 요청이 다른 테넌트를 주장해도 주체의 테넌트로 처리된다", () => {
+    const w = world();
+    const order = w.addOrder([{ bookId: "book-1", quantity: 2, unitPriceKrw: "15000" }]);
+
+    const allocation = authorizedActions.allocateSourcing(w.deps, staff, {
+      orderId: order.id,
+      lineId: order.lines[0]!.lineId,
+      supplierCode: "sup-a",
+      quantity: 2,
+      idempotencyKey: "alloc-bound",
+      tenantId: "tenant-b", // 위조 시도
+    } as never);
+
+    expect(allocation.tenantId).toBe("tenant-a");
+    expect(w.deps.allocations.list("tenant-b")).toEqual([]);
   });
 });

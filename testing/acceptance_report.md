@@ -8,7 +8,7 @@
 
 | 영역 | 판정 | 한 줄 근거 |
 |---|---|---|
-| 도메인 단위·통합(메모리 저장소) | **PASS** | `npx vitest run` 91 files / 1019 tests 통과, 실패 0 |
+| 도메인 단위·통합(메모리 저장소) | **PASS** | `npx vitest run` 91 files / 1021 tests 통과, 실패 0 |
 | 타입 검사 | **PASS** | `npx tsc --noEmit` 출력 없음 |
 | OpenAPI 스키마·계약 | **PARTIAL** | 주문 API(05단계)만 명세가 있고 26개 통과. 나머지 영역은 명세·구현 없음 |
 | HTTP | **PARTIAL** | 핸들러 단위 41개 통과. 실제 서버·라우터·JWT 없음 |
@@ -25,7 +25,7 @@
 
 | 명령 | 결과 |
 |---|---|
-| `npx vitest run` | files 91, tests 1019, passed 1019, failed 0 (인증 계층 추가 후 재실행. 아래 디렉터리별 표는 21e22e3 기준 JSON 집계에 auth 변경만 반영) |
+| `npx vitest run` | files 91, tests 1021, passed 1021, failed 0 (인증 계층 추가 후 재실행. 아래 디렉터리별 표는 21e22e3 기준 JSON 집계에 auth 변경만 반영) |
 | `npx tsc --noEmit` | 출력 없음(오류 0) |
 | 정적 점검: `git ls-files` 파일명(.env·secret·credential·pem·key) | 해당 없음 |
 | 정적 점검: `src tests openapi implementation package.json`에서 JWT·키 패턴, `ordering-dev`·`testBookshare` 프로젝트 ID, `service_role` grep | 해당 없음 |
@@ -35,7 +35,7 @@
 
 | 디렉터리 | 파일 | 테스트 |
 |---|---|---|
-| auth | 4 | 29 |
+| auth | 4 | 31 |
 | errors | 1 | 8 |
 | http | 3 | 41 |
 | idempotency | 2 | 53 |
@@ -49,7 +49,7 @@
 | closure | 4 | 15 |
 | cancellation | 5 | 25 |
 | reopening | 1 | 6 |
-| **합계** | **91** | **1019** |
+| **합계** | **91** | **1021** |
 
 (`tests/helpers`는 테스트 파일이 없는 공용 픽스처다.)
 
@@ -104,7 +104,7 @@
 | 저장소 시크릿 | PASS(정적, 한계 있음) | 위 정적 점검 3종. 완전한 시크릿 스캐너가 아님 |
 | 외부 호출 | PASS(정적) | 도메인 코드가 PG·알림·네트워크를 호출하지 않음 |
 | 금지된 DB 접근 | PASS | `testBookshare`와 `ordering-dev`에 접속하지 않음 |
-| 권한 모델 | **부분 완화** | `src/auth`의 `resolvePrincipal`·`bindActor`·`authorizedActions`가 역할·행위자·테넌트·SYSTEM 실행자를 주체에서 주입한다(요청 값은 무시, 구조 테스트로 누락 방지). 단 외부 진입점이 도메인 함수를 직접 호출하면 우회되고, 행위자 이름이 없는 일부 조달·주문 명령의 `tenantId`는 아직 주입하지 않았으며, JWT 서명 검증·서버가 없다. 원래 위험(`actorRole`·`executedBy`가 요청 값이라 위조 가능)은 도메인 함수 자체에는 그대로 남아 있다. `SYSTEM` 전용 명령도 동일 |
+| 권한 모델 | **부분 완화** | `src/auth`의 `resolvePrincipal`·`bindActor`·`authorizedActions`가 역할·행위자·테넌트·SYSTEM 실행자를 주체에서 주입한다(요청 값은 무시, 구조 테스트로 누락 방지). 단 외부 진입점이 도메인 함수를 직접 호출하면 우회되고, 조회 함수의 `tenantId`는 아직 주체에서 주입하지 않았으며, JWT 서명 검증·서버가 없다. 원래 위험(`actorRole`·`executedBy`가 요청 값이라 위조 가능)은 도메인 함수 자체에는 그대로 남아 있다. `SYSTEM` 전용 명령도 동일 |
 
 ## 5. 동시성에 대한 정직한 기록
 
@@ -138,7 +138,7 @@
 | 6d9bb13 | 해제 후 남는 공급처 의무 파생, 주문 종결 차단, 재조달 중복 위험 승인 | BR-P05 |
 | 21e22e3 | 파손·오배송 처리 기록과 발주 종결 차단 | BR-P06, ST-R01 |
 
-테스트는 968 → 1005개(+37), 파일은 76 → 88개(+12)다. 그 뒤 인증·권한 계층(§10)으로 1019개, 91 files가 되었다.
+테스트는 968 → 1005개(+37), 파일은 76 → 88개(+12)다. 그 뒤 인증·권한 계층(§10)으로 1021개, 91 files가 되었다.
 
 ### 9.1 이번 갱신에서 새로 생긴 위험·주의
 
@@ -154,18 +154,18 @@
 
 ## 10. 인증·권한 계층 (ac366ed 이후, T7 부분 해소)
 
-`src/auth`에 다음을 추가했다. 테스트 14개(`tests/auth/resolvePrincipal`·`bindActor`·`authorizedActions`).
+`src/auth`에 다음을 추가했다. 테스트 16개(`tests/auth/resolvePrincipal`·`bindActor`·`authorizedActions`).
 
 | 구성 | 역할 |
 |---|---|
 | `resolvePrincipal` | 검증이 끝난 신원(userId·tenantId·sessionExpiresAt)에서 USER 주체를 만든다. 역할은 멤버십에서 온다. 세션 만료·형식 오류는 UNAUTHENTICATED, 비활성·타 테넌트·비멤버는 같은 FORBIDDEN. 멤버십은 매 호출 다시 읽어 직원 비활성화가 즉시 반영된다(ST-A05, ST-A08) |
 | `createSystemPrincipal` | 서버 내부 업무용 SYSTEM 주체 |
 | `bindActor` | 명령의 `tenantId`·역할·행위자 이름·`executedBy`를 요청 본문이 아니라 주체에서 주입하고(위조 값은 덮어씀), 허용되지 않은 주체는 명령을 호출하기 전에 FORBIDDEN으로 거부 |
-| `authorizedActions` | 역할·SYSTEM 실행자·행위자 이름(`...By`)을 요청으로 받는 50개 명령을 바인딩한 모음(역할/SYSTEM 19개 + Owner·Staff 공용 31개). 구조 테스트 2개가 `actorRole`·`executedBy`를 받거나 멱등 키와 `...By` 필드를 가진 명령 파일이 이 모음에서 빠지면 실패시킨다 |
+| `authorizedActions` | 역할·SYSTEM 실행자·행위자 이름(`...By`)·테넌트를 요청으로 받는 59개 명령을 바인딩한 모음(역할/SYSTEM 19개 + 행위자 이름 31개 + 테넌트만 주입 9개 = 59개). 구조 테스트 3개가 `actorRole`·`executedBy`를 받거나, 멱등 키와 `...By` 필드를 가졌거나, 멱등 키와 `tenantId`를 가진 명령 파일이 이 모음에서 빠지면 실패시킨다 |
 
 **남은 한계**
 - 외부 진입점이 `authorizedActions` 대신 도메인 함수를 직접 호출하면 우회된다. 진입점 규약과 서버 조립에서 강제해야 한다.
-- 행위자 이름이 없는 명령(`allocateSourcing`, `createPurchaseOrder`, `recordSupplierReply`, 주문 생성·확정 등)은 `tenantId`만 요청에서 받는다. 이 명령들의 테넌트 주입은 아직 바인딩하지 않았다.
+- 멱등 키가 없는 조회 함수(`getOrder`, `listOrders` 등)와 `createOrderApi`의 내부 인가(`authorizeTenantAccess`)는 이 모음에 포함하지 않았다. 조회의 `tenantId`는 호출자가 넘기는 값이다.
 - JWT 서명 검증·키 관리·서버가 없다. `resolvePrincipal`은 검증이 끝난 신원을 입력으로 받는다고 가정한다.
 - ST-A01~A04(이메일 인증·서점 개설·초대·만료/철회), 직원 비활성화·복구 명령 자체, ST-A06/A07은 구현하지 않았다. 마지막 Owner 보호도 없다.
 
