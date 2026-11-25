@@ -207,4 +207,32 @@ describe("주문 재개 (정정으로 종결 조건이 깨졌을 때, 서버 전
     expect(reopening.blockers.length).toBeGreaterThan(0);
     expect((await orderState(closed.orderId)).closed_at).toBeNull();
   });
+
+  it("같은 정정으로 두 세션이 동시에 재개해도 한 번만 재개되고 version은 1만 오르며 재개 기록도 1건이다", async () => {
+    const closed = await closedOrder(11);
+    const before = await orderState(closed.orderId);
+    const correction = await correctPay(closed.paymentId!, "5000");
+    const trigger = { kind: "PAYMENT_CORRECTION" as const, id: correction.id };
+
+    const results = await Promise.allSettled([reopen(closed.orderId, trigger), reopen(closed.orderId, trigger)]);
+
+    expect(outcomes(results)).toEqual(["BUSINESS_INVARIANT", "OK"]);
+    expect(await orderState(closed.orderId)).toMatchObject({ closed_at: null, version: before.version + 1 });
+    expect(await num("select count(*)::int as n from public.ordering_order_reopenings where order_id = $1", [closed.orderId])).toBe(1);
+  });
+
+  it("재개와 새 결제 입력이 동시에 들어와도 재개는 항상 성공하고, 결제는 재개 뒤에만 받아진다", async () => {
+    const closed = await closedOrder(12);
+    const correction = await correctPay(closed.paymentId!, "5000");
+    const trigger = { kind: "PAYMENT_CORRECTION" as const, id: correction.id };
+    const pay = () => createPgPaymentApi({ pool: db.pool() }).recordPayment(staff, { tenantId: T_A, orderId: closed.orderId, method: "CARD", amountKrw: "500", externalReference: `RACE-${key()}`, paidAt: "2026-03-04T06:00:00.000Z", idempotencyKey: key() });
+
+    const [reopening, payment] = await Promise.allSettled([reopen(closed.orderId, trigger), pay()]);
+
+    expect(reopening!.status).toBe("fulfilled");
+    expect((await orderState(closed.orderId)).closed_at).toBeNull();
+    expect(await num("select count(*)::int as n from public.ordering_order_reopenings where order_id = $1", [closed.orderId])).toBe(1);
+    const accepted = await num("select count(*)::int as n from public.ordering_payments where order_id = $1 and amount_krw = 500", [closed.orderId]);
+    expect(accepted).toBe(payment!.status === "fulfilled" ? 1 : 0);
+  });
 });
