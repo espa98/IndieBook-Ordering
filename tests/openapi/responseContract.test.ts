@@ -152,3 +152,33 @@ describe("응답 계약: 발주 조회", () => {
   });
 });
 
+describe("응답 계약: 템플릿·안내 대상·미수령 경고 조회", () => {
+  it("세 조회의 data 스키마가 선언되어 있고 실제 응답(시도·결과·경고 포함)이 그것을 만족한다", async () => {
+    const book = await call("POST", "/books", { source: "MANUAL", title: "안내 책", listPriceKrw: "7000", reason: "수기 등록", registeredAt: "2026-03-04T06:00:00.000Z" });
+    const bookId = book.body.data.id as string;
+    expect((await call("POST", `/books/${bookId}/initial-stock`, { quantity: 2, actedAt: "2026-03-04T06:05:00.000Z" })).status).toBe(201);
+    const draft = await call("POST", "/orders", { lines: [{ bookId, quantity: 2, unitPriceKrw: "7000" }] });
+    const orderId = draft.body.data.id as string;
+    const confirmed = await call("POST", `/orders/${orderId}/confirm`, { expectedVersion: 1 });
+    const lineId = confirmed.body.data.lines[0].lineId as string;
+    expect((await call("POST", `/orders/${orderId}/lines/${lineId}/stock-reservations`, { quantity: 2, reservedAt: "2026-03-04T06:10:00.000Z" })).status).toBe(201);
+    const target = await call("POST", `/orders/${orderId}/notification-targets`, { mode: "FULL", createdAt: "2026-03-04T06:20:00.000Z" });
+    expect(target.status).toBe(201);
+    const attempt = await call("POST", `/notification-targets/${target.body.data.id}/attempts`, { channel: "PHONE", messageSnapshot: "도서가 준비되었습니다", attemptedAt: "2026-03-04T06:30:00.000Z" });
+    expect(attempt.status).toBe(201);
+    expect((await call("POST", `/notification-attempts/${attempt.body.data.id}/result`, { outcome: "MANUAL_RECORDED", note: "통화 완료", resultAt: "2026-03-04T06:40:00.000Z" })).status).toBe(201);
+    const template = await call("POST", "/message-templates", { key: "ORDER_READY", body: "{{storeName}}입니다. {{bookTitle}} 도서가 준비되었습니다", expectedVersion: 0, publishedAt: "2026-03-04T06:00:00.000Z" });
+    expect(template.status).toBe(201);
+
+    const templates = await call("GET", "/message-templates");
+    const targets = await call("GET", `/orders/${orderId}/notification-targets`);
+    const warnings = await call("GET", "/long-unreceived-warnings");
+    expect([templates.status, targets.status, warnings.status]).toEqual([200, 200, 200]);
+    expect(warnings.body.data.length).toBeGreaterThan(0);
+    for (const t of ["/message-templates", "/orders/{orderId}/notification-targets", "/long-unreceived-warnings"]) expect(declared(t), `${t} data 스키마`).toBe(true);
+    expect(conforms("/message-templates", templates.body)).toMatchObject({ ok: true });
+    expect(conforms("/orders/{orderId}/notification-targets", targets.body)).toMatchObject({ ok: true });
+    expect(conforms("/long-unreceived-warnings", warnings.body)).toMatchObject({ ok: true });
+  });
+});
+

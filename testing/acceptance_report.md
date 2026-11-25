@@ -1172,3 +1172,19 @@
 - 발주의 취소·종결(`cancelledAt`·`cancelledBy`·`cancelReason`·`closedAt`) 분기 응답은 검증하지 않았다(필드는 도메인 타입에서 옮겼다).
 - 남은 조회 3개(`/message-templates`, `/orders/{orderId}/notification-targets`, `/long-unreceived-warnings`)와 쓰기 응답 62개는 자유 형식이다.
 
+## 64. 응답 스키마: 템플릿·안내 대상·미수령 경고 조회 (T8 일부)
+
+테스트 1개 추가(`tests/openapi/responseContract.test.ts`). 먼저 "`data` 스키마가 선언되어 있다"에서 실패함을 확인한 뒤 채웠다. 이로써 **조회(GET) 14개 경로 전부**의 응답 `data`를 선언하고 실제 응답으로 검증한다(§62~64).
+
+| 경로 | 스키마 | 검증한 응답 |
+|---|---|---|
+| `GET /message-templates` | `TemplateVersion` | 템플릿 1개(변수 2개) |
+| `GET /orders/{orderId}/notification-targets` | `NotificationTarget`(`status`·`attemptCount`·`lastAttempt`·`lastResult` 포함) | 시도·결과를 기록한 대상 |
+| `GET /long-unreceived-warnings` | `LongUnreceivedWarning` | 안내 후 266일 지난 확보 물량이 있는 주문 1건 |
+
+테스트 입력 오류 1건: 템플릿 본문에 `{{customerName}}`을 썼으나 고객 이름은 허용 변수가 아니다(개인정보, DEC-12). 서버가 올바르게 400으로 거부했으므로 허용 변수(`storeName`·`bookTitle`)로 입력을 고쳤다.
+
+**한계**
+- 안내 대상의 `renoticeOfTargetId`(재안내로 생긴 대상) 분기와 시도·결과가 없는 `PENDING` 대상, 실패(`FAILED`) 결과의 응답은 검증하지 않았다.
+- **쓰기(POST) 62개 경로의 응답은 여전히 자유 형식**이다.
+

@@ -9,7 +9,7 @@ info:
     본문 허용 필드(`additionalProperties: false`), 쿼리 파라미터, `Idempotency-Key` 필수 여부가 어긋나면 테스트가 실패한다.
 
     **이 명세가 기술하지 않는 것(미구현·미검증):** 필수 여부(`required`)·열거값·타입은 도메인 요청 타입 기준이고
-    런타임 400으로는 전수 검증하지 않았다, 응답 `data`의 필드별 스키마(조회 11개 경로(공급처·도서·재고·감사 로그·결제 현황·발주)만 선언했고 `tests/openapi/responseContract.test.ts`가 실제 응답으로 검증한다. 나머지는 자유 형식), 경로별 오류 응답의 실제 발생
+    런타임 400으로는 전수 검증하지 않았다, 응답 `data`의 필드별 스키마(조회 14개 경로 전부(쓰기 62개 경로는 아직 자유 형식)를 선언했고 `tests/openapi/responseContract.test.ts`가 실제 응답으로 검증한다. 나머지는 자유 형식), 경로별 오류 응답의 실제 발생
     조건(공통 오류 응답을 선언만 하고 401만 계약 테스트로 확인한다).
 
     **공통 규칙(`ordering.yaml`과 같다):** Bearer JWT, 모든 쓰기(POST)는 `Idempotency-Key` 필수, 경로 식별자는 UUID가 아니면 404
@@ -1456,7 +1456,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/TemplateVersion" } }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -1522,7 +1525,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/NotificationTarget" } }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -1944,7 +1950,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/LongUnreceivedWarning" } }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -3472,6 +3481,78 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    LongUnreceivedWarning:
+      type: object
+      required: [orderId, targetId, notifiedAt, daysElapsed, securedQuantity]
+      properties:
+        orderId: { type: string, format: uuid }
+        targetId: { type: string, format: uuid }
+        notifiedAt: { type: string, format: date-time }
+        daysElapsed: { type: integer }
+        securedQuantity: { type: integer }
+    NotificationTarget:
+      type: object
+      required: [id, tenantId, orderId, mode, lines, securedTotal, createdBy, createdAt, recordedAt, status, attemptCount]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        mode: { type: string, enum: [FULL, PARTIAL] }
+        renoticeOfTargetId: { type: string, format: uuid }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [orderLineId, orderedQuantity, receivedQuantity, securedQuantity]
+            properties:
+              orderLineId: { type: string, format: uuid }
+              orderedQuantity: { type: integer }
+              receivedQuantity: { type: integer }
+              securedQuantity: { type: integer }
+        securedTotal: { type: integer }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+        status: { type: string, enum: [PENDING, ATTEMPTED, MANUAL_RECORDED, FAILED] }
+        attemptCount: { type: integer }
+        lastAttempt:
+          type: object
+          required: [id, tenantId, targetId, channel, messageSnapshot, attemptedBy, attemptedAt, recordedAt]
+          properties:
+            id: { type: string, format: uuid }
+            tenantId: { type: string, format: uuid }
+            targetId: { type: string, format: uuid }
+            channel: { type: string, enum: [MESSENGER, OTHER, PHONE, SMS, VISIT] }
+            messageSnapshot: { type: string }
+            attemptedBy: { type: string }
+            attemptedAt: { type: string, format: date-time }
+            recordedAt: { type: string, format: date-time }
+        lastResult:
+          type: object
+          required: [id, tenantId, targetId, attemptId, outcome, note, recordedBy, resultAt, recordedAt]
+          properties:
+            id: { type: string, format: uuid }
+            tenantId: { type: string, format: uuid }
+            targetId: { type: string, format: uuid }
+            attemptId: { type: string, format: uuid }
+            outcome: { type: string, enum: [FAILED, MANUAL_RECORDED] }
+            note: { type: string }
+            recordedBy: { type: string }
+            resultAt: { type: string, format: date-time }
+            recordedAt: { type: string, format: date-time }
+    TemplateVersion:
+      type: object
+      required: [id, tenantId, key, version, body, variables, publishedBy, publishedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        key: { type: string }
+        version: { type: integer }
+        body: { type: string }
+        variables: { type: array, items: { type: string } }
+        publishedBy: { type: string }
+        publishedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
     PurchaseOrder:
       type: object
       required: [id, tenantId, supplierCode, status, version, lines]
