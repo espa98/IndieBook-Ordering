@@ -10,7 +10,8 @@ info:
 
     **이 명세가 기술하지 않는 것(미구현·미검증):** 필수 여부(`required`)·열거값·타입은 도메인 요청 타입 기준이고
     런타임 400으로는 전수 검증하지 않았다, 응답 `data`의 필드별 스키마(76개 경로 전부 선언했고 `tests/openapi/responseContract.test.ts`가 실제 정상 응답 한 번으로 검증한다. 다른 분기의 응답은 도메인 타입 기준), 경로별 오류 응답의 실제 발생
-    조건(공통 오류 응답을 선언만 하고 401만 계약 테스트로 확인한다).
+    조건. DB 없이 판정되는 공통 오류(401·404 식별자 형식·400 쿼리/헤더/본문·415·405)는 `tests/openapi/errorContract.test.ts`가
+    모든 경로에서 검증하지만, 403·404(없는 대상)·409·422·500은 선언만 하고 경로별로 확인하지 않는다.
 
     **공통 규칙(`ordering.yaml`과 같다):** Bearer JWT, 모든 쓰기(POST)는 `Idempotency-Key` 필수, 경로 식별자는 UUID가 아니면 404
     (공급처 `code`만 예외), 본문의 알 수 없는 필드와 알 수 없는 쿼리는 400, 행위자(역할·이름)는 토큰에서 도출하므로 본문으로 보낼 수 없다.
@@ -74,6 +75,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/books/{bookId}/initial-stock:
@@ -124,6 +129,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/books/{bookId}/stock-adjustments:
@@ -176,6 +185,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/stock:
@@ -217,6 +230,8 @@ paths:
           $ref: "ordering.yaml#/components/responses/Unauthenticated"
         "403":
           $ref: "ordering.yaml#/components/responses/Forbidden"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/stock/{bookId}:
@@ -249,6 +264,8 @@ paths:
           $ref: "ordering.yaml#/components/responses/Forbidden"
         "404":
           $ref: "ordering.yaml#/components/responses/NotFound"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/stock-reservations/{reservationId}/releases:
@@ -300,6 +317,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/payments/{paymentId}/void:
@@ -350,6 +371,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/orders/{orderId}/fulfillments:
@@ -411,6 +436,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/orders/{orderId}/fulfillments/{fulfillmentId}/corrections:
@@ -481,6 +510,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/payments/{paymentId}/corrections:
@@ -533,6 +566,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/orders/{orderId}/cancellation-requests:
@@ -586,6 +623,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/order-cancellation-requests/{requestId}/decision:
@@ -636,6 +677,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/order-cancellation-requests/{requestId}/application:
@@ -685,6 +730,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/orders/{orderId}/closure-requests:
@@ -735,6 +784,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/allocation-cancellations/{cancellationId}/stock-intakes:
@@ -790,6 +843,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/allocation-cancellations/{cancellationId}/return-requests:
@@ -840,6 +897,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/return-requests/{requestId}/replies:
@@ -892,6 +953,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/return-requests/{requestId}/dispatches:
@@ -943,6 +1008,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/return-requests/{requestId}/completions:
@@ -994,6 +1063,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/return-requests/{requestId}/exceptions:
@@ -1046,6 +1119,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/return-requests/{requestId}/renegotiations:
@@ -1097,6 +1174,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/return-exceptions/{exceptionId}/resolutions:
@@ -1149,6 +1230,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/orders/{orderId}/payments:
@@ -1182,6 +1267,8 @@ paths:
           $ref: "ordering.yaml#/components/responses/Forbidden"
         "404":
           $ref: "ordering.yaml#/components/responses/NotFound"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
     post:
@@ -1225,6 +1312,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/payments/{paymentId}/confirmation:
@@ -1275,6 +1366,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/orders/{orderId}/refund-tasks:
@@ -1324,6 +1419,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/refund-tasks/{taskId}/refund-requests:
@@ -1376,6 +1475,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/refund-tasks/{taskId}/refund-attempts:
@@ -1429,6 +1532,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/refund-attempts/{attemptId}/resolution:
@@ -1480,6 +1587,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/message-templates:
@@ -1524,6 +1635,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
     get:
@@ -1552,6 +1667,8 @@ paths:
           $ref: "ordering.yaml#/components/responses/Unauthenticated"
         "403":
           $ref: "ordering.yaml#/components/responses/Forbidden"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/orders/{orderId}/notification-targets:
@@ -1602,6 +1719,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
     get:
@@ -1626,6 +1747,8 @@ paths:
           $ref: "ordering.yaml#/components/responses/Forbidden"
         "404":
           $ref: "ordering.yaml#/components/responses/NotFound"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/notification-targets/{targetId}/copies:
@@ -1676,6 +1799,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/notification-targets/{targetId}/attempts:
@@ -1727,6 +1854,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/notification-targets/{targetId}/renotices:
@@ -1776,6 +1907,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/notification-attempts/{attemptId}/result:
@@ -1827,6 +1962,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/audit-log:
@@ -1874,6 +2013,8 @@ paths:
           $ref: "ordering.yaml#/components/responses/Unauthenticated"
         "403":
           $ref: "ordering.yaml#/components/responses/Forbidden"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/books:
@@ -1920,6 +2061,8 @@ paths:
           $ref: "ordering.yaml#/components/responses/Unauthenticated"
         "403":
           $ref: "ordering.yaml#/components/responses/Forbidden"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
     post:
@@ -1967,6 +2110,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/books/{bookId}:
@@ -2000,6 +2147,8 @@ paths:
           $ref: "ordering.yaml#/components/responses/Forbidden"
         "404":
           $ref: "ordering.yaml#/components/responses/NotFound"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/books/{bookId}/revisions:
@@ -2033,6 +2182,8 @@ paths:
           $ref: "ordering.yaml#/components/responses/Forbidden"
         "404":
           $ref: "ordering.yaml#/components/responses/NotFound"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/long-unreceived-warnings:
@@ -2064,6 +2215,8 @@ paths:
           $ref: "ordering.yaml#/components/responses/Unauthenticated"
         "403":
           $ref: "ordering.yaml#/components/responses/Forbidden"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/books/{bookId}/updates:
@@ -2124,6 +2277,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/staff-invitations:
@@ -2171,6 +2328,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/staff-invitations/{invitationId}/revocation:
@@ -2210,6 +2371,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/members/{targetUserId}/status:
@@ -2259,6 +2424,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/stores:
@@ -2304,6 +2473,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/invitations/accept:
@@ -2344,6 +2517,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/suppliers:
@@ -2369,6 +2546,8 @@ paths:
           $ref: "ordering.yaml#/components/responses/Unauthenticated"
         "403":
           $ref: "ordering.yaml#/components/responses/Forbidden"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
     post:
@@ -2410,6 +2589,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/suppliers/{code}:
@@ -2442,6 +2625,8 @@ paths:
           $ref: "ordering.yaml#/components/responses/Forbidden"
         "404":
           $ref: "ordering.yaml#/components/responses/NotFound"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/suppliers/{code}/updates:
@@ -2498,6 +2683,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/suppliers/{code}/activation:
@@ -2548,6 +2737,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/orders/{orderId}/lines/{lineId}/sourcing-allocations:
@@ -2604,6 +2797,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/orders/{orderId}/lines/{lineId}/duplicate-risk-approvals:
@@ -2663,6 +2860,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/sourcing-allocations/{allocationId}/releases:
@@ -2713,6 +2914,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/purchase-orders:
@@ -2764,6 +2969,8 @@ paths:
           $ref: "ordering.yaml#/components/responses/Unauthenticated"
         "403":
           $ref: "ordering.yaml#/components/responses/Forbidden"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
     post:
@@ -2803,6 +3010,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/purchase-orders/{purchaseOrderId}:
@@ -2835,6 +3046,8 @@ paths:
           $ref: "ordering.yaml#/components/responses/Forbidden"
         "404":
           $ref: "ordering.yaml#/components/responses/NotFound"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/purchase-orders/{purchaseOrderId}/ready:
@@ -2884,6 +3097,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/purchase-orders/{purchaseOrderId}/delivery:
@@ -2937,6 +3154,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/purchase-orders/{purchaseOrderId}/cancellation:
@@ -2988,6 +3209,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/purchase-orders/{purchaseOrderId}/lines/{poLineId}/cancellation-requests:
@@ -3044,6 +3269,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/purchase-orders/{purchaseOrderId}/cancellation-requests/{requestId}/responses:
@@ -3102,6 +3331,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/purchase-orders/{purchaseOrderId}/cancellation-confirmation:
@@ -3151,6 +3384,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/purchase-orders/{purchaseOrderId}/supplier-replies:
@@ -3206,6 +3443,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/purchase-orders/{purchaseOrderId}/receipts:
@@ -3259,6 +3500,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/receipts/{receiptId}/defect-resolutions:
@@ -3312,6 +3557,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/receipts/{receiptId}/excess-decisions:
@@ -3364,6 +3613,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/receipts/{receiptId}/corrections:
@@ -3415,6 +3668,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/receipts/{receiptId}/allocations:
@@ -3467,6 +3724,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/allocations/{allocationId}/cancellations:
@@ -3518,6 +3779,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/allocations/{allocationId}/reallocations:
@@ -3576,6 +3841,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/allocations/{allocationId}/releases:
@@ -3627,6 +3896,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/refund-requests/{requestId}/decision:
@@ -3682,6 +3955,10 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
 

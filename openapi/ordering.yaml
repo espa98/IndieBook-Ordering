@@ -408,6 +408,8 @@ components:
                 - VERSION_CONFLICT
                 - BUSINESS_INVARIANT
                 - INTERNAL_ERROR
+                - METHOD_NOT_ALLOWED
+                - UNSUPPORTED_MEDIA_TYPE
             message:
               type: string
               description: |
@@ -500,6 +502,35 @@ components:
                     properties:
                       code:
                         const: BUSINESS_INVARIANT
+    MethodNotAllowed:
+      description: 이 경로가 지원하지 않는 메서드. `Allow` 헤더에 지원하는 메서드가 있다.
+      headers:
+        Allow:
+          description: 이 경로가 지원하는 메서드(쉼표 구분)
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ErrorBody"
+              - properties:
+                  error:
+                    properties:
+                      code:
+                        const: METHOD_NOT_ALLOWED
+    UnsupportedMediaType:
+      description: 본문의 `Content-Type`이 `application/json`이 아님
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ErrorBody"
+              - properties:
+                  error:
+                    properties:
+                      code:
+                        const: UNSUPPORTED_MEDIA_TYPE
     InternalError:
       description: 예상하지 못한 서버 오류. 원인은 응답에 없고 서버 로그(`onUnexpectedError` 훅)에만 남는다.
       content:
