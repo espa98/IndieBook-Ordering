@@ -168,3 +168,76 @@ describe("역할별 403: 직원에게 일부만 허용되는 명령", () => {
     expect((await get(DELEGATE)).status).toBe(403); // 위임은 감사 로그 조회와 무관하다
   });
 });
+
+describe("역할별 403: 직원에게 허용된 나머지 경로 (역방향)", () => {
+  it("Owner 전용·부분 허용·감사 로그를 뺀 모든 서점 범위 경로는 직원에게 403이 아니다 (권한을 너무 좁게 막지 않는다)", async () => {
+    // 전체 허용 명령은 권한 검사가 입력 검증보다 앞서므로, 직원이 막혔다면 400이 아니라 403이 먼저 나온다
+    const classified = new Set([
+      ...Object.values(OWNER_ONLY_ROUTES),
+      ...PARTIAL.map((c) => c.route),
+      "GET /v1/tenants/{tenantId}/audit-log",
+    ]);
+    const ops = await loadOperations();
+    const rest = app.routes.filter((r) => r.scope === "tenant" && !classified.has(specKey(r)));
+    expect(rest.length).toBeGreaterThan(40);
+
+    const problems: string[] = [];
+    for (const r of rest) {
+      const key = specKey(r);
+      const response = await app(r.method === "POST" ? request(r, STAFF, sampleBody(ops.get(key))) : { ...request(r, STAFF, ""), rawBody: undefined });
+      if ([401, 403, 500].includes(response.status)) problems.push(`${key}: 상태 ${response.status} ${JSON.stringify(response.body)}`);
+    }
+    expect(problems).toEqual([]);
+  });
+});
+
+describe("역할별 403: 대상에 따라 갈리는 규칙", () => {
+  let seq = 0;
+  const call = async (sub: string, method: "GET" | "POST", path: string, body?: unknown) => {
+    const headers: Record<string, string> = { authorization: `Bearer ${token(sub)}` };
+    if (method === "POST") headers["idempotency-key"] = `role-${++seq}`;
+    if (body !== undefined) headers["content-type"] = "application/json";
+    const response = await app({ method, path: `/v1/tenants/${T_A}${path}`, query: new URLSearchParams(), headers, rawBody: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: response.status, body: JSON.parse(JSON.stringify(response.body)) as any };
+  };
+  const must = async (res: Promise<{ status: number; body: any }>, status: number, what: string) => {
+    const r = await res;
+    expect(r.status, `${what}: ${JSON.stringify(r.body)}`).toBe(status);
+    return r.body.data;
+  };
+
+  it("다른 고객의 주문으로 재배분하는 것은 Owner만 하고(DEC-15), 같은 주문 안에서 옮기는 것은 직원도 할 수 있다", async () => {
+    // 한 발주에 두 고객의 주문 품목을 묶어 입고하고, 첫 고객에게 배분해 둔다
+    await must(call(OWNER, "POST", "/suppliers", { code: "role-sup", name: "역할 도매", orderChannel: "EMAIL", registeredAt: "2026-03-04T06:00:00.000Z" }), 201, "공급처 등록");
+    const book = await must(call(OWNER, "POST", "/books", { source: "MANUAL", title: "재배분 책", listPriceKrw: "5000", reason: "수기 등록", registeredAt: "2026-03-04T06:00:00.000Z" }), 201, "도서 등록");
+    const lineOf = async (quantity: number) => {
+      const order = await must(call(OWNER, "POST", "/orders", { lines: [{ bookId: book.id, quantity, unitPriceKrw: "5000" }] }), 201, "주문 생성");
+      const confirmed = await must(call(OWNER, "POST", `/orders/${order.id}/confirm`, { expectedVersion: 1 }), 200, "주문 확정");
+      return { orderId: order.id as string, lineId: confirmed.lines[0].lineId as string };
+    };
+    const first = await lineOf(3);
+    const second = await lineOf(2);
+    const a1 = await must(call(OWNER, "POST", `/orders/${first.orderId}/lines/${first.lineId}/sourcing-allocations`, { supplierCode: "role-sup", quantity: 3 }), 201, "배정 1");
+    const a2 = await must(call(OWNER, "POST", `/orders/${second.orderId}/lines/${second.lineId}/sourcing-allocations`, { supplierCode: "role-sup", quantity: 2 }), 201, "배정 2");
+    const po = await must(call(OWNER, "POST", "/purchase-orders", { supplierCode: "role-sup", allocationIds: [a1.id, a2.id] }), 201, "발주 생성");
+    await must(call(OWNER, "POST", `/purchase-orders/${po.id}/ready`, { expectedVersion: 1 }), 200, "발주 준비");
+    await must(call(OWNER, "POST", `/purchase-orders/${po.id}/delivery`, { expectedVersion: 2, method: "EMAIL", deliveredAt: "2026-03-04T07:00:00.000Z" }), 200, "발주 전달");
+    const poLineId = (await must(call(OWNER, "GET", `/purchase-orders/${po.id}`), 200, "발주 조회")).lines[0].poLineId as string;
+    const receipt = await must(call(OWNER, "POST", `/purchase-orders/${po.id}/receipts`, { poLineId, normalQuantity: 5, damagedQuantity: 0, misdeliveredQuantity: 0, receivedAt: "2026-03-05T06:00:00.000Z" }), 201, "입고");
+    const allocation = await must(call(OWNER, "POST", `/receipts/${receipt.id}/allocations`, { orderId: first.orderId, orderLineId: first.lineId, quantity: 3, allocatedAt: "2026-03-05T07:00:00.000Z" }), 201, "입고 배분");
+    const move = (sub: string, to: { orderId: string; lineId: string }, quantity: number) =>
+      call(sub, "POST", `/allocations/${allocation.id}/reallocations`, { toOrderId: to.orderId, toOrderLineId: to.lineId, quantity, reason: "재배분", actedAt: "2026-03-05T08:00:00.000Z" });
+
+    // 직원: 다른 고객의 주문으로는 403(명세 선언·ErrorBody 포함), 같은 주문 안에서는 허용
+    const denied = await move(STAFF, second, 1);
+    expect(denied.status, JSON.stringify(denied.body)).toBe(403);
+    const ajv = new Ajv2020({ strict: false, allErrors: true });
+    const ops = await loadOperations();
+    expect(ajv.validate(ops.get("POST /v1/tenants/{tenantId}/allocations/{allocationId}/reallocations")!.responses["403"].content["application/json"].schema, denied.body), ajv.errorsText()).toBe(true);
+    expect((await move(STAFF, first, 1)).status).toBe(201);
+
+    // Owner는 다른 고객의 주문으로도 옮긴다
+    expect((await move(OWNER, second, 1)).status).toBe(201);
+  });
+});
+
