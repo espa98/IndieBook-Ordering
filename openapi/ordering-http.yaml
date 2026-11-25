@@ -1993,6 +1993,42 @@ paths:
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/invitations/accept:
+    post:
+      tags: [staff]
+      operationId: acceptInvitation
+      summary: acceptInvitation
+      description: 서점에 속하기 전의 계정이 초대를 수락한다. 이메일은 본문이 아니라 토큰의 최상위 `email` claim에서만 가져온다.
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                token: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/suppliers:
     parameters:
       - $ref: "ordering.yaml#/components/parameters/TenantId"

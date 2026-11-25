@@ -24,9 +24,11 @@ const app = createApp({
   pool: { connect: () => Promise.reject(new Error("no database in this test")) } as never,
   jwt: { keys: [{ kid: "k1", alg: "HS256", key: new TextEncoder().encode("x".repeat(32)) as never }], audience: "authenticated" } as never,
 });
+/** 서점 범위 경로는 `/v1/tenants/{tenantId}`, 계정 범위 경로는 `/v1`로 시작한다 */
+const prefix = (r: { scope: "tenant" | "account" }) => (r.scope === "account" ? "/v1" : BASE);
 /** 서버 경로표를 명세와 같은 표기로 바꾼다: `(?<orderId>[^/]+)` → `{orderId}` */
 const served = () =>
-  app.routes.map((r) => ({ ...r, key: `${r.method} ${BASE}${r.template}` }));
+  app.routes.map((r) => ({ ...r, key: `${r.method} ${prefix(r)}${r.template}` }));
 
 describe("openapi/ordering-http.yaml: 서버 경로표와 명세의 드리프트 방지", () => {
   it("유효한 OpenAPI 3.1 문서이다 (참조 해석 포함)", async () => {
@@ -62,7 +64,7 @@ describe("openapi/ordering-http.yaml: 서버 경로표와 명세의 드리프트
     const spec = (await SwaggerParser.dereference(HTTP_SPEC)) as unknown as Json;
     const ajv = new Ajv2020({ strict: false, allErrors: true });
     for (const route of served()) {
-      const path = `${BASE}${route.template}`.replace(/\{[^}]+\}/g, "0a000000-0000-4000-8000-000000000001");
+      const path = `${prefix(route)}${route.template}`.replace(/\{[^}]+\}/g, "0a000000-0000-4000-8000-000000000001");
       const response = await app({ method: route.method, path, query: new URLSearchParams(), headers: {}, rawBody: undefined });
       expect(response.status, route.key).toBe(401);
       const declared = Object.entries<Json>(spec.paths).flatMap(([p, item]) => (item[route.method.toLowerCase()] && `${route.method} ${p}` === route.key ? [item[route.method.toLowerCase()]] : []))[0];

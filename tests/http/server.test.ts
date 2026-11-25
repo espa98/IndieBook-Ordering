@@ -955,3 +955,27 @@ describe("HTTP 서버: 결제 현황 조회 경로", () => {
     expect((await call(path, { sub: "33333333-0000-4000-8000-0000000000ff" })).status).toBe(403);
   });
 });
+
+describe("HTTP 서버: 초대 수락 (서점에 속하기 전의 계정)", () => {
+  it("토큰과 JWT의 이메일 claim이 맞는 계정만 멤버가 되고, 이메일 claim이 없거나 다르거나 본문으로 주장하면 거부된다", async () => {
+    const NEW = "44444444-0000-4000-8000-0000000000a1";
+    const withEmail = (sub: string, email?: string) => ({ authorization: `Bearer ${token(sub, email === undefined ? {} : { email })}` });
+    const expiresAt = new Date(Date.now() + 7 * 86_400_000).toISOString();
+    const invited = await call(`/v1/tenants/${T_A}/staff-invitations`, { method: "POST", sub: OWNER_A, body: { email: "joiner@http.test", expiresAt } });
+    const secret = invited.json.data.token as string;
+    const accept = "/v1/invitations/accept";
+
+    expect((await call(accept, { method: "POST", sub: null, body: { token: secret } })).status).toBe(401);
+    expect((await call(accept, { method: "POST", headers: withEmail(NEW, "joiner@http.test"), key: null, body: { token: secret } })).status).toBe(400); // Idempotency-Key 필요
+    expect((await call(accept, { method: "POST", headers: withEmail(NEW, "joiner@http.test"), body: { token: secret, email: "joiner@http.test" } })).status).toBe(400); // 이메일을 본문으로 주장
+    expect((await call(accept, { method: "POST", headers: withEmail(NEW), body: { token: secret } })).status).toBe(403); // 이메일 claim 없음
+    expect((await call(accept, { method: "POST", headers: withEmail(NEW, "other@http.test"), body: { token: secret } })).status).toBe(403);
+    expect((await call(orders(), { sub: NEW })).status).toBe(403); // 아직 멤버가 아니다
+
+    const ok = await call(accept, { method: "POST", headers: withEmail(NEW, "Joiner@Http.Test"), body: { token: secret } });
+    expect(ok.status).toBe(201);
+    expect(ok.json.data).toMatchObject({ userId: NEW, tenantId: T_A, role: "STAFF", status: "ACTIVE" });
+    expect((await call(orders(), { sub: NEW })).status).toBe(200);
+    expect((await call(accept, { method: "POST", headers: withEmail("44444444-0000-4000-8000-0000000000a2", "joiner@http.test"), body: { token: secret } })).status).toBe(403); // 재사용
+  });
+});

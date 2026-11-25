@@ -42,6 +42,8 @@ type Ctx = {
   query: URLSearchParams;
   body: Record<string, unknown>;
   userId: string;
+  /** 인증 제공자가 토큰에 담은 최상위 `email` claim. `user_metadata`는 사용자가 고칠 수 있어 쓰지 않는다 */
+  email: string | undefined;
   idempotencyKey: string;
 };
 type Route = {
@@ -54,21 +56,31 @@ type Route = {
   /** 허용하는 쿼리 파라미터 */
   queryFields?: readonly string[];
   success: number;
+  /** `account`: 서점에 속하기 전의 계정 업무(`/v1/...`). 기본은 서점 범위(`/v1/tenants/{tenantId}/...`) */
+  scope: "tenant" | "account";
   run: (ctx: Ctx) => Promise<unknown>;
 };
 
 const T = "/v1/tenants/(?<tenantId>[^/]+)";
-const route = (method: Route["method"], path: string, spec: Omit<Route, "method" | "pattern" | "template">): Route => ({
+const route = (method: Route["method"], path: string, spec: Omit<Route, "method" | "pattern" | "template" | "scope">): Route => ({
   method,
   pattern: new RegExp(`^${T}${path}$`),
   template: path.replace(/\(\?<(\w+)>[^)]*\)/g, "{$1}"),
+  scope: "tenant",
+  ...spec,
+});
+const accountRoute = (method: Route["method"], path: string, spec: Omit<Route, "method" | "pattern" | "template" | "scope">): Route => ({
+  method,
+  pattern: new RegExp(`^/v1${path}$`),
+  template: path,
+  scope: "account",
   ...spec,
 });
 
 const validation = (message: string) => new AppError("VALIDATION_ERROR", message);
 
 /** 서버가 제공하는 경로의 공개 정보(명세 대조용) */
-export type RouteInfo = { method: "GET" | "POST"; template: string; fields?: readonly string[]; queryFields?: readonly string[]; success: number };
+export type RouteInfo = { method: "GET" | "POST"; scope: "tenant" | "account"; template: string; fields?: readonly string[]; queryFields?: readonly string[]; success: number };
 
 export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppResponse>) & { routes: RouteInfo[] } {
   const orders = createPgOrderApi({ pool: deps.pool });
@@ -286,6 +298,15 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       fields: ["outcome", "note", "resultAt"],
       run: (c) => notifications.recordNotificationResult(actor(c), merge(c, { tenantId: t(c), attemptId: c.params.attemptId!, idempotencyKey: c.idempotencyKey })),
     }),
+    accountRoute("POST", "/invitations/accept", {
+      success: 201,
+      fields: ["token"],
+      // 이메일은 본문이 아니라 검증된 토큰에서만 가져온다. 이메일 claim이 없으면 초대와 대조할 수 없으므로 거부한다
+      run: (c) => {
+        if (typeof c.email !== "string" || c.email === "") throw new AppError("FORBIDDEN");
+        return staffAdmin.acceptInvitation({ userId: c.userId, email: c.email }, { token: c.body.token as never, idempotencyKey: c.idempotencyKey });
+      },
+    }),
     route("GET", "/suppliers", {
       success: 200,
       run: (c) => reads.listSuppliers(actor(c), { tenantId: t(c) }),
@@ -484,10 +505,11 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
     }),
   ];
 
-  function authenticate(request: AppRequest): string {
+  function authenticate(request: AppRequest): { userId: string; email: string | undefined } {
     const match = /^Bearer ([^\s]+)$/i.exec(request.headers.authorization ?? "");
     if (!match) throw new AppError("UNAUTHENTICATED");
-    return verifyJwt(match[1]!, deps.jwt).sub;
+    const claims = verifyJwt(match[1]!, deps.jwt);
+    return { userId: claims.sub, email: typeof claims.email === "string" ? claims.email : undefined };
   }
 
   function parseBody(request: AppRequest, fields: readonly string[]): Record<string, unknown> {
@@ -519,7 +541,7 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       if (!request.path.startsWith("/v1/")) throw new AppError("NOT_FOUND");
 
       // 인증이 가장 먼저다. 존재하는 경로와 없는 경로가 같은 401을 낸다
-      const userId = authenticate(request);
+      const { userId, email } = authenticate(request);
 
       const matches = routes.flatMap((r) => {
         const m = r.pattern.exec(request.path);
@@ -547,7 +569,7 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
         }
         body = parseBody(request, hit.r.fields ?? []);
       }
-      const data = await hit.r.run({ params: hit.params, query, body, userId, idempotencyKey });
+      const data = await hit.r.run({ params: hit.params, query, body, userId, email, idempotencyKey });
       return { status: hit.r.success, body: { data } };
     } catch (error) {
       if (error instanceof HttpError) return { status: error.status, body: errorBody(error.code, error.message) };
@@ -562,7 +584,7 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       return { status: response.status, body: response.body };
     }
   };
-  const info: RouteInfo[] = routes.map(({ method, template, fields, queryFields, success }) => ({ method, template, ...(fields ? { fields } : {}), ...(queryFields ? { queryFields } : {}), success }));
+  const info: RouteInfo[] = routes.map(({ method, scope, template, fields, queryFields, success }) => ({ method, scope, template, ...(fields ? { fields } : {}), ...(queryFields ? { queryFields } : {}), success }));
   return Object.assign(handler, { routes: info });
 }
 

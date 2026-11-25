@@ -1,7 +1,8 @@
 import type { PoolClient } from "pg";
+import { acceptInvitation } from "../auth/acceptInvitation";
 import { authorizedActions } from "../auth/authorizedActions";
 import type { Membership } from "../auth/authorizeTenantAccess";
-import type { InvitationEvent, InviteStaffRequest, StaffInvitation } from "../auth/inviteStaff";
+import { hashInvitationToken, type InvitationEvent, type InviteStaffRequest, type StaffInvitation } from "../auth/inviteStaff";
 import type { RevokeInvitationRequest } from "../auth/revokeInvitation";
 import type { MembershipChange, SetMembershipStatusRequest } from "../auth/setMembershipStatus";
 import { AppError } from "../errors/AppError";
@@ -164,7 +165,36 @@ export function createPgStaffApi(deps: { pool: PoolLike }) {
       return result;
     });
 
+  /** 계정(사용자 ID와 인증 제공자가 확인한 이메일)이 초대를 수락한다. 수락 시점에는 서점을 모르므로 토큰 해시로 초대를 찾는다.
+   * 멱등 기록 대신 사건 기록으로 재시도를 알아본다: 같은 사용자가 이미 수락한 초대는 같은 멤버십을 돌려준다. */
+  const acceptOnce = (actor: Actor & { email: string }, request: { token: string; idempotencyKey: string }) =>
+    inTransaction(deps.pool, "service_role", actor.userId, async (client) => {
+      const tokenHash = hashInvitationToken(String(request.token));
+      const row = (await client.query("select * from public.ordering_staff_invitations where token_hash = $1", [tokenHash])).rows[0];
+      if (row) await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`inv:${row.tenant_id}:${row.email}`]);
+      const invitations = row ? [toInvitation(row)] : [];
+      const events = row ? (await client.query("select * from public.ordering_invitation_events where tenant_id = $1 and invitation_id = $2", [row.tenant_id, row.id])).rows.map(toEvent) : [];
+      const memberships: Membership[] = row ? await loadMembership(client, actor.userId, row.tenant_id) : [];
+      const replay = events.find((e) => e.kind === "ACCEPTED" && e.actorId === actor.userId);
+      if (replay && memberships[0] && typeof actor.email === "string" && actor.email.trim().toLowerCase() === row.email) return memberships[0];
+      const savedMemberships: Membership[] = [];
+      const savedEvents: InvitationEvent[] = [];
+      const membership = acceptInvitation(
+        {
+          invitations: { findByTokenHash: (hash) => invitations.find((i) => i.tokenHash === hash) },
+          invitationEvents: { list: () => events, save: (e) => void savedEvents.push(e) },
+          memberships: { find: (u, t) => memberships.find((m) => m.userId === u && m.tenantId === t), save: (m) => void savedMemberships.push(m) },
+          idempotency: new Map(),
+        },
+        { token: request.token, userId: actor.userId, verifiedEmail: actor.email, idempotencyKey: request.idempotencyKey },
+      );
+      for (const m of savedMemberships) await client.query("insert into public.ordering_members (tenant_id, user_id, role, active) values ($1, $2, $3, $4)", [m.tenantId, m.userId, m.role, m.status === "ACTIVE"]);
+      for (const e of savedEvents) await client.query("insert into public.ordering_invitation_events (id, tenant_id, invitation_id, kind, actor_id, at) values ($1, $2, $3, $4, $5, $6)", [e.id, e.tenantId, e.invitationId, e.kind, e.actorId, e.at]);
+      return membership;
+    });
+
   return {
+    acceptInvitation: (actor: Actor & { email: string }, request: { token: string; idempotencyKey: string }) => withRetry(() => acceptOnce(actor, request)),
     inviteStaff: (actor: Actor, request: InviteStaffBody) => withRetry(() => inviteOnce(actor, request)),
     revokeInvitation: (actor: Actor, request: RevokeInvitationBody) => withRetry(() => revokeOnce(actor, request)),
     setMembershipStatus: (actor: Actor, request: SetMembershipStatusBody) => withRetry(() => statusOnce(actor, request)),

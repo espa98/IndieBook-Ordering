@@ -151,3 +151,7 @@
 - 구현이 안 된 기능 목록은 `testing/test_matrix.csv`와 `testing/acceptance_report.md`를 본다.
 - 기술적 차단 조건(T1~T10)은 `release/go_no_go.md` §1을 본다.
 - `implementation/05_orders_results.md`는 06~09단계 변경을 아직 반영하지 않았다(문서 지연). 이 문서의 I01~I05는 그 보고서를 근거로 했다.
+
+## 부록. E3 후속 기록 (2026-11-25)
+
+초대 수락(`POST /v1/invitations/accept`)은 이메일을 **검증된 JWT의 최상위 `email` claim**에서만 가져온다(본문·`user_metadata` 불신). Supabase는 토큰에 이메일 인증 여부 claim을 싣지 않으므로 **Auth 프로젝트의 이메일 확인(Confirm email) 활성화가 배포 전제**다. 다르게 하길 원하면(예: 별도 인증 여부 claim 요구) 알려 달라.

@@ -151,3 +151,47 @@ describe("직원 비활성화·복구 (Postgres 영속화)", () => {
     expect(await codeOf(() => setStatus(lastOwner, "INACTIVE", { userId: lastOwner }))).toBe("BUSINESS_INVARIANT");
   });
 });
+
+describe("초대 수락 (Postgres 영속화)", () => {
+  const NEW_USER = "44444444-0000-4000-8000-000000000001";
+  const accept = (token: string, actor: { userId: string; email: string } = { userId: NEW_USER, email: "joiner@shop.test" }) =>
+    api().acceptInvitation(actor, { token, idempotencyKey: key() });
+
+  it("토큰과 이메일이 맞는 계정만 활성 Staff가 되고, 틀린 토큰·다른 이메일·재사용·철회·만료는 이유를 알 수 없게 같은 FORBIDDEN이다", async () => {
+    const { invitation, token } = await invite("joiner@shop.test");
+
+    expect(await codeOf(() => accept("x".repeat(43)))).toBe("FORBIDDEN"); // 틀린 토큰
+    expect(await codeOf(() => accept(token, { userId: NEW_USER, email: "other@shop.test" }))).toBe("FORBIDDEN"); // 다른 이메일
+    expect(await rows("select 1 from public.ordering_members where user_id = $1", [NEW_USER])).toEqual([]); // 거부는 아무것도 남기지 않는다
+
+    expect(await accept(token, { userId: NEW_USER, email: " Joiner@Shop.Test " })).toMatchObject({ userId: NEW_USER, tenantId: T_A, role: "STAFF", status: "ACTIVE" });
+    expect((await rows("select role, active from public.ordering_members where tenant_id = $1 and user_id = $2", [T_A, NEW_USER]))[0]).toEqual({ role: "STAFF", active: true });
+    expect((await rows("select kind, actor_id from public.ordering_invitation_events where invitation_id = $1", [invitation.id]))[0]).toEqual({ kind: "ACCEPTED", actor_id: NEW_USER });
+
+    expect(await codeOf(() => accept(token, { userId: "44444444-0000-4000-8000-000000000002", email: "joiner@shop.test" }))).toBe("FORBIDDEN"); // 재사용
+
+    const revoked = await invite("revoked@shop.test");
+    await revoke(revoked.invitation.id);
+    expect(await codeOf(() => accept(revoked.token, { userId: "44444444-0000-4000-8000-000000000003", email: "revoked@shop.test" }))).toBe("FORBIDDEN");
+
+    const expiring = await invite("expired@shop.test", owner, new Date(Date.now() + 1500).toISOString());
+    await new Promise((r) => setTimeout(r, 1700));
+    expect(await codeOf(() => accept(expiring.token, { userId: "44444444-0000-4000-8000-000000000004", email: "expired@shop.test" }))).toBe("FORBIDDEN");
+  });
+
+  it("같은 토큰을 두 계정이 동시에 수락해도 하나만 멤버가 되고, 이미 수락한 계정의 재시도는 같은 멤버십을 돌려주며, 이미 멤버인 계정은 거부된다", async () => {
+    const { invitation, token } = await invite("race@shop.test");
+    const a = { userId: "44444444-0000-4000-8000-000000000011", email: "race@shop.test" };
+    const b = { userId: "44444444-0000-4000-8000-000000000012", email: "race@shop.test" };
+    const results = await Promise.allSettled([accept(token, a), accept(token, b)]);
+    expect(outcomes(results)).toEqual(["FORBIDDEN", "OK"]);
+    expect((await rows("select count(*)::int as n from public.ordering_invitation_events where invitation_id = $1", [invitation.id]))[0].n).toBe(1);
+    const winner = results[0]!.status === "fulfilled" ? a : b;
+    expect((await rows("select count(*)::int as n from public.ordering_members where user_id = any($1::uuid[])", [[a.userId, b.userId]]))[0].n).toBe(1);
+
+    expect(await accept(token, winner)).toMatchObject({ userId: winner.userId, tenantId: T_A, status: "ACTIVE" }); // 재시도
+
+    const existing = await invite("staff-b@shop.test");
+    expect(await codeOf(() => accept(existing.token, { userId: STAFF_B, email: "staff-b@shop.test" }))).toBe("BUSINESS_INVARIANT"); // 이미 멤버
+  });
+});
