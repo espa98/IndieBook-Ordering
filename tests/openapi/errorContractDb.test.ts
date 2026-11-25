@@ -18,7 +18,6 @@ const OWNER = "11111111-0000-4000-8000-000000000001";
 const STRANGER = "33333333-0000-4000-8000-000000000001";
 const MISSING = "0a000000-0000-4000-8000-0000000000ff";
 const SPECS = ["../../openapi/ordering.yaml", "../../openapi/ordering-http.yaml"].map((p) => fileURLToPath(new URL(p, import.meta.url)));
-const ORDER_ROUTES = /^(GET|POST) \/v1\/tenants\/\{tenantId\}\/orders(\/\{orderId\}(\/confirm)?)?$/;
 
 type Json = Record<string, any>;
 let db: IsolatedPostgres;
@@ -85,7 +84,7 @@ async function check(routes: ReturnType<typeof tenantRoutes>, sub: string, idFil
   const ops = await loadOperations();
   const ajv = new Ajv2020({ strict: false, allErrors: true });
   const problems: string[] = [];
-  for (const r of routes.filter((x) => !ORDER_ROUTES.test(specKey(x)))) {
+  for (const r of routes) {
     const response = await app(request(r, sub, idFill, sampleBody(ops.get(specKey(r)))));
     const key = specKey(r);
     if (response.status !== expected) {

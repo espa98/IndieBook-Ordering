@@ -35,8 +35,6 @@ async function loadOperations() {
   }
   return ops;
 }
-/** 주문 4개 경로는 `ordering.yaml`(도메인 계약 테스트)이 기술한다. 그 테스트는 도메인 API를 동기로 호출해 HTTP 계층 오류(405·415·쿼리 400)를 만들 수 없어 여기서 제외한다 */
-const ORDER_ROUTES = /^(GET|POST) \/v1\/tenants\/\{tenantId\}\/orders(\/\{orderId\}(\/confirm)?)?$/;
 const specKey = (r: { method: string; scope: "tenant" | "account"; template: string }) => `${r.method} ${r.scope === "account" ? "/v1" : "/v1/tenants/{tenantId}"}${r.template}`;
 
 type Case = { name: string; applies: (r: (typeof app.routes)[number]) => boolean; expected: number; request: (r: (typeof app.routes)[number]) => Parameters<typeof app>[0] };
@@ -66,7 +64,7 @@ describe("오류 응답 계약: DB 없이 판정되는 공통 오류", () => {
     it(`${c.name}: 모든 해당 경로에서 그 상태이고, 명세가 그 상태를 선언하며, 본문이 ErrorBody를 만족한다`, async () => {
       const ops = await loadOperations();
       const ajv = new Ajv2020({ strict: false, allErrors: true });
-      const routes = app.routes.filter(c.applies).filter((r) => !ORDER_ROUTES.test(specKey(r)));
+      const routes = app.routes.filter(c.applies);
       expect(routes.length).toBeGreaterThan(0);
       const problems: string[] = [];
       for (const r of routes) {

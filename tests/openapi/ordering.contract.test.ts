@@ -8,6 +8,8 @@ import { createOrderApi } from "../../src/order/orderApi";
 import { createIdempotencyStore } from "../../src/idempotency/executeIdempotent";
 import { createInMemoryOrderRepository } from "../helpers/inMemoryOrderRepository";
 import { createInMemoryMembershipRepository } from "../helpers/inMemoryMembershipRepository";
+import { createApp } from "../../src/http/app";
+import { signHs256 } from "../helpers/jwtSign";
 
 const SPEC_PATH = fileURLToPath(new URL("../../openapi/ordering.yaml", import.meta.url));
 const BASE = "/v1/tenants/{tenantId}";
@@ -84,7 +86,8 @@ type Scenario = {
   method: string;
   path: string;
   status: number;
-  run: () => { status: number; body: unknown };
+  /** 도메인 API를 동기로 호출하거나, HTTP 계층 오류(405·415 등)는 앱을 비동기로 호출한다 */
+  run: () => { status: number; body: unknown } | Promise<{ status: number; body: unknown }>;
 };
 
 const O = `${BASE}/orders`;
@@ -99,6 +102,33 @@ const confirmReq = (orderId: string, extra: Json = {}) => ({
   idempotencyKey: "c-1",
   ...extra,
 });
+
+/**
+ * HTTP 계층에서만 나오는 오류(405·415·쿼리 400)는 도메인 API로 만들 수 없어 앱을 직접 호출한다.
+ * DB에 접속하려 하면 즉시 실패하는 풀을 쓰므로, 요청이 DB까지 갔다면 500으로 드러난다.
+ */
+const HTTP_SECRET = "order-contract-http-secret-0123456789abcdef";
+const SOME_ID = "0a000000-0000-4000-8000-000000000001";
+const httpApp = createApp({
+  pool: { connect: () => Promise.reject(new Error("no database in this test")) } as never,
+  jwt: { keys: [{ kid: "k1", alg: "HS256", key: HTTP_SECRET }], audience: "authenticated" },
+});
+const httpBearer = () => {
+  const now = Math.floor(Date.now() / 1000);
+  return `Bearer ${signHs256({ sub: SOME_ID, aud: "authenticated", role: "authenticated", exp: now + 3600, iat: now }, HTTP_SECRET, { kid: "k1" })}`;
+};
+async function callHttp(options: { method: string; path: string; query?: string; headers?: Record<string, string>; rawBody?: string }) {
+  const response = await httpApp({
+    method: options.method as "GET",
+    path: options.path.replace("{tenantId}", SOME_ID).replace("{orderId}", SOME_ID),
+    query: new URLSearchParams(options.query ?? ""),
+    headers: { authorization: httpBearer(), ...(options.headers ?? {}) },
+    rawBody: options.rawBody,
+  });
+  return { status: response.status, body: response.body };
+}
+const wrongMethod = (path: string) => () => callHttp({ method: "DELETE", path });
+const notJson = (path: string) => () => callHttp({ method: "POST", path, headers: { "idempotency-key": "k-1", "content-type": "text/plain" }, rawBody: "{}" });
 
 const scenarios: Scenario[] = [
   // GET /orders
@@ -126,13 +156,21 @@ const scenarios: Scenario[] = [
   { label: "IDEMPOTENCY_CONFLICT", method: "post", path: CONFIRM, status: 409, run: () => { const { api, owner } = setup(); const o = api.createOrder(owner, { tenantId: "tenant-a", idempotencyKey: "k", lines }); api.confirmOrder(owner, confirmReq(o.id)); return handle(() => api.confirmOrder(owner, confirmReq(o.id, { expectedVersion: 2 })), guard); } },
   { label: "재확정(BUSINESS_INVARIANT)", method: "post", path: CONFIRM, status: 422, run: () => { const { api, owner } = setup(); const o = api.createOrder(owner, { tenantId: "tenant-a", idempotencyKey: "k", lines }); api.confirmOrder(owner, confirmReq(o.id)); return handle(() => api.confirmOrder(owner, confirmReq(o.id, { expectedVersion: 2, idempotencyKey: "c-2" })), guard); } },
   { label: "저장소 장애", method: "post", path: CONFIRM, status: 500, run: () => handle(() => brokenApi().confirmOrder({ userId: "owner-a" }, confirmReq("x")), guard) },
+  // HTTP 계층 오류(DB 없이 판정): 허용되지 않는 메서드, 잘못된 Content-Type, 알 수 없는 쿼리
+  { label: "허용되지 않는 메서드", method: "get", path: O, status: 405, run: wrongMethod(O) },
+  { label: "허용되지 않는 메서드", method: "post", path: O, status: 405, run: wrongMethod(O) },
+  { label: "Content-Type이 JSON이 아님", method: "post", path: O, status: 415, run: notJson(O) },
+  { label: "알 수 없는 쿼리", method: "get", path: OID, status: 400, run: () => callHttp({ method: "GET", path: OID, query: "__unknown__=1" }) },
+  { label: "허용되지 않는 메서드", method: "get", path: OID, status: 405, run: wrongMethod(OID) },
+  { label: "허용되지 않는 메서드", method: "post", path: CONFIRM, status: 405, run: wrongMethod(CONFIRM) },
+  { label: "Content-Type이 JSON이 아님", method: "post", path: CONFIRM, status: 415, run: notJson(CONFIRM) },
 ];
 
 describe("오류 응답도 스키마를 만족하고, 스펙이 선언한 모든 오류 응답을 검증한다", () => {
   it.each(scenarios.map((s) => [`${s.method.toUpperCase()} ${s.path} → ${s.status} (${s.label})`, s] as const))(
     "%s",
-    (_name, s) => {
-      const response = s.run();
+    async (_name, s) => {
+      const response = await s.run();
 
       expect(response.status).toBe(s.status);
       expectConforms(s.path, s.method, response);
