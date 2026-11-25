@@ -149,6 +149,11 @@ describe("직원 비활성화·복구 (Postgres 영속화)", () => {
 
     const lastOwner = (await rows("select user_id from public.ordering_members where tenant_id = $1 and role = 'OWNER' and active", [T_A]))[0].user_id as string;
     expect(await codeOf(() => setStatus(lastOwner, "INACTIVE", { userId: lastOwner }))).toBe("BUSINESS_INVARIANT");
+
+    // 정리: 경쟁에서 누가 비활성화될지는 정해져 있지 않으므로, 뒤의 테스트가 `owner`(OWNER_A)를 쓸 수 있게 둘 다 활성으로 되돌린다
+    const demoted = lastOwner === OWNER_A ? OWNER_A2 : OWNER_A;
+    await setStatus(demoted, "ACTIVE", { userId: lastOwner });
+    expect((await rows("select count(*)::int as n from public.ordering_members where tenant_id = $1 and role = 'OWNER' and active", [T_A]))[0].n).toBe(2);
   });
 });
 
