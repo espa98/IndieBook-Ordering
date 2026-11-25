@@ -8,8 +8,8 @@ info:
     이 파일은 `tests/openapi/ordering.http.test.ts`가 서버 경로표와 대조한다: (메서드, 경로) 집합, 성공 상태,
     본문 허용 필드(`additionalProperties: false`), 쿼리 파라미터, `Idempotency-Key` 필수 여부가 어긋나면 테스트가 실패한다.
 
-    **이 명세가 기술하지 않는 것(미구현·미검증):** 요청 필드의 타입·필수 여부(도메인이 400으로 검증하며 필드별 스키마는
-    아직 옮기지 않았다), 응답 `data`의 필드별 스키마(`data`는 도메인 객체이며 자유 형식으로 둔다), 경로별 오류 응답의 실제 발생
+    **이 명세가 기술하지 않는 것(미구현·미검증):** 요청 필드의 필수 여부와 열거값(`kind`·`outcome` 등은 `type: string`만 선언한다. 타입은
+    선언했고 도메인 검증이 400으로 거부한다), 응답 `data`의 필드별 스키마(`data`는 도메인 객체이며 자유 형식으로 둔다), 경로별 오류 응답의 실제 발생
     조건(공통 오류 응답을 선언만 하고 401만 계약 테스트로 확인한다).
 
     **공통 규칙(`ordering.yaml`과 같다):** Bearer JWT, 모든 쓰기(POST)는 `Idempotency-Key` 필수, 경로 식별자는 UUID가 아니면 404
@@ -49,8 +49,8 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                quantity: {}
-                reservedAt: {}
+                quantity: { type: integer }
+                reservedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -95,8 +95,8 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                quantity: {}
-                actedAt: {}
+                quantity: { type: integer }
+                actedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -141,10 +141,10 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                direction: {}
-                quantity: {}
-                reason: {}
-                actedAt: {}
+                direction: { type: string, enum: [IN, OUT] }
+                quantity: { type: integer }
+                reason: { type: string }
+                actedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -251,9 +251,9 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                quantity: {}
-                reason: {}
-                releasedAt: {}
+                quantity: { type: integer }
+                reason: { type: string }
+                releasedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -298,8 +298,8 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                reason: {}
-                voidedAt: {}
+                reason: { type: string }
+                voidedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -344,9 +344,9 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                orderLineId: {}
-                sources: {}
-                receivedAt: {}
+                orderLineId: { type: string, format: uuid }
+                sources: { type: array, items: { type: object } }
+                receivedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -397,12 +397,12 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                quantity: {}
-                restorations: {}
-                reason: {}
-                evidence: {}
-                physicalReturnConfirmed: {}
-                correctedAt: {}
+                quantity: { type: integer }
+                restorations: { type: array, items: { type: object } }
+                reason: { type: string }
+                evidence: { type: string }
+                physicalReturnConfirmed: { type: boolean }
+                correctedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -447,10 +447,10 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                reducedKrw: {}
-                reason: {}
-                evidence: {}
-                correctedAt: {}
+                reducedKrw: { type: string }
+                reason: { type: string }
+                evidence: { type: string }
+                correctedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -495,11 +495,11 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                orderLineId: {}
-                quantity: {}
-                reason: {}
-                expectedVersion: {}
-                requestedAt: {}
+                orderLineId: { type: string, format: uuid }
+                quantity: { type: integer }
+                reason: { type: string }
+                expectedVersion: { type: integer }
+                requestedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -544,8 +544,8 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                decision: {}
-                decidedAt: {}
+                decision: { type: string }
+                decidedAt: { type: string, format: date-time }
       responses:
         "200":
           description: 성공(`data`는 도메인 객체)
@@ -590,7 +590,7 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                appliedAt: {}
+                appliedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -635,8 +635,8 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                expectedVersion: {}
-                requestedAt: {}
+                expectedVersion: { type: integer }
+                requestedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -681,8 +681,8 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                quantity: {}
-                actedAt: {}
+                quantity: { type: integer }
+                actedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -727,8 +727,8 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                quantity: {}
-                requestedAt: {}
+                quantity: { type: integer }
+                requestedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -773,10 +773,10 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                acceptedQuantity: {}
-                rejectedQuantity: {}
-                evidence: {}
-                repliedAt: {}
+                acceptedQuantity: { type: integer }
+                rejectedQuantity: { type: integer }
+                evidence: { type: string }
+                repliedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -821,9 +821,9 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                quantity: {}
-                dispatchedAt: {}
-                referenceNumber: {}
+                quantity: { type: integer }
+                dispatchedAt: { type: string, format: date-time }
+                referenceNumber: { type: string }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -868,9 +868,9 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                quantity: {}
-                evidence: {}
-                confirmedAt: {}
+                quantity: { type: integer }
+                evidence: { type: string }
+                confirmedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -915,10 +915,10 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                quantity: {}
-                kind: {}
-                evidence: {}
-                reportedAt: {}
+                quantity: { type: integer }
+                kind: { type: string }
+                evidence: { type: string }
+                reportedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -963,9 +963,9 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                quantity: {}
-                retryReason: {}
-                requestedAt: {}
+                quantity: { type: integer }
+                retryReason: { type: string }
+                requestedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -1010,10 +1010,10 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                outcome: {}
-                quantity: {}
-                evidence: {}
-                resolvedAt: {}
+                outcome: { type: string }
+                quantity: { type: integer }
+                evidence: { type: string }
+                resolvedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -1079,10 +1079,10 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                method: {}
-                amountKrw: {}
-                externalReference: {}
-                paidAt: {}
+                method: { type: string }
+                amountKrw: { type: string }
+                externalReference: { type: string }
+                paidAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -1127,8 +1127,8 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                evidence: {}
-                confirmedAt: {}
+                evidence: { type: string }
+                confirmedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -1173,7 +1173,7 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                openedAt: {}
+                openedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -1218,10 +1218,10 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                paymentId: {}
-                amountKrw: {}
-                evidence: {}
-                requestedAt: {}
+                paymentId: { type: string, format: uuid }
+                amountKrw: { type: string }
+                evidence: { type: string }
+                requestedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -1266,11 +1266,11 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                paymentId: {}
-                amountKrw: {}
-                result: {}
-                reason: {}
-                reportedAt: {}
+                paymentId: { type: string, format: uuid }
+                amountKrw: { type: string }
+                result: { type: string }
+                reason: { type: string }
+                reportedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -1315,9 +1315,9 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                outcome: {}
-                evidence: {}
-                resolvedAt: {}
+                outcome: { type: string }
+                evidence: { type: string }
+                resolvedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -1356,10 +1356,10 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                key: {}
-                body: {}
-                expectedVersion: {}
-                publishedAt: {}
+                key: { type: string }
+                body: { type: string }
+                expectedVersion: { type: integer }
+                publishedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -1427,8 +1427,8 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                mode: {}
-                createdAt: {}
+                mode: { type: string }
+                createdAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -1494,8 +1494,8 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                action: {}
-                actedAt: {}
+                action: { type: string }
+                actedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -1540,9 +1540,9 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                channel: {}
-                messageSnapshot: {}
-                attemptedAt: {}
+                channel: { type: string }
+                messageSnapshot: { type: string }
+                attemptedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -1587,7 +1587,7 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                createdAt: {}
+                createdAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -1632,9 +1632,9 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                outcome: {}
-                note: {}
-                resultAt: {}
+                outcome: { type: string }
+                note: { type: string }
+                resultAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -1747,16 +1747,16 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                source: {}
-                title: {}
-                authors: {}
-                isbn: {}
-                listPriceKrw: {}
-                externalId: {}
-                fetchedAt: {}
-                reason: {}
-                acknowledgeDuplicateOf: {}
-                registeredAt: {}
+                source: { type: string }
+                title: { type: string }
+                authors: { type: array, items: { type: string } }
+                isbn: { type: string }
+                listPriceKrw: { type: string }
+                externalId: { type: string }
+                fetchedAt: { type: string, format: date-time }
+                reason: { type: string }
+                acknowledgeDuplicateOf: { type: string, format: uuid }
+                registeredAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -1887,11 +1887,11 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                expectedVersion: {}
-                changes: {}
-                reason: {}
-                acknowledgeDuplicateOf: {}
-                changedAt: {}
+                expectedVersion: { type: integer }
+                changes: { type: object }
+                reason: { type: string }
+                acknowledgeDuplicateOf: { type: string, format: uuid }
+                changedAt: { type: string, format: date-time }
       responses:
         "200":
           description: 성공(`data`는 도메인 객체)
@@ -1930,8 +1930,8 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                email: {}
-                expiresAt: {}
+                email: { type: string }
+                expiresAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -2010,7 +2010,7 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                status: {}
+                status: { type: string }
       responses:
         "200":
           description: 성공(`data`는 도메인 객체)
@@ -2048,7 +2048,7 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                storeName: {}
+                storeName: { type: string }
       responses:
         "201":
           description: 성공(`data`는 `tenant`와 `membership`)
@@ -2084,7 +2084,7 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                token: {}
+                token: { type: string }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -2140,10 +2140,10 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                code: {}
-                name: {}
-                orderChannel: {}
-                registeredAt: {}
+                code: { type: string }
+                name: { type: string }
+                orderChannel: { type: string }
+                registeredAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -2214,10 +2214,10 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                expectedVersion: {}
-                changes: {}
-                reason: {}
-                changedAt: {}
+                expectedVersion: { type: integer }
+                changes: { type: object }
+                reason: { type: string }
+                changedAt: { type: string, format: date-time }
       responses:
         "200":
           description: 성공(`data`는 도메인 객체)
@@ -2261,9 +2261,9 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                active: {}
-                reason: {}
-                changedAt: {}
+                active: { type: boolean }
+                reason: { type: string }
+                changedAt: { type: string, format: date-time }
       responses:
         "200":
           description: 성공(`data`는 도메인 객체)
@@ -2314,8 +2314,8 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                supplierCode: {}
-                quantity: {}
+                supplierCode: { type: string }
+                quantity: { type: integer }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -2366,11 +2366,11 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                purchaseOrderId: {}
-                poLineId: {}
-                surplusPlan: {}
-                planNote: {}
-                approvedAt: {}
+                purchaseOrderId: { type: string, format: uuid }
+                poLineId: { type: string, format: uuid }
+                surplusPlan: { type: string }
+                planNote: { type: string }
+                approvedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -2415,8 +2415,8 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                reason: {}
-                releasedAt: {}
+                reason: { type: string }
+                releasedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -2495,8 +2495,8 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                supplierCode: {}
-                allocationIds: {}
+                supplierCode: { type: string }
+                allocationIds: { type: array, items: { type: string, format: uuid } }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -2568,7 +2568,7 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                expectedVersion: {}
+                expectedVersion: { type: integer }
       responses:
         "200":
           description: 성공(`data`는 도메인 객체)
@@ -2613,11 +2613,11 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                expectedVersion: {}
-                method: {}
-                deliveredAt: {}
-                referenceNumber: {}
-                fileVersion: {}
+                expectedVersion: { type: integer }
+                method: { type: string }
+                deliveredAt: { type: string, format: date-time }
+                referenceNumber: { type: string }
+                fileVersion: { type: integer }
       responses:
         "200":
           description: 성공(`data`는 도메인 객체)
@@ -2662,9 +2662,9 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                expectedVersion: {}
-                reason: {}
-                cancelledAt: {}
+                expectedVersion: { type: integer }
+                reason: { type: string }
+                cancelledAt: { type: string, format: date-time }
       responses:
         "200":
           description: 성공(`data`는 도메인 객체)
@@ -2715,8 +2715,8 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                quantity: {}
-                reason: {}
+                quantity: { type: integer }
+                reason: { type: string }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -2767,10 +2767,10 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                acceptedQuantity: {}
-                rejectedQuantity: {}
-                evidence: {}
-                repliedAt: {}
+                acceptedQuantity: { type: integer }
+                rejectedQuantity: { type: integer }
+                evidence: { type: string }
+                repliedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -2815,7 +2815,7 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                expectedVersion: {}
+                expectedVersion: { type: integer }
       responses:
         "200":
           description: 성공(`data`는 도메인 객체)
@@ -2860,13 +2860,13 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                poLineId: {}
-                kind: {}
-                quantity: {}
-                source: {}
-                eta: {}
-                evidence: {}
-                repliedAt: {}
+                poLineId: { type: string, format: uuid }
+                kind: { type: string }
+                quantity: { type: integer }
+                source: { type: string }
+                eta: { type: string, format: date }
+                evidence: { type: string }
+                repliedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -2911,11 +2911,11 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                poLineId: {}
-                normalQuantity: {}
-                damagedQuantity: {}
-                misdeliveredQuantity: {}
-                receivedAt: {}
+                poLineId: { type: string, format: uuid }
+                normalQuantity: { type: integer }
+                damagedQuantity: { type: integer }
+                misdeliveredQuantity: { type: integer }
+                receivedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -2960,11 +2960,11 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                kind: {}
-                quantity: {}
-                outcome: {}
-                evidence: {}
-                resolvedAt: {}
+                kind: { type: string }
+                quantity: { type: integer }
+                outcome: { type: string }
+                evidence: { type: string }
+                resolvedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -3009,10 +3009,10 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                decision: {}
-                quantity: {}
-                reason: {}
-                decidedAt: {}
+                decision: { type: string }
+                quantity: { type: integer }
+                reason: { type: string }
+                decidedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -3057,9 +3057,9 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                quantity: {}
-                reason: {}
-                correctedAt: {}
+                quantity: { type: integer }
+                reason: { type: string }
+                correctedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -3104,10 +3104,10 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                orderId: {}
-                orderLineId: {}
-                quantity: {}
-                allocatedAt: {}
+                orderId: { type: string, format: uuid }
+                orderLineId: { type: string, format: uuid }
+                quantity: { type: integer }
+                allocatedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -3152,9 +3152,9 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                quantity: {}
-                reason: {}
-                cancelledAt: {}
+                quantity: { type: integer }
+                reason: { type: string }
+                cancelledAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -3199,11 +3199,11 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                toOrderId: {}
-                toOrderLineId: {}
-                quantity: {}
-                reason: {}
-                actedAt: {}
+                toOrderId: { type: string, format: uuid }
+                toOrderLineId: { type: string, format: uuid }
+                quantity: { type: integer }
+                reason: { type: string }
+                actedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -3248,9 +3248,9 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                quantity: {}
-                reason: {}
-                releasedAt: {}
+                quantity: { type: integer }
+                reason: { type: string }
+                releasedAt: { type: string, format: date-time }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -3295,8 +3295,8 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                decision: {}
-                decidedAt: {}
+                decision: { type: string }
+                decidedAt: { type: string, format: date-time }
       responses:
         "200":
           description: 성공(`data`는 도메인 객체)

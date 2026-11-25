@@ -1098,3 +1098,14 @@
 | 재개와 새 결제 입력이 동시에 → 재개는 항상 성공, 주문은 열림, 재개 기록 1건, 결제는 재개 뒤에 들어간 경우에만 저장(받아진 결제 수가 결과와 일치) | 통과 |
 
 **한계:** 종결 스위퍼 인스턴스를 둘 이상 동시에 띄우는 부하 검증은 아직 하지 않았다. 실제 Supabase 풀러에서의 락 동작도 확인하지 못했다.
+
+## 58. OpenAPI 요청 필드 타입 (T8 일부, `openapi/ordering-http.yaml`)
+
+테스트 2개 추가(`tests/openapi/ordering.http.test.ts`). 주문 외 76개 경로의 요청 본문 필드 194개가 모두 `{}`(타입 없음)였다. 먼저 "모든 본문 필드는 타입을 선언한다"를 추가해 194개 위반으로 **실패함을 확인**한 뒤 타입을 채웠다.
+
+- 정수(`quantity`·`*Quantity`·`expectedVersion`·`fileVersion`), 시각(`*At`: `date-time`), 날짜(`eta`: `date`), 금액(`*Krw`: 문자열), 식별자(`*Id`·`orderLineId` 등: uuid 문자열), 불리언, 배열·객체, 그 밖의 문자열.
+- `direction`은 `IN`/`OUT` 열거로 제한했다. 나머지 열거 필드(`kind`·`outcome`·`decision`·`status`·`mode`·`method`·`source`·`result`·`channel`·`action`·`orderChannel`·`surplusPlan`)는 경로마다 값이 달라 **`type: string`만 선언**했다.
+- 이름 규칙 테스트("필드 이름 규칙과 타입이 맞는다")는 `eta`를 `date-time`으로 잘못 선언했던 것을 도메인(`recordSupplierReply`는 `YYYY-MM-DD`만 허용)과 대조해 고친 뒤 추가했다. 이 테스트 자체는 수정 뒤에 쓴 것이라 먼저 실패하는 단계가 없었다.
+
+**한계:** 타입은 필드 이름 규칙과 도메인 요청 타입 일부에서 정했고 **필드별로 전수 대조하지는 않았다**. 필수 여부(`required`)와 경로별 열거값, 객체 배열(`sources`·`restorations`·`changes`)의 내부 구조, 응답 `data` 스키마, 경로별 오류 발생 조건은 아직 없다.
+

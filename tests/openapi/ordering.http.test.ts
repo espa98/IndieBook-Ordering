@@ -60,6 +60,31 @@ describe("openapi/ordering-http.yaml: 서버 경로표와 명세의 드리프트
     }
   });
 
+  it("모든 본문 필드는 타입(type/enum/oneOf/$ref 중 하나)을 선언한다", () => {
+    const untyped: string[] = [];
+    for (const { key, op } of operations(load(HTTP_SPEC))) {
+      const props: Json = op.requestBody?.content?.["application/json"]?.schema?.properties ?? {};
+      for (const [name, schema] of Object.entries<Json>(props)) {
+        if (!("type" in schema || "enum" in schema || "oneOf" in schema || "$ref" in schema)) untyped.push(`${key} .${name}`);
+      }
+    }
+    expect(untyped).toEqual([]);
+  });
+
+  it("필드 이름 규칙과 타입이 맞는다: 수량·버전은 integer, *At은 date-time, eta는 date, *Krw는 string", () => {
+    const wrong: string[] = [];
+    for (const { key, op } of operations(load(HTTP_SPEC))) {
+      const props: Json = op.requestBody?.content?.["application/json"]?.schema?.properties ?? {};
+      for (const [name, schema] of Object.entries<Json>(props)) {
+        if (/(^quantity$|Quantity$|^expectedVersion$|^fileVersion$)/.test(name) && schema.type !== "integer") wrong.push(`${key} .${name}`);
+        if (/At$/.test(name) && (schema.type !== "string" || schema.format !== "date-time")) wrong.push(`${key} .${name}`);
+        if (name === "eta" && (schema.type !== "string" || schema.format !== "date")) wrong.push(`${key} .${name}`);
+        if (/Krw$/.test(name) && schema.type !== "string") wrong.push(`${key} .${name}`);
+      }
+    }
+    expect(wrong).toEqual([]);
+  });
+
   it("모든 경로는 인증이 없으면 같은 401이고, 그 본문은 명세의 ErrorBody를 만족한다", async () => {
     const spec = (await SwaggerParser.dereference(HTTP_SPEC)) as unknown as Json;
     const ajv = new Ajv2020({ strict: false, allErrors: true });
