@@ -888,3 +888,19 @@ describe("HTTP 서버: 조회 경로", () => {
   });
 });
 
+
+describe("HTTP 서버: 공급처 조회 경로", () => {
+  it("직원도 공급처 목록·상세를 읽고, 없는 코드·타 서점·비멤버는 거부된다", async () => {
+    const sup = `/v1/tenants/${T_A}/suppliers`;
+    const registeredAt = new Date().toISOString();
+    expect((await call(sup, { method: "POST", sub: OWNER_A, body: { code: "http-read", name: "조회 공급처", orderChannel: "EMAIL", registeredAt } })).status).toBe(201);
+
+    const list = await call(sup, { sub: STAFF_A });
+    expect(list.status).toBe(200);
+    expect(list.json.data.find((s: any) => s.code === "http-read")).toMatchObject({ name: "조회 공급처", orderChannel: "EMAIL", active: true });
+    expect((await call(`${sup}/http-read`, { sub: STAFF_A })).json.data).toMatchObject({ code: "http-read", version: 1 });
+    expect((await call(`${sup}/no-such`, { sub: STAFF_A })).status).toBe(404);
+    expect((await call(`/v1/tenants/${T_B}/suppliers/http-read`, { sub: OWNER_B })).status).toBe(404);
+    expect((await call(sup, { sub: "33333333-0000-4000-8000-0000000000ff" })).status).toBe(403);
+  });
+});

@@ -27,7 +27,7 @@ export type RegisterSupplierBody = Omit<RegisterSupplierRequest, "actorRole" | "
 export type UpdateSupplierBody = Omit<UpdateSupplierRequest, "actorRole" | "changedBy">;
 export type SetSupplierActiveBody = Omit<SetSupplierActiveRequest, "actorRole" | "changedBy">;
 
-const toSupplier = (row: any): Supplier | undefined =>
+export const toSupplier = (row: any): Supplier | undefined =>
   row
     ? {
         tenantId: row.tenant_id,

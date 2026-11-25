@@ -188,3 +188,29 @@ describe("고객 안내 조회·미수령 경고 (읽기 API)", () => {
     expect(await codeOf(() => read().longUnreceivedWarnings({ userId: EX_STAFF }, { tenantId: T_A }))).toBe("FORBIDDEN");
   });
 });
+
+describe("공급처 조회 (읽기 API)", () => {
+  it("활성 멤버는 자기 서점 공급처를 코드순으로 읽고(비활성 포함), 다른 서점 공급처는 보이지 않는다", async () => {
+    const c = await db.connect();
+    await c.query(
+      `insert into public.ordering_suppliers (tenant_id, code, active, name, order_channel) values ($1, 'zeta', true, '제타 유통', 'EMAIL'), ($1, 'alpha', false, '알파 도매', 'WEB'), ($2, 'beta', true, '다른 서점 공급처', 'PHONE')`,
+      [T_A, T_B],
+    );
+    await c.end();
+
+    const list = await read().listSuppliers(staff, { tenantId: T_A });
+    expect(list.map((s) => s.code)).toEqual(["alpha", "zeta"]);
+    expect(list[0]).toMatchObject({ tenantId: T_A, active: false, name: "알파 도매", orderChannel: "WEB", version: 1 });
+    expect(await codeOf(() => read().listSuppliers({ userId: STRANGER }, { tenantId: T_A }))).toBe("FORBIDDEN");
+    expect(await codeOf(() => read().listSuppliers({ userId: EX_STAFF }, { tenantId: T_A }))).toBe("FORBIDDEN");
+  });
+});
+
+describe("공급처 상세 (읽기 API)", () => {
+  it("공급처 상세는 같은 서점만 보이고 없는 코드·다른 서점 코드는 같은 404이다", async () => {
+    expect(await read().getSupplier(staff, { tenantId: T_A, code: "zeta" })).toMatchObject({ code: "zeta", active: true, name: "제타 유통", orderChannel: "EMAIL" });
+    expect(await codeOf(() => read().getSupplier(staff, { tenantId: T_A, code: "beta" }))).toBe("NOT_FOUND");
+    expect(await codeOf(() => read().getSupplier(staff, { tenantId: T_A, code: "nope" }))).toBe("NOT_FOUND");
+    expect(await codeOf(() => read().getSupplier({ userId: STRANGER }, { tenantId: T_A, code: "zeta" }))).toBe("FORBIDDEN");
+  });
+});

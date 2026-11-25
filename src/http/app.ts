@@ -286,6 +286,14 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       fields: ["outcome", "note", "resultAt"],
       run: (c) => notifications.recordNotificationResult(actor(c), merge(c, { tenantId: t(c), attemptId: c.params.attemptId!, idempotencyKey: c.idempotencyKey })),
     }),
+    route("GET", "/suppliers", {
+      success: 200,
+      run: (c) => reads.listSuppliers(actor(c), { tenantId: t(c) }),
+    }),
+    route("GET", "/suppliers/(?<code>[a-z0-9][a-z0-9-]{0,31})", {
+      success: 200,
+      run: (c) => reads.getSupplier(actor(c), { tenantId: t(c), code: c.params.code! }),
+    }),
     route("GET", "/books", {
       success: 200,
       queryFields: ["limit", "cursor", "isbn"],

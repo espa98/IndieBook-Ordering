@@ -7,7 +7,9 @@ import { notificationState, type NotificationStatus } from "../notification/noti
 import type { NotificationTarget } from "../notification/createNotificationTarget";
 import type { NotificationAttempt } from "../notification/recordNotificationAttempt";
 import type { NotificationResult } from "../notification/recordNotificationResult";
+import type { Supplier } from "../procurement/allocateSourcing";
 import { toBook } from "./pgCatalogApi";
+import { toSupplier } from "./pgSupplierApi";
 import { loadSecuredDeps, toAttempt, toResult, toTarget } from "./pgNotificationApi";
 import { inTransaction, isUuid, loadMembership, loadOrders, principalFor, type PoolLike } from "./pgSupport";
 
@@ -169,6 +171,19 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
           );
         }
         return warnings.sort((a, b) => b.daysElapsed - a.daysElapsed || (a.orderId < b.orderId ? -1 : 1));
+      }),
+
+    /** 비활성 공급처도 포함해 코드순으로 돌려준다 */
+    listSuppliers: (actor: Actor, request: { tenantId: string }): Promise<Supplier[]> =>
+      asMember(actor, request.tenantId, async (client) =>
+        (await client.query("select * from public.ordering_suppliers where tenant_id = $1 order by code", [request.tenantId])).rows.map((row) => toSupplier(row)!),
+      ),
+
+    getSupplier: (actor: Actor, request: { tenantId: string; code: string }): Promise<Supplier> =>
+      asMember(actor, request.tenantId, async (client) => {
+        const supplier = toSupplier((await client.query("select * from public.ordering_suppliers where tenant_id = $1 and code = $2", [request.tenantId, request.code])).rows[0]);
+        if (!supplier) throw new AppError("NOT_FOUND");
+        return supplier;
       }),
 
     listBooks: (actor: Actor, request: ListBooksRequest): Promise<{ items: Book[]; nextCursor?: string }> =>
