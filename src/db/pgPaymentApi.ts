@@ -22,6 +22,7 @@ import {
   principalFor,
   saveNewCommands,
   type PoolLike,
+  withReferenceIds,
 } from "./pgSupport";
 
 type Actor = { userId: string };
@@ -363,7 +364,7 @@ export function createPgPaymentApi(deps: { pool: PoolLike }) {
       execute(actor, request, { table: "ordering_refund_tasks", id: request.refundTaskId }, {}, (ctx) => {
         const { tenantId: _t, ...rest } = request;
         void _t;
-        return authorizedActions.reportRefundAttempt(repos(ctx), ctx.principal, rest);
+        return withReferenceIds(request, ["paymentId"], () => authorizedActions.reportRefundAttempt(repos(ctx), ctx.principal, rest));
       }),
     resolveRefundAttempt: (actor: Actor, request: ResolveRefundAttemptBody): Promise<RefundAttemptResolution> =>
       execute(actor, request, { table: "ordering_refund_attempts", id: request.attemptId }, {}, (ctx) => {
@@ -393,7 +394,7 @@ export function createPgPaymentApi(deps: { pool: PoolLike }) {
       execute(actor, request, { table: "ordering_refund_tasks", id: request.refundTaskId }, {}, (ctx) => {
         const { tenantId: _t, ...rest } = request;
         void _t;
-        return authorizedActions.requestRefund(repos(ctx), ctx.principal, rest);
+        return withReferenceIds(request, ["paymentId"], () => authorizedActions.requestRefund(repos(ctx), ctx.principal, rest));
       }),
     decideRefundRequest: (actor: Actor, request: DecideRefundRequestBody): Promise<DecideRefundRequestResult> =>
       execute(actor, request, { table: "ordering_refund_requests", id: request.requestId }, {}, (ctx) => {

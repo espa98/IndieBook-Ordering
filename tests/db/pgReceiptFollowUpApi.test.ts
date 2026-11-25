@@ -184,6 +184,22 @@ describe("배분 취소·재배정 (Postgres 영속화)", () => {
     expect(await codeOf(() => cancelAlloc(allocation.id, 1))).toBe("BUSINESS_INVARIANT"); // 해제로 잔량이 0
   });
 
+  it("재배분의 목적지 toOrderId·toOrderLineId가 uuid 형식이 아니면 조회(422)보다 먼저 VALIDATION_ERROR이고 아무것도 저장되지 않으며, uuid 형식이면 연결되지 않은 목적지는 기존대로 BUSINESS_INVARIANT이다", async () => {
+    const shared = await sentSharedPo(9, [2, 2]);
+    const receipt = await receive(shared, 4);
+    const [first, second] = shared.lines as [{ orderId: string; lineId: string }, { orderId: string; lineId: string }];
+    const allocation = await allocateTo(receipt.id, first, 2);
+    const releases = () => rows("select count(*)::int as n from public.ordering_allocation_releases where allocation_id = $1", [allocation.id]).then((r) => r[0].n as number);
+    const before = await releases();
+
+    for (const bad of ["not-a-uuid", "", 123, null]) {
+      expect(await codeOf(() => reallocate(allocation.id, { orderId: bad as never, lineId: second.lineId }, 1)), `toOrderId ${JSON.stringify(bad)}`).toBe("VALIDATION_ERROR");
+      expect(await codeOf(() => reallocate(allocation.id, { orderId: second.orderId, lineId: bad as never }, 1)), `toOrderLineId ${JSON.stringify(bad)}`).toBe("VALIDATION_ERROR");
+    }
+    expect(await codeOf(() => reallocate(allocation.id, { orderId: "0a000000-0000-4000-8000-0000000000fd", lineId: second.lineId }, 1))).toBe("BUSINESS_INVARIANT"); // 형식은 맞지만 연결되지 않은 목적지
+    expect(await releases()).toBe(before);
+  });
+
   it("같은 발주 품목에 연결된 다른 고객에게 배분을 옮기고(다른 고객은 Owner만), 해제와 새 배분이 함께 저장되며 한도·연결을 넘을 수 없다", async () => {
     const shared = await sentSharedPo(7, [2, 2]);
     const receipt = await receive(shared, 4);

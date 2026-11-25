@@ -148,6 +148,23 @@ describe("createPgPaymentApi: 결제·환급을 Postgres 영속화로 실행", (
     expect(await count("select count(*)::int as n from public.ordering_refund_requests")).toBe(before);
   });
 
+  it("환급 요청·시도의 본문 paymentId가 uuid 형식이 아니면 결제 조회(404)보다 먼저 VALIDATION_ERROR이고 아무것도 저장되지 않으며, uuid 형식이면 없는 결제는 여전히 NOT_FOUND이다", async () => {
+    const { api, payment, task } = await overpaidScene();
+    const MISSING_PAYMENT = "0a000000-0000-4000-8000-0000000000fb";
+    const requests = () => count("select count(*)::int as n from public.ordering_refund_requests");
+    const attempts = () => count("select count(*)::int as n from public.ordering_refund_attempts");
+    const [requestsBefore, attemptsBefore] = [await requests(), await attempts()];
+
+    for (const bad of ["not-a-uuid", "", 123, null]) {
+      expect(await codeOf(() => requestRefund(api, task.id, bad as never, "1000")), `요청 ${JSON.stringify(bad)}`).toBe("VALIDATION_ERROR");
+      expect(await codeOf(() => api.reportRefundAttempt(staff, { tenantId: T_A, refundTaskId: task.id, paymentId: bad as never, amountKrw: "1000", result: "FAILED", reason: "r", reportedAt: "2026-03-04T06:50:00.000Z", idempotencyKey: key() })), `시도 ${JSON.stringify(bad)}`).toBe("VALIDATION_ERROR");
+    }
+    expect(await codeOf(() => requestRefund(api, task.id, MISSING_PAYMENT, "1000"))).toBe("NOT_FOUND"); // 형식은 맞지만 없는 결제
+    expect(await requests()).toBe(requestsBefore);
+    expect(await attempts()).toBe(attemptsBefore);
+    expect(payment.id).toBeTruthy();
+  });
+
   it("해소되지 않은 UNKNOWN 환급 시도는 한도에서 예약되어 재요청이 막힌다 (TC-90)", async () => {
     const { api, order, payment, task } = await overpaidScene();
     await rows(

@@ -149,29 +149,7 @@ describe("판단 불가였던 거부 입력을 대상이 존재하는 요청으�
     expect(problems).toEqual([]);
   });
 
-  /**
-   * 알려진 불일치(정책 결정 대기): 본문의 참조 ID 필드(`orderLineId`·`paymentId`·`poLineId` 등)에 형식이 틀린 값(uuid 아님·빈 문자열·숫자·null)이나
-   * 누락을 보내면 명세는 거부하지만 서버는 400이 아니라 **404 또는 422**로 응답한다(형식 검사 없이 조회해서 "없음"으로 끝낸다).
-   * 도메인 명령은 메모리 저장소 테스트가 `"order-1"` 같은 비-uuid ID를 쓰므로 도메인에서 uuid를 강제할 수 없고,
-   * uuid 형식 확인은 PG 어댑터의 책임이다. 어댑터가 형식 오류를 400으로 응답하게 할지는 클라이언트 계약을 바꾸는 결정이라 아직 정하지 않았다.
-   * 현재 동작을 그대로 고정한다 — 고쳐지면 이 단언이 실패해 갱신을 알려 준다. (`acknowledgeDuplicateOf`는 고쳐서 표에서 뺐다.)
-   */
-  const REFERENCE_FIELD_STATUS: Record<string, Record<string, number>> = {
-    "/orders/{orderId}/cancellation-requests .orderLineId": { "uuid 아님": 404, "빈 문자열": 400, "숫자": 400, "null": 400, "누락": 400 },
-    "/orders/{orderId}/fulfillments .orderLineId": { "uuid 아님": 404, "빈 문자열": 400, "숫자": 400, "null": 400, "누락": 400 },
-    "/receipts/{receiptId}/allocations .orderId": { "uuid 아님": 422, "빈 문자열": 400, "숫자": 400, "null": 400, "누락": 400 },
-    "/receipts/{receiptId}/allocations .orderLineId": { "uuid 아님": 422, "빈 문자열": 400, "숫자": 400, "null": 400, "누락": 400 },
-    "/allocations/{allocationId}/reallocations .toOrderId": { "uuid 아님": 422, "빈 문자열": 400, "숫자": 400, "null": 400, "누락": 400 },
-    "/allocations/{allocationId}/reallocations .toOrderLineId": { "uuid 아님": 422, "빈 문자열": 400, "숫자": 400, "null": 400, "누락": 400 },
-    "/refund-tasks/{taskId}/refund-requests .paymentId": { "uuid 아님": 404, "빈 문자열": 400, "숫자": 400, "null": 400, "누락": 400 },
-    "/refund-tasks/{taskId}/refund-attempts .paymentId": { "uuid 아님": 404, "빈 문자열": 400, "숫자": 400, "null": 400, "누락": 400 },
-    "/orders/{orderId}/lines/{lineId}/duplicate-risk-approvals .purchaseOrderId": { "uuid 아님": 422, "빈 문자열": 400, "숫자": 400, "null": 400, "누락": 400 },
-    "/orders/{orderId}/lines/{lineId}/duplicate-risk-approvals .poLineId": { "uuid 아님": 422, "빈 문자열": 400, "숫자": 400, "null": 400, "누락": 400 },
-    "/purchase-orders/{purchaseOrderId}/receipts .poLineId": { "uuid 아님": 404, "빈 문자열": 400, "숫자": 400, "null": 400, "누락": 400 },
-    "/purchase-orders/{purchaseOrderId}/supplier-replies .poLineId": { "uuid 아님": 404, "빈 문자열": 400, "숫자": 400, "null": 400, "누락": 400 },
-  };
-
-  it("본문의 참조 ID 필드: 형식이 틀린 값은 지금 400이 아니라 404·422로 응답한다 (알려진 불일치, 정책 결정 대기)", async () => {
+  it("본문의 참조 ID 필드: uuid가 아닌 값·빈 문자열·숫자·null·누락을 실제 대상에 보내면 12개 필드 모두 서버가 400이다", async () => {
     const world = await buildWorld();
     const ops = await loadOperations();
     const ajv = new Ajv2020({ strict: false, allErrors: true });
@@ -213,13 +191,11 @@ describe("판단 불가였던 거부 입력을 대상이 존재하는 요청으�
       }
     }
     expect(checked).toBeGreaterThan(40);
-    // 서버가 이미 400으로 거부하는 필드(고친 것): 값 종류별로 모두 400이어야 하고, 고정 표에는 넣지 않는다
-    for (const fixed of ["/books/{bookId}/updates .acknowledgeDuplicateOf"]) {
-      expect(observed[fixed], fixed).toEqual({ "uuid 아님": 400, "빈 문자열": 400, "숫자": 400, null: 400 });
-      delete observed[fixed];
-    }
-    // (경로, 필드)·값 종류별 상태가 고정 표와 같다. 서버가 더 엄격해져 400이 되면 이 단언이 실패해 표 갱신을 알려 준다
-    expect(observed).toEqual(REFERENCE_FIELD_STATUS);
+    // 모든 (경로, 필드)가 모든 값 종류에서 400이다. 하나라도 400이 아니면 그 필드·값이 실패 메시지에 나온다
+    const everyKind = { "uuid 아님": 400, "빈 문자열": 400, "숫자": 400, null: 400 };
+    const expected = Object.fromEntries(Object.entries(observed).map(([key, kinds]) => [key, { ...everyKind, ...("누락" in kinds ? { "누락": 400 } : {}) }]));
+    expect(observed).toEqual(expected);
+    expect(Object.keys(observed).length).toBeGreaterThanOrEqual(12);
   });
 });
 

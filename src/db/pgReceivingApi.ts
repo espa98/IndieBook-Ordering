@@ -22,6 +22,7 @@ import {
   principalFor,
   saveNewCommands,
   type PoolLike,
+  withReferenceIds,
 } from "./pgSupport";
 
 type Actor = { userId: string };
@@ -245,7 +246,7 @@ export function createPgReceivingApi(deps: { pool: PoolLike }) {
           actor,
           request,
           async () => (isUuid(request.poLineId) && isUuid(request.purchaseOrderId) ? { poLineId: request.poLineId, poId: request.purchaseOrderId } : undefined),
-          (ctx) => authorizedActions.receiveGoods({ ...receiptRepos(ctx.state, sink), idempotency: ctx.idempotency }, ctx.principal, rest),
+          (ctx) => withReferenceIds(request, ["poLineId"], () => authorizedActions.receiveGoods({ ...receiptRepos(ctx.state, sink), idempotency: ctx.idempotency }, ctx.principal, rest)),
           async (client) => void (await Promise.all(sink.receipts.map((r) => insertReceipt(client, r)))),
         );
       }),
@@ -410,7 +411,7 @@ export function createPgReceivingApi(deps: { pool: PoolLike }) {
             const r = a ? await lookupReceipt(client, request.tenantId, a.receipt_id) : undefined;
             return r ? { poLineId: r.po_line_id, poId: r.purchase_order_id } : undefined;
           },
-          (ctx) => authorizedActions.reallocateAllocation({ ...receiptRepos(ctx.state, sink), idempotency: ctx.idempotency }, ctx.principal, rest),
+          (ctx) => withReferenceIds(request, ["toOrderId", "toOrderLineId"], () => authorizedActions.reallocateAllocation({ ...receiptRepos(ctx.state, sink), idempotency: ctx.idempotency }, ctx.principal, rest)),
           async (client) => {
             // 해제와 새 배분은 한 트랜잭션에서 함께 저장한다
             for (const r of sink.releases) {
@@ -437,7 +438,7 @@ export function createPgReceivingApi(deps: { pool: PoolLike }) {
             const r = await lookupReceipt(client, request.tenantId, request.receiptId);
             return r ? { poLineId: r.po_line_id, poId: r.purchase_order_id } : undefined;
           },
-          (ctx) => authorizedActions.allocateReceipt({ ...receiptRepos(ctx.state, sink), idempotency: ctx.idempotency }, ctx.principal, rest),
+          (ctx) => withReferenceIds(request, ["orderId", "orderLineId"], () => authorizedActions.allocateReceipt({ ...receiptRepos(ctx.state, sink), idempotency: ctx.idempotency }, ctx.principal, rest)),
           async (client) => {
             for (const a of sink.allocations) {
               await client.query(

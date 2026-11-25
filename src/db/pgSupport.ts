@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from "pg";
 import { currentAudit } from "./auditContext";
+import { AppError } from "../errors/AppError";
 import { authorizeTenantAccess, type Membership } from "../auth/authorizeTenantAccess";
 import type { UserPrincipal } from "../auth/principal";
 import type { IdempotencyStore } from "../idempotency/executeIdempotent";
@@ -11,6 +12,35 @@ export type DbRole = "service_role" | "authenticated";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isUuid = (value: unknown): value is string => typeof value === "string" && UUID.test(value);
+
+/**
+ * 요청 본문의 참조 ID(`orderLineId`·`paymentId` 등)가 uuid 형식인지 확인한다. 도메인은 메모리 저장소 테스트가 `"order-1"` 같은 비-uuid ID를
+ * 쓰기 때문에 형식을 강제하지 못하고, uuid 형식은 어댑터의 책임이다. 값이 없는(`undefined`) 필드는 필수 여부를 도메인이 판단하므로 건너뛴다.
+ * 오류 메시지에는 필드 이름만 담고 클라이언트가 보낸 값은 되돌리지 않는다.
+ */
+export function assertReferenceIds(request: object, fields: readonly string[]): void {
+  for (const field of fields) {
+    const value = (request as Record<string, unknown>)[field];
+    if (value !== undefined && !isUuid(value)) throw new AppError("VALIDATION_ERROR", `${field} must be a valid id`);
+  }
+}
+
+/**
+ * 도메인 호출을 감싸 본문의 참조 ID 형식을 확인한다. 우선순위는 권한(403) → 다른 입력 검증(400) → 이 확인 → 조회 실패(404·422)다.
+ * 도메인이 성공하면 형식이 틀린 값이 조회에 쓰이지 않은 것이므로 거부하고, 도메인이 대상을 못 찾아 끝났다면(NOT_FOUND·BUSINESS_INVARIANT)
+ * 형식 오류를 "없는 대상"으로 오해시키지 않도록 400으로 바꾼다. 그 밖의 오류는 그대로 던진다.
+ */
+export function withReferenceIds<T>(request: object, fields: readonly string[], run: () => T): T {
+  let result: T;
+  try {
+    result = run();
+  } catch (error) {
+    if (error instanceof AppError && (error.code === "NOT_FOUND" || error.code === "BUSINESS_INVARIANT")) assertReferenceIds(request, fields);
+    throw error;
+  }
+  assertReferenceIds(request, fields);
+  return result;
+}
 
 /**
  * 한 트랜잭션에서 지정한 DB 역할로 실행한다. `authenticated`면 JWT 클레임의 sub를 설정해 RLS가 적용된다.

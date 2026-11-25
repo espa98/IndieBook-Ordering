@@ -292,6 +292,33 @@ describe("중복 구매 위험 (이전 공급처 의무가 남은 품목의 재�
   });
 });
 
+describe("조달 명령의 본문 참조 ID는 uuid 형식이어야 한다", () => {
+  const MISSING_ID = "0a000000-0000-4000-8000-0000000000fb";
+
+  it("공급처 회신(poLineId)과 중복 위험 승인(purchaseOrderId·poLineId)의 본문 ID가 uuid 형식이 아니면 조회(404·422)보다 먼저 VALIDATION_ERROR이고 아무것도 저장되지 않으며, uuid 형식이면 기존 오류를 그대로 낸다", async () => {
+    const api = createPgProcurementApi({ pool: db.pool() });
+    const line = await confirmedLine(18, 2);
+    const allocation = await allocate(api, line, "sup-a", 2);
+    const po = await create(api, "sup-a", [allocation.id]);
+    await ready(api, po.id, 1);
+    await deliver(api, po.id, 2); // 회신은 전달 뒤에만 받는다
+    const replies = () => rows("select count(*)::int as n from public.ordering_po_replies").then((r) => r[0].n as number);
+    const approvals = () => rows("select count(*)::int as n from public.ordering_duplicate_risk_approvals").then((r) => r[0].n as number);
+    const [repliesBefore, approvalsBefore] = [await replies(), await approvals()];
+
+    for (const bad of ["not-a-uuid", "", 123, null]) {
+      expect(await codeOf(() => supplierReply(api, po.id, bad as never, "CONFIRM", 1)), `회신 poLineId ${JSON.stringify(bad)}`).toBe("VALIDATION_ERROR");
+      expect(await codeOf(() => approveRisk(api, line, { purchaseOrderId: bad as never, poLineId: po.lines[0]!.poLineId })), `승인 purchaseOrderId ${JSON.stringify(bad)}`).toBe("VALIDATION_ERROR");
+      expect(await codeOf(() => approveRisk(api, line, { purchaseOrderId: po.id, poLineId: bad as never })), `승인 poLineId ${JSON.stringify(bad)}`).toBe("VALIDATION_ERROR");
+    }
+    // 형식은 맞지만 없는 대상은 기존 오류를 그대로 낸다
+    expect(await codeOf(() => supplierReply(api, po.id, MISSING_ID, "CONFIRM", 1))).toBe("NOT_FOUND");
+    expect(await codeOf(() => approveRisk(api, line, { purchaseOrderId: MISSING_ID, poLineId: MISSING_ID }))).toBe("BUSINESS_INVARIANT"); // 주문·품목은 있고 열린 의무만 없다
+    expect(await replies()).toBe(repliesBefore);
+    expect(await approvals()).toBe(approvalsBefore);
+  });
+});
+
 describe("중복 구매 위험 승인은 없는 주문·품목을 NOT_FOUND로 거부한다", () => {
   const MISSING = "0a000000-0000-4000-8000-0000000000fe";
 

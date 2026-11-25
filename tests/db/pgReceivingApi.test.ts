@@ -169,6 +169,28 @@ describe("createPgReceivingApi.receiveGoods: 검수 입고", () => {
   });
 });
 
+describe("입고·배분의 본문 참조 ID는 uuid 형식이어야 한다", () => {
+  const MISSING_ID = "0a000000-0000-4000-8000-0000000000fc";
+
+  it("입고(poLineId)와 배분(orderId·orderLineId)의 본문 ID가 uuid 형식이 아니면 조회(404·422)보다 먼저 VALIDATION_ERROR이고 아무것도 저장되지 않으며, uuid 형식이면 없는 대상은 기존 오류를 그대로 낸다", async () => {
+    const { api, order, po, receipt } = await receivedScene(14, 2);
+    const receipts = () => num("select count(*)::int as n from public.ordering_goods_receipts");
+    const allocations = () => num("select count(*)::int as n from public.ordering_receipt_allocations");
+    const [receiptsBefore, allocationsBefore] = [await receipts(), await allocations()];
+
+    for (const bad of ["not-a-uuid", "", 123, null]) {
+      expect(await codeOf(() => receive(api, po, 1, { poLineId: bad })), `입고 ${JSON.stringify(bad)}`).toBe("VALIDATION_ERROR");
+      expect(await codeOf(() => api.allocateReceipt(staff, { tenantId: T_A, receiptId: receipt.id, orderId: bad as never, orderLineId: order.lineId, quantity: 1, allocatedAt: "2026-03-04T06:40:00.000Z", idempotencyKey: key() })), `배분 orderId ${JSON.stringify(bad)}`).toBe("VALIDATION_ERROR");
+      expect(await codeOf(() => api.allocateReceipt(staff, { tenantId: T_A, receiptId: receipt.id, orderId: order.orderId, orderLineId: bad as never, quantity: 1, allocatedAt: "2026-03-04T06:40:00.000Z", idempotencyKey: key() })), `배분 orderLineId ${JSON.stringify(bad)}`).toBe("VALIDATION_ERROR");
+    }
+    // 형식은 맞지만 없는 대상은 기존 오류를 그대로 낸다
+    expect(await codeOf(() => receive(api, po, 1, { poLineId: MISSING_ID }))).toBe("NOT_FOUND");
+    expect(await codeOf(() => api.allocateReceipt(staff, { tenantId: T_A, receiptId: receipt.id, orderId: MISSING_ID, orderLineId: order.lineId, quantity: 1, allocatedAt: "2026-03-04T06:40:00.000Z", idempotencyKey: key() }))).toBe("BUSINESS_INVARIANT");
+    expect(await receipts()).toBe(receiptsBefore);
+    expect(await allocations()).toBe(allocationsBefore);
+  });
+});
+
 describe("createPgReceivingApi.allocateReceipt / releaseAllocation: 고객별 배분", () => {
   it("배분하면 저장되고, 입고 정상량·발주 연결 수량을 넘는 배분과 연결되지 않은 주문은 거부된다", async () => {
     const api = createPgReceivingApi({ pool: db.pool() });

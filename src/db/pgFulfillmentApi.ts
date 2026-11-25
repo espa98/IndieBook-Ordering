@@ -29,6 +29,7 @@ import {
   principalFor,
   saveNewCommands,
   type PoolLike,
+  withReferenceIds,
 } from "./pgSupport";
 
 type Actor = { userId: string };
@@ -209,7 +210,7 @@ export function createPgFulfillmentApi(deps: { pool: PoolLike }) {
           allocationCancellations: { list: (_t, allocationId) => allocationCancellations.filter((c) => c.allocationId === allocationId) },
           idempotency,
         };
-      const result = authorizedActions.postFulfillment(postDeps, principal, rest);
+      const result = withReferenceIds(request, ["orderLineId"], () => authorizedActions.postFulfillment(postDeps, principal, rest));
 
       // 참조되는 쪽부터 저장한다: 예약 인도 → 재고 이동 → 수령 기록
       for (const d of newDeliveries) {
@@ -261,7 +262,7 @@ export function createPgFulfillmentApi(deps: { pool: PoolLike }) {
       };
       const { tenantId: _tenantId, ...rest } = request;
       void _tenantId;
-      const result = authorizedActions.requestOrderCancellation(
+      const result = withReferenceIds(request, ["orderLineId"], () => authorizedActions.requestOrderCancellation(
         {
           orders: {
             get: (t, id) => (order && order.tenantId === t && order.id === id ? order : undefined),
@@ -275,7 +276,7 @@ export function createPgFulfillmentApi(deps: { pool: PoolLike }) {
         },
         principal,
         rest,
-      );
+      ));
       for (const r of saved) {
         await client.query(
           "insert into public.ordering_order_cancellation_requests (id, tenant_id, order_id, order_line_id, quantity, reason, base_version, requested_by, requested_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",

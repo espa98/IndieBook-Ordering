@@ -34,6 +34,7 @@ import {
   principalFor,
   saveNewCommands,
   type PoolLike,
+  withReferenceIds,
 } from "./pgSupport";
 
 type Actor = { userId: string };
@@ -327,14 +328,16 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
       const none = { purchaseOrders: { get: () => undefined }, replies: { list: () => [] }, cancellations: { listResponses: () => [] }, receipts: { list: () => [] }, receiptCorrections: { list: () => [] }, sourcingReleases: { listByOrder: () => [] } };
       let result: DuplicateRiskApproval;
       try {
-        result = authorizedActions.approveDuplicateRisk(
-          {
-            supplierObligations: risk?.supplierObligations ?? none,
-            duplicateRiskApprovals: { list: () => risk?.approvals ?? [], save: (a) => void saved.push(a) },
-            idempotency,
-          },
-          principal,
-          rest,
+        result = withReferenceIds(request, ["purchaseOrderId", "poLineId"], () =>
+          authorizedActions.approveDuplicateRisk(
+            {
+              supplierObligations: risk?.supplierObligations ?? none,
+              duplicateRiskApprovals: { list: () => risk?.approvals ?? [], save: (a) => void saved.push(a) },
+              idempotency,
+            },
+            principal,
+            rest,
+          ),
         );
       } catch (error) {
         // 권한·입력 검증 다음에는 대상 존재가 업무 규칙("열린 의무 없음")보다 먼저다. 없는 주문이나 그 주문에 없는 품목은 NOT_FOUND다
@@ -490,7 +493,7 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
       ),
     recordSupplierReply: (actor: Actor, body: RecordSupplierReplyBody) =>
       transition(actor, body, body.poLineId, (state, principal, idempotency, saved, rest) =>
-        authorizedActions.recordSupplierReply(
+        withReferenceIds(body, ["poLineId"], () => authorizedActions.recordSupplierReply(
           {
             purchaseOrders: poRepo(state, saved),
             replies: { list: () => state?.replies ?? [], save: (r) => void saved.replies.push(r) },
@@ -505,7 +508,7 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
           },
           principal,
           rest,
-        ),
+        )),
       ),
   };
 }

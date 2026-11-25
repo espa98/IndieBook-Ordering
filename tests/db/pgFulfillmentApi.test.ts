@@ -175,6 +175,39 @@ describe("createPgFulfillmentApi.requestOrderCancellation: 취소 요청 (D27 �
     expect(await num("select count(*)::int as n from public.ordering_order_cancellation_requests where order_id = $1", [d.orderId])).toBe(1);
   });
 
+  it("본문의 orderLineId가 uuid 형식이 아니면(수령·취소 요청 모두) 품목 조회(404)보다 먼저 VALIDATION_ERROR이고 아무것도 저장되지 않으며, uuid 형식이면 없는 품목은 여전히 NOT_FOUND이다", async () => {
+    const api = createPgFulfillmentApi({ pool: db.pool() });
+    const d = await deliverable(8, 2);
+    const MISSING_LINE = "0a000000-0000-4000-8000-0000000000fa";
+
+    for (const bad of ["not-a-uuid", "", 123, null]) {
+      expect(await codeOf(() => api.postFulfillment(staff, { ...fulfillBody(d, 1), orderLineId: bad } as never)), `수령 ${JSON.stringify(bad)}`).toBe("VALIDATION_ERROR");
+      expect(await codeOf(() => api.requestOrderCancellation(staff, { ...cancelBody(d, 1), orderLineId: bad } as never)), `취소 ${JSON.stringify(bad)}`).toBe("VALIDATION_ERROR");
+    }
+    expect(await codeOf(() => api.postFulfillment(staff, { ...fulfillBody(d, 1), orderLineId: MISSING_LINE }))).toBe("NOT_FOUND"); // 형식은 맞지만 없는 품목
+    expect(await codeOf(() => api.requestOrderCancellation(staff, { ...cancelBody(d, 1), orderLineId: MISSING_LINE }))).toBe("NOT_FOUND");
+    expect(await num("select count(*)::int as n from public.ordering_fulfillments where order_id = $1", [d.orderId])).toBe(0);
+    expect(await num("select count(*)::int as n from public.ordering_order_cancellation_requests where order_id = $1", [d.orderId])).toBe(0);
+  });
+
+  it("멤버십(403)과 다른 입력 검증(수량 등)이 참조 ID 형식 확인보다 먼저라서, 둘 다 틀렸으면 먼저 닿는 검증의 필드가 보고된다", async () => {
+    const api = createPgFulfillmentApi({ pool: db.pool() });
+    const d = await deliverable(9, 2);
+    const detailOf = async (run: () => Promise<unknown>) => {
+      try {
+        await run();
+      } catch (error) {
+        return error instanceof AppError ? `${error.code}:${String(error.detail ?? "")}` : `NON_APP_ERROR`;
+      }
+    };
+
+    // 비멤버는 형식과 무관하게 먼저 403이다(멤버십 확인은 도메인 호출보다 훨씬 앞에서 한다)
+    expect(await codeOf(() => api.postFulfillment({ userId: STRANGER }, { ...fulfillBody(d, 1), orderLineId: "not-a-uuid" } as never))).toBe("FORBIDDEN");
+    // 수량(다른 입력 검증)과 품목 ID가 모두 틀리면 수량이 먼저 보고된다
+    expect(await detailOf(() => api.postFulfillment(staff, { ...fulfillBody(d, 0), orderLineId: "not-a-uuid" } as never))).toContain("quantity");
+    expect(await detailOf(() => api.postFulfillment(staff, { ...fulfillBody(d, 1), orderLineId: "not-a-uuid" } as never))).toContain("orderLineId");
+  });
+
   it("진행 중인 취소 요청이 있는 수량은 인도할 수 없다 (D27)", async () => {
     const api = createPgFulfillmentApi({ pool: db.pool() });
     const d = await deliverable(8, 2);
