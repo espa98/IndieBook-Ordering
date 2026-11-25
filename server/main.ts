@@ -27,7 +27,7 @@ const app = createApp({
   // 내부 오류의 원본은 서버 로그에만 남기고 응답에는 싣지 않는다
   logError: (error) => console.error("unhandled request error:", error instanceof Error ? error.stack : error),
 });
-const server = createHttpServer(app, { maxBodyBytes: config.maxBodyBytes });
+const server = createHttpServer(app, { maxBodyBytes: config.maxBodyBytes, allowedOrigins: config.allowedOrigins });
 
 server.listen(config.port, () => console.log(`ordering server listening on port ${config.port}`));
 

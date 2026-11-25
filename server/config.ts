@@ -8,6 +8,8 @@ export type ServerConfig = {
   /** 종결 스위퍼 실행 간격(초). 0이면 끈다 */
   closureSweepIntervalSeconds: number;
   jwt: JwtVerifyOptions;
+  /** CORS를 허용하는 브라우저 오리진(정확히 일치). 기본은 빈 목록 */
+  allowedOrigins: string[];
 };
 
 const fail = (message: string): never => {
@@ -40,6 +42,25 @@ function parseKeys(raw: string): JwtKey[] {
   });
 }
 
+/** 쉼표로 구분한 오리진 목록. 스킴·호스트·포트만 있는 정확한 오리진만 받는다(와일드카드·경로·중복 거부) */
+function parseOrigins(raw: string | undefined): string[] {
+  if (raw === undefined || raw.trim() === "") return [];
+  const origins = raw.split(",").map((o) => o.trim());
+  for (const origin of origins) {
+    let url: URL | undefined;
+    try {
+      url = new URL(origin);
+    } catch {
+      url = undefined;
+    }
+    if (origin.includes("*") || !url || (url.protocol !== "https:" && url.protocol !== "http:") || url.origin !== origin) {
+      return fail("CORS_ALLOWED_ORIGINS must be a comma-separated list of exact origins such as https://app.example.com");
+    }
+  }
+  if (new Set(origins).size !== origins.length) return fail("CORS_ALLOWED_ORIGINS must not contain duplicates");
+  return origins;
+}
+
 /**
  * 환경 변수에서 서버 설정을 만든다(순수 함수). 서명 키는 둘 중 하나 이상 필요하다:
  * SUPABASE_JWT_KEYS(RS256/ES256 공개 키 JSON 배열), SUPABASE_JWT_SECRET(HS256 비밀, 32자 이상).
@@ -59,6 +80,7 @@ export function loadConfig(env: Record<string, string | undefined>): ServerConfi
     port: integer(env, "PORT", 8080, 1, 65535),
     maxBodyBytes: integer(env, "MAX_BODY_BYTES", 1024 * 1024, 1, 64 * 1024 * 1024),
     closureSweepIntervalSeconds: integer(env, "CLOSURE_SWEEP_INTERVAL_SECONDS", 300, 0, 86_400),
+    allowedOrigins: parseOrigins(env.CORS_ALLOWED_ORIGINS),
     jwt: { keys, audience: "authenticated", ...(env.SUPABASE_JWT_ISSUER ? { issuer: env.SUPABASE_JWT_ISSUER } : {}) },
   };
 }

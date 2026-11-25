@@ -57,4 +57,13 @@ describe("loadConfig: 종결 스위퍼 주기", () => {
       expect(() => loadConfig({ ...base, CLOSURE_SWEEP_INTERVAL_SECONDS: bad }), bad).toThrow(/CLOSURE_SWEEP_INTERVAL_SECONDS/);
     }
   });
+
+  it("CORS 허용 오리진은 기본이 빈 목록이고, 쉼표로 구분한 정확한 오리진만 받으며 와일드카드·경로·http 외 형식·중복은 거부한다", () => {
+    expect(loadConfig(base).allowedOrigins).toEqual([]);
+    expect(loadConfig({ ...base, CORS_ALLOWED_ORIGINS: "" }).allowedOrigins).toEqual([]);
+    expect(loadConfig({ ...base, CORS_ALLOWED_ORIGINS: " https://app.example.com , http://localhost:5173 " }).allowedOrigins).toEqual(["https://app.example.com", "http://localhost:5173"]);
+    for (const bad of ["*", "https://*.example.com", "https://app.example.com/", "https://app.example.com/path", "ftp://app.example.com", "app.example.com", "https://a.test,https://a.test", "null"]) {
+      expect(() => loadConfig({ ...base, CORS_ALLOWED_ORIGINS: bad }), bad).toThrow(/CORS_ALLOWED_ORIGINS/);
+    }
+  });
 });
