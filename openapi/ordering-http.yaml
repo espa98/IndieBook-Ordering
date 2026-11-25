@@ -1612,7 +1612,7 @@ paths:
               additionalProperties: false
               required: [key, body, expectedVersion, publishedAt]
               properties:
-                key: { type: string }
+                key: { type: string, pattern: '^[A-Z][A-Z0-9_]{0,63}$' }
                 body: { type: string }
                 expectedVersion: { type: integer }
                 publishedAt: { type: string, format: date-time }
@@ -2080,15 +2080,20 @@ paths:
               type: object
               additionalProperties: false
               required: [source, title, listPriceKrw, registeredAt]
+              allOf:
+                - if: { properties: { source: { const: MANUAL } }, required: [source] }
+                  then: { required: [reason] }
+                - if: { properties: { source: { const: YES24 } }, required: [source] }
+                  then: { required: [externalId, fetchedAt] }
               properties:
                 source: { type: string, enum: [MANUAL, YES24] }
                 title: { type: string }
                 authors: { type: array, items: { type: string } }
                 isbn: { type: string }
-                listPriceKrw: { type: string }
-                externalId: { type: string }
+                listPriceKrw: { type: string, pattern: '^[1-9][0-9]*$' }
+                externalId: { type: string, minLength: 1 }
                 fetchedAt: { type: string, format: date-time }
-                reason: { type: string }
+                reason: { type: string, minLength: 1 }
                 acknowledgeDuplicateOf: { type: string, format: uuid }
                 registeredAt: { type: string, format: date-time }
       responses:
@@ -2252,7 +2257,7 @@ paths:
                     title: { type: string }
                     authors: { type: array, items: { type: string } }
                     isbn: { type: string }
-                    listPriceKrw: { type: string }
+                    listPriceKrw: { type: string, pattern: '^[1-9][0-9]*$' }
                 reason: { type: string }
                 acknowledgeDuplicateOf: { type: string, format: uuid }
                 changedAt: { type: string, format: date-time }
@@ -2302,7 +2307,7 @@ paths:
               additionalProperties: false
               required: [email, expiresAt]
               properties:
-                email: { type: string }
+                email: { type: string, pattern: '^\s*[^\s@]+@[^\s@]+\.[^\s@]+\s*$' }
                 expiresAt: { type: string, format: date-time }
       responses:
         "201":
