@@ -3,6 +3,7 @@ import { createPgCancellationApi } from "../db/pgCancellationApi";
 import { createPgDispositionApi } from "../db/pgDispositionApi";
 import { createPgFulfillmentApi } from "../db/pgFulfillmentApi";
 import { createPgNotificationApi } from "../db/pgNotificationApi";
+import { createPgReadApi } from "../db/pgReadApi";
 import { createPgOrderApi } from "../db/pgOrderApi";
 import { createPgPaymentApi } from "../db/pgPaymentApi";
 import { createPgProcurementApi } from "../db/pgProcurementApi";
@@ -80,12 +81,15 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
   const staffAdmin = createPgStaffApi({ pool: deps.pool });
   const catalog = createPgCatalogApi({ pool: deps.pool });
   const notifications = createPgNotificationApi({ pool: deps.pool });
+  const reads = createPgReadApi({ pool: deps.pool });
   const cancellations = createPgCancellationApi({ pool: deps.pool });
   const dispositions = createPgDispositionApi({ pool: deps.pool });
   const actor = (c: Ctx) => ({ userId: c.userId });
   // 본문은 신뢰할 수 없는 JSON이다. 형식 검증은 도메인이 하므로 여기서는 경계 타입만 맞춘다
   const merge = (c: Ctx, extra: Record<string, unknown>) => ({ ...c.body, ...extra }) as never;
   const t = (c: Ctx) => c.params.tenantId!;
+  const text = (c: Ctx, name: string) => (c.query.has(name) ? { [name]: c.query.get(name) as string } : {});
+  const int = (c: Ctx, name: string) => (c.query.has(name) ? { [name]: Number(c.query.get(name)) } : {});
 
   const routes: Route[] = [
     route("GET", "/orders", {
@@ -281,6 +285,33 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       success: 201,
       fields: ["outcome", "note", "resultAt"],
       run: (c) => notifications.recordNotificationResult(actor(c), merge(c, { tenantId: t(c), attemptId: c.params.attemptId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("GET", "/books", {
+      success: 200,
+      queryFields: ["limit", "cursor", "isbn"],
+      run: (c) => reads.listBooks(actor(c), { tenantId: t(c), ...int(c, "limit"), ...text(c, "cursor"), ...text(c, "isbn") }),
+    }),
+    route("GET", "/books/(?<bookId>[^/]+)", {
+      success: 200,
+      run: (c) => reads.getBook(actor(c), { tenantId: t(c), bookId: c.params.bookId! }),
+    }),
+    route("GET", "/books/(?<bookId>[^/]+)/revisions", {
+      success: 200,
+      run: (c) => reads.listBookRevisions(actor(c), { tenantId: t(c), bookId: c.params.bookId! }),
+    }),
+    route("GET", "/message-templates", {
+      success: 200,
+      queryFields: ["key"],
+      run: (c) => reads.listMessageTemplates(actor(c), { tenantId: t(c), ...text(c, "key") }),
+    }),
+    route("GET", "/orders/(?<orderId>[^/]+)/notification-targets", {
+      success: 200,
+      run: (c) => reads.listNotificationTargets(actor(c), { tenantId: t(c), orderId: c.params.orderId! }),
+    }),
+    route("GET", "/long-unreceived-warnings", {
+      success: 200,
+      queryFields: ["thresholdDays"],
+      run: (c) => reads.longUnreceivedWarnings(actor(c), { tenantId: t(c), ...int(c, "thresholdDays") }),
     }),
     route("POST", "/books", {
       success: 201,

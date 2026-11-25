@@ -32,7 +32,7 @@ export type RecordNotificationResultBody = Omit<RecordNotificationResultRequest,
 export type RenotifyBody = Omit<RenotifyRequest, "createdBy">;
 export type RecordNotificationAttemptBody = Omit<RecordNotificationAttemptRequest, "attemptedBy">;
 
-const toTarget = (t: any): NotificationTarget => ({
+export const toTarget = (t: any): NotificationTarget => ({
   id: t.id,
   tenantId: t.tenant_id,
   orderId: t.order_id,
@@ -45,7 +45,7 @@ const toTarget = (t: any): NotificationTarget => ({
   recordedAt: iso(t.recorded_at),
 });
 
-const toAttempt = (a: any): NotificationAttempt => ({
+export const toAttempt = (a: any): NotificationAttempt => ({
   id: a.id,
   tenantId: a.tenant_id,
   targetId: a.target_id,
@@ -56,7 +56,7 @@ const toAttempt = (a: any): NotificationAttempt => ({
   recordedAt: iso(a.recorded_at),
 });
 
-const toResult = (r: any): NotificationResult => ({
+export const toResult = (r: any): NotificationResult => ({
   id: r.id,
   tenantId: r.tenant_id,
   targetId: r.target_id,
@@ -72,7 +72,7 @@ const toResult = (r: any): NotificationResult => ({
 type Sink = { targets: NotificationTarget[]; copies: NotificationCopy[]; attempts: NotificationAttempt[]; results: NotificationResult[] };
 
 /** 주문의 현재 확보량 계산에 필요한 원장(수령·재고 예약·입고 배분)을 적재해 도메인 저장소 모양으로 돌려준다 */
-async function loadSecuredDeps(client: PoolClient, tenantId: string, order: Order): Promise<SecuredSnapshotDeps> {
+export async function loadSecuredDeps(client: PoolClient, tenantId: string, order: Order): Promise<SecuredSnapshotDeps> {
   const fulfillments = await loadFulfillments(client, tenantId, order.id);
   const books = await Promise.all([...new Set(order.lines.map((l) => l.bookId))].map((id) => loadBookLedger(client, tenantId, id)));
   const reservations = books.flatMap((b) => b.reservations);

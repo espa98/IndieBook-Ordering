@@ -846,3 +846,45 @@ describe("HTTP 서버: 고객 안내", () => {
   });
 });
 
+describe("HTTP 서버: 조회 경로", () => {
+  it("도서 목록·상세·수정 이력, 템플릿, 안내 대상, 미수령 경고를 직원도 읽고, 잘못된 쿼리·타 서점·비멤버는 거부된다", async () => {
+    const books = `/v1/tenants/${T_A}/books`;
+    const registeredAt = new Date().toISOString();
+    const created = await call(books, { method: "POST", sub: STAFF_A, body: { source: "MANUAL", title: "조회 시험 도서", isbn: "9788900003333", listPriceKrw: "8000", reason: "수기", registeredAt } });
+    const bookId = created.json.data.id as string;
+    expect((await call(`${books}/${bookId}/updates`, { method: "POST", sub: OWNER_A, body: { expectedVersion: 1, changes: { listPriceKrw: "8500" }, reason: "인상", changedAt: registeredAt } })).status).toBe(200);
+
+    expect((await call(books, { sub: "33333333-0000-4000-8000-0000000000ff" })).status).toBe(403);
+    expect((await call(`${books}?limit=0`, { sub: STAFF_A })).status).toBe(400);
+    expect((await call(`${books}?unknown=1`, { sub: STAFF_A })).status).toBe(400);
+    const list = await call(`${books}?isbn=9788900003333`, { sub: STAFF_A });
+    expect(list.status).toBe(200);
+    expect(list.json.data.items.map((b: any) => b.id)).toEqual([bookId]);
+    const detail = await call(`${books}/${bookId}`, { sub: STAFF_A });
+    expect(detail.json.data).toMatchObject({ title: "조회 시험 도서", version: 2, listPriceKrw: "8500" });
+    expect((await call(`${books}/0a000000-0000-4000-8000-00000000ffff`, { sub: STAFF_A })).status).toBe(404);
+    expect((await call(`${books}/${bookId}/revisions`, { sub: STAFF_A })).json.data).toHaveLength(1);
+
+    const templates = `/v1/tenants/${T_A}/message-templates`;
+    await call(templates, { method: "POST", sub: OWNER_A, body: { key: "HTTP_READ", body: "첫 문구", expectedVersion: 0, publishedAt: registeredAt } });
+    await call(templates, { method: "POST", sub: OWNER_A, body: { key: "HTTP_READ", body: "둘째 문구", expectedVersion: 1, publishedAt: registeredAt } });
+    expect((await call(templates, { sub: STAFF_A })).json.data.find((v: any) => v.key === "HTTP_READ")).toMatchObject({ version: 2, body: "둘째 문구" });
+    expect((await call(`${templates}?key=HTTP_READ`, { sub: STAFF_A })).json.data.map((v: any) => v.version)).toEqual([1, 2]);
+    expect((await call(`${templates}?key=bad`, { sub: STAFF_A })).status).toBe(400);
+
+    await seedStock(5, 5);
+    const o = await confirmedOrder(5, 2);
+    await call(`${orders()}/${o.orderId}/lines/${o.lineId}/stock-reservations`, { method: "POST", sub: STAFF_A, body: { quantity: 2, reservedAt: registeredAt } });
+    const noTargets = await call(`${orders()}/${o.orderId}/notification-targets`, { sub: STAFF_A });
+    expect(noTargets.json.data).toEqual([]);
+    const target = await call(`${orders()}/${o.orderId}/notification-targets`, { method: "POST", sub: STAFF_A, body: { createdAt: registeredAt } });
+    expect((await call(`${orders()}/${o.orderId}/notification-targets`, { sub: STAFF_A })).json.data[0]).toMatchObject({ id: target.json.data.id, status: "PENDING", attemptCount: 0 });
+    expect((await call(`${orders(T_B)}/${o.orderId}/notification-targets`, { sub: OWNER_B })).status).toBe(404);
+
+    const warnings = `/v1/tenants/${T_A}/long-unreceived-warnings`;
+    expect((await call(warnings, { sub: STAFF_A })).json.data).toEqual([]);
+    expect((await call(`${warnings}?thresholdDays=0`, { sub: STAFF_A })).status).toBe(400);
+    expect((await call(`${warnings}?thresholdDays=3`, { sub: "33333333-0000-4000-8000-0000000000ff" })).status).toBe(403);
+  });
+});
+
