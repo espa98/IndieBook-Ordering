@@ -71,6 +71,47 @@ async function confirmedLine(book: number, quantity: number) {
 const reserve = (line: { orderId: string; lineId: string }, quantity: number) =>
   stock().reserveStock(owner, { tenantId: T_A, orderId: line.orderId, orderLineId: line.lineId, quantity, reservedAt: "2026-03-04T06:40:00.000Z", idempotencyKey: key() });
 
+const MISSING_BOOK = "b0000000-0000-4000-8000-0000000000ff";
+const initialFor = (bookId: string, actor = owner, quantity = 5) =>
+  stock().registerInitialStock(actor, { tenantId: T_A, bookId, quantity, actedAt: "2026-03-04T06:00:00.000Z", idempotencyKey: key() });
+const ledgerRows = (bookId: string) => num("select count(*)::int as n from public.ordering_stock_movements where book_key = $1", [bookId]);
+
+describe("재고는 이 서점에 등록된 도서에만 기록된다", () => {
+  it("존재하지 않는 도서의 초기 재고 등록은 NOT_FOUND이고 재고 기록도 멱등 기록도 남기지 않는다", async () => {
+    const commandsBefore = await num("select count(*)::int as n from public.ordering_commands");
+
+    expect(await codeOf(() => initialFor(MISSING_BOOK))).toBe("NOT_FOUND");
+
+    expect(await ledgerRows(MISSING_BOOK)).toBe(0);
+    expect(await num("select count(*)::int as n from public.ordering_commands")).toBe(commandsBefore);
+  });
+
+  it("존재하지 않는 도서의 재고 조정은 초기 재고가 없다는 업무 규칙(422)보다 먼저 NOT_FOUND이고 아무것도 기록하지 않는다", async () => {
+    const adjustFor = (bookId: string) =>
+      stock().adjustStock(owner, { tenantId: T_A, bookId, direction: "IN", quantity: 1, reason: "실사 정정", actedAt: "2026-03-04T06:10:00.000Z", idempotencyKey: key() });
+
+    expect(await codeOf(() => adjustFor(MISSING_BOOK))).toBe("NOT_FOUND");
+    expect(await codeOf(() => adjust(2, "IN", 1))).toBe("BUSINESS_INVARIANT"); // 실제 도서이지만 초기 재고가 없으면 여전히 업무 규칙 위반이다
+
+    expect(await ledgerRows(MISSING_BOOK)).toBe(0);
+  });
+
+  it("권한(403)과 입력 검증(400)이 도서 존재(404)보다 먼저이고, 다른 서점의 도서는 없는 도서와 같이 NOT_FOUND이다", async () => {
+    // 도서의 존재 여부가 권한 없는 사용자에게 드러나지 않는다
+    expect(await codeOf(() => initialFor(MISSING_BOOK, staff))).toBe("FORBIDDEN");
+    expect(await codeOf(() => initialFor(MISSING_BOOK, { userId: STRANGER }))).toBe("FORBIDDEN");
+    expect(await codeOf(() => initialFor(MISSING_BOOK, owner, 0))).toBe("VALIDATION_ERROR");
+
+    const T_B = "bbbbbbbb-0000-4000-8000-000000000002";
+    const OTHER_BOOK = "b0000000-0000-4000-8000-0000000000aa";
+    await rows(`insert into public.ordering_tenants (id, name, owner_user_id) values ($1, '서점 B', $2)`, [T_B, "22222222-0000-4000-8000-000000000001"]);
+    await rows(`insert into public.ordering_books (id, tenant_id, title, list_price_krw, source, manual_reason, created_by, created_at) values ($1, $2, '타 서점 책', 10000, 'MANUAL', '시험', 'seed', now())`, [OTHER_BOOK, T_B]);
+
+    expect(await codeOf(() => initialFor(OTHER_BOOK))).toBe("NOT_FOUND");
+    expect(await ledgerRows(OTHER_BOOK)).toBe(0);
+  });
+});
+
 describe("초기 재고 등록·재고 조정 (Postgres 영속화)", () => {
   it("Owner만 도서별로 한 번 초기 재고를 등록하고, 조정은 Owner 또는 위임된 직원만 하며 초기 재고 없음·예약 아래로의 감소·잘못된 입력은 거부된다", async () => {
     expect(await codeOf(() => initial(1, 5, staff))).toBe("FORBIDDEN"); // 초기 재고는 점주만 (DEC-19)

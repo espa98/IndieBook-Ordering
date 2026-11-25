@@ -104,8 +104,6 @@ async function check(routes: ReturnType<typeof tenantRoutes>, sub: string, idFil
  * 현재 동작을 그대로 고정한다. 고치면 이 목록의 단언이 실패해 갱신을 알려 준다.
  */
 const KNOWN_GAPS: Record<string, { status: number; why: string }> = {
-  "POST /v1/tenants/{tenantId}/books/{bookId}/initial-stock": { status: 201, why: "없는 도서 ID에도 초기 재고가 기록된다(재고 원장의 도서 키가 도서 테이블과 연결되어 있지 않음)" },
-  "POST /v1/tenants/{tenantId}/books/{bookId}/stock-adjustments": { status: 201, why: "없는 도서 ID에도 재고 조정이 기록된다" },
   "POST /v1/tenants/{tenantId}/orders/{orderId}/lines/{lineId}/duplicate-risk-approvals": { status: 422, why: "없는 주문 품목을 404가 아니라 '열린 공급처 의무 없음'(BUSINESS_INVARIANT)으로 거부한다" },
 };
 const gapKey = (r: { method: string; template: string }) => specKey(r);

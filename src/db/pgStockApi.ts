@@ -210,6 +210,12 @@ export function createPgStockApi(deps: { pool: PoolLike }) {
     throw new Error("this command must not write this ledger");
   };
 
+  /** 재고는 이 서점에 등록된 도서에만 기록한다. 재고 원장의 도서 키는 FK 없는 텍스트라 어댑터가 확인해야 한다 */
+  async function assertBookExists(client: PoolClient, tenantId: string, bookId: unknown) {
+    const found = isUuid(tenantId) && isUuid(bookId) ? (await client.query("select 1 from public.ordering_books where tenant_id = $1 and id = $2", [tenantId, bookId])).rowCount === 1 : false;
+    if (!found) throw new AppError("NOT_FOUND");
+  }
+
   /** 초기 재고 등록(Owner): 책 락 아래에서 도서별 중복을 확인하고 INITIAL 입고 항목을 저장한다 (BR-Q22) */
   const initialOnce = (actor: Actor, request: RegisterInitialStockBody) =>
     inTransaction(deps.pool, "service_role", actor.userId, async (client) => {
@@ -223,6 +229,7 @@ export function createPgStockApi(deps: { pool: PoolLike }) {
       const { tenantId: _t, ...rest } = request;
       void _t;
       const result = authorizedActions.registerInitialStock({ stockMovements: { list: (_t2, bookId) => ledger.movements.filter((m) => m.bookId === bookId), save: (m) => void saved.push(m) }, idempotency }, principal, rest);
+      await assertBookExists(client, request.tenantId, request.bookId);
       await insertMovements(client, saved);
       await saveNewCommands(client, idempotency, known);
       return result;
@@ -241,18 +248,26 @@ export function createPgStockApi(deps: { pool: PoolLike }) {
       const saved: StockMovement[] = [];
       const { tenantId: _t, ...rest } = request;
       void _t;
-      const result = authorizedActions.adjustStock(
-        {
-          stockMovements: { list: (_t2, bookId) => ledger.movements.filter((m) => m.bookId === bookId), save: (m) => void saved.push(m) },
-          stockDelegations: { isDelegated: (_t2, userId) => delegated && userId === actor.userId },
-          stockReservations: { list: (_t2, bookId) => ("reservations" in ledger ? ledger.reservations : []).filter((r) => r.bookId === bookId) },
-          stockReservationReleases: { list: (_t2, id) => ("releases" in ledger ? ledger.releases : []).filter((r) => r.reservationId === id) },
-          stockReservationDeliveries: { list: (_t2, id) => ("deliveries" in ledger ? ledger.deliveries : []).filter((d) => d.reservationId === id) },
-          idempotency,
-        },
-        principal,
-        rest,
-      );
+      let result: ReturnType<typeof authorizedActions.adjustStock>;
+      try {
+        result = authorizedActions.adjustStock(
+          {
+            stockMovements: { list: (_t2, bookId) => ledger.movements.filter((m) => m.bookId === bookId), save: (m) => void saved.push(m) },
+            stockDelegations: { isDelegated: (_t2, userId) => delegated && userId === actor.userId },
+            stockReservations: { list: (_t2, bookId) => ("reservations" in ledger ? ledger.reservations : []).filter((r) => r.bookId === bookId) },
+            stockReservationReleases: { list: (_t2, id) => ("releases" in ledger ? ledger.releases : []).filter((r) => r.reservationId === id) },
+            stockReservationDeliveries: { list: (_t2, id) => ("deliveries" in ledger ? ledger.deliveries : []).filter((d) => d.reservationId === id) },
+            idempotency,
+          },
+          principal,
+          rest,
+        );
+      } catch (error) {
+        // 권한·입력 검증 다음에는 도서 존재가 업무 규칙(초기 재고 없음 등)보다 먼저다
+        if (error instanceof AppError && error.code === "BUSINESS_INVARIANT") await assertBookExists(client, request.tenantId, request.bookId);
+        throw error;
+      }
+      await assertBookExists(client, request.tenantId, request.bookId);
       await insertMovements(client, saved);
       await saveNewCommands(client, idempotency, known);
       return result;
