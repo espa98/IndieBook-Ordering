@@ -148,6 +148,23 @@ describe("postFulfillment: 수령(인도) 등록 (ST-F01, UC-13, FUL-001/002, DE
     expect(deps.stockReservationDeliveries.list("tenant-a", reservation.id)).toEqual([]);
   });
 
+  it("수령 품목 ID(orderLineId)가 비어 있지 않은 문자열이 아니면(빈 문자열·숫자·null·누락) 품목 조회(404)보다 먼저 VALIDATION_ERROR 400이고 아무것도 기록되지 않는다", () => {
+    const { deps, orderD, pay, fulfillRequest, fulfillments } = fulfillmentScene();
+    pay(orderD.id, "30000");
+
+    for (const orderLineId of ["", " ", 123, null, undefined]) {
+      let thrown: unknown;
+      try {
+        postFulfillment(deps, fulfillRequest({ orderLineId } as never));
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, JSON.stringify(orderLineId)).toBeInstanceOf(AppError);
+      expect((thrown as AppError).code, JSON.stringify(orderLineId)).toBe("VALIDATION_ERROR");
+    }
+    expect(fulfillments.list("tenant-a", orderD.id)).toEqual([]);
+  });
+
   it("없는 주문·품목·다른 테넌트는 NOT_FOUND 404이고, 다른 주문의 예약 물량을 출처로 쓰면 BUSINESS_INVARIANT 422이다", () => {
     const { deps, orderD, reservation, orders, pay, fulfillRequest, fulfillments } = fulfillmentScene();
     pay(orderD.id, "30000");

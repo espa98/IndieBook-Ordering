@@ -61,7 +61,7 @@ export function reportRefundAttempt(
   if (request.result !== "FAILED" && request.result !== "UNKNOWN") {
     invalid("result", "must be FAILED or UNKNOWN");
   }
-  for (const field of ["reason", "reportedBy"] as const) {
+  for (const field of ["paymentId", "reason", "reportedBy"] as const) {
     if (!isNonEmptyString(request[field])) {
       invalid(field, "must be a non-empty string");
     }

@@ -1,3 +1,4 @@
+import { AppError } from "../errors/AppError";
 import type { PoolClient } from "pg";
 import { authorizedActions } from "../auth/authorizedActions";
 import type { Book, BookRevision, RegisterBookRequest } from "../catalog/registerBook";
@@ -57,6 +58,11 @@ export function createPgCatalogApi(deps: { pool: PoolLike }) {
   const loadAllBooks = async (client: PoolClient, tenantId: string): Promise<Book[]> =>
     isUuid(tenantId) ? (await client.query("select * from public.ordering_books where tenant_id = $1 order by recorded_at, id", [tenantId])).rows.map(toBook) : [];
 
+  /** 중복 확인 표시는 확인한 도서의 ID여야 한다. 후보가 없으면 값이 쓰이지 않아 도메인은 틀린 값을 알아채지 못하므로 형식은 어댑터가 확인한다 */
+  const assertAcknowledgementIsUuid = (value: unknown) => {
+    if (value !== undefined && !isUuid(value)) throw new AppError("VALIDATION_ERROR", "acknowledgeDuplicateOf must be a book id");
+  };
+
   const registerOnce = (actor: Actor, request: RegisterBookBody) =>
     inTransaction(deps.pool, "service_role", actor.userId, async (client) => {
       const principal = principalFor(await loadMembership(client, actor.userId, request.tenantId), actor.userId, request.tenantId);
@@ -73,6 +79,7 @@ export function createPgCatalogApi(deps: { pool: PoolLike }) {
         principal,
         rest,
       );
+      assertAcknowledgementIsUuid(request.acknowledgeDuplicateOf);
       for (const b of saved) {
         await client.query(
           "insert into public.ordering_books (id, tenant_id, title, authors, isbn, list_price_krw, source, external_id, fetched_at, manual_reason, status, version, created_by, created_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
@@ -103,6 +110,7 @@ export function createPgCatalogApi(deps: { pool: PoolLike }) {
         principal,
         rest,
       );
+      assertAcknowledgementIsUuid(request.acknowledgeDuplicateOf);
       for (const b of savedBooks) {
         await client.query("update public.ordering_books set title = $3, authors = $4, isbn = $5, list_price_krw = $6, version = $7 where tenant_id = $1 and id = $2", [b.tenantId, b.id, b.title, b.authors, b.isbn ?? null, b.listPriceKrw, b.version]);
       }

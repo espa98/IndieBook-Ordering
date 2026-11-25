@@ -61,7 +61,7 @@ export function approveDuplicateRisk(
   if (request.surplusPlan !== "STOCK_INTAKE" && request.surplusPlan !== "SUPPLIER_RETURN") {
     invalid("surplusPlan", "must be STOCK_INTAKE or SUPPLIER_RETURN");
   }
-  for (const field of ["planNote", "approvedBy"] as const) {
+  for (const field of ["purchaseOrderId", "poLineId", "planNote", "approvedBy"] as const) {
     if (!isNonEmptyString(request[field])) {
       invalid(field, "must be a non-empty string");
     }

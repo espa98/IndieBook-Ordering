@@ -82,7 +82,7 @@ export function requestOrderCancellation(
   if (!Number.isInteger(request.quantity) || request.quantity < 1) {
     invalid("quantity", "must be an integer >= 1");
   }
-  for (const field of ["reason", "requestedBy"] as const) {
+  for (const field of ["orderLineId", "reason", "requestedBy"] as const) {
     if (!isNonEmptyString(request[field])) {
       invalid(field, "must be a non-empty string");
     }

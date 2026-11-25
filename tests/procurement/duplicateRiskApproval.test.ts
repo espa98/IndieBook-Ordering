@@ -120,4 +120,22 @@ describe("재조달의 중복 위험 승인 (BR-P05)", () => {
     expect(codeOf({ orderId: "no-such-order" })).toBe("BUSINESS_INVARIANT");
     expect(deps.duplicateRiskApprovals.list("tenant-a", approveRequest().orderId)).toEqual([]);
   });
+
+  it("승인 대상의 발주 ID(purchaseOrderId)와 발주 품목 ID(poLineId)가 비어 있지 않은 문자열이 아니면(빈 문자열·숫자·null·누락) 업무 규칙(422)이 아니라 VALIDATION_ERROR 400이고 아무것도 기록되지 않는다", () => {
+    const { deps, approveRequest } = resourcingScene();
+
+    for (const field of ["purchaseOrderId", "poLineId"] as const) {
+      for (const bad of ["", " ", 123, null, undefined]) {
+        let thrown: unknown;
+        try {
+          approveDuplicateRisk(deps, approveRequest({ [field]: bad }));
+        } catch (error) {
+          thrown = error;
+        }
+        expect(thrown, `${field}=${JSON.stringify(bad)}`).toBeInstanceOf(AppError);
+        expect((thrown as AppError).code, `${field}=${JSON.stringify(bad)}`).toBe("VALIDATION_ERROR");
+      }
+    }
+    expect(deps.duplicateRiskApprovals.list("tenant-a", approveRequest().orderId)).toEqual([]);
+  });
 });

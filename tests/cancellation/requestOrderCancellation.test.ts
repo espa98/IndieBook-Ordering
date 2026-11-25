@@ -92,6 +92,22 @@ describe("requestOrderCancellation: 주문 취소 요청 (ST-O05/O06, BR-O05/O06
     expect(orderCancellationRequests.list("tenant-a", orderD.id)).toEqual([]);
   });
 
+  it("취소 대상 품목 ID(orderLineId)가 비어 있지 않은 문자열이 아니면(빈 문자열·숫자·null·누락) 품목 조회(404)보다 먼저 VALIDATION_ERROR 400이고 아무것도 기록되지 않는다", () => {
+    const { deps, cancelOrderRequest, orderD, orderCancellationRequests } = cancellationRequestScene();
+
+    for (const orderLineId of ["", " ", 123, null, undefined]) {
+      let thrown: unknown;
+      try {
+        requestOrderCancellation(deps, cancelOrderRequest({ orderLineId } as never));
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, JSON.stringify(orderLineId)).toBeInstanceOf(AppError);
+      expect((thrown as AppError).code, JSON.stringify(orderLineId)).toBe("VALIDATION_ERROR");
+    }
+    expect(orderCancellationRequests.list("tenant-a", orderD.id)).toEqual([]);
+  });
+
   it("없는 주문·품목·다른 테넌트는 NOT_FOUND 404, 요청 version이 현재와 다르면 VERSION_CONFLICT 409, 종결된 주문은 BUSINESS_INVARIANT 422이다", () => {
     const { deps, cancelOrderRequest, orderD, orderCancellationRequests } = cancellationRequestScene();
     const codeOf = (request: ReturnType<typeof cancelOrderRequest>) => {

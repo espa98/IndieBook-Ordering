@@ -96,6 +96,31 @@ describe("도서 중복·멱등·동시성", () => {
   });
 });
 
+describe("중복 확인 표시는 uuid 형식의 도서 ID여야 한다 (Postgres 영속화)", () => {
+  it("uuid가 아닌 acknowledgeDuplicateOf는 중복 후보가 없어도 VALIDATION_ERROR이고 등록·수정되지 않는다(조용히 무시하지 않는다)", async () => {
+    const count = async () => Number((await db.pool().query("select count(*)::int as n from public.ordering_books where tenant_id = $1", [T_A])).rows[0].n);
+    const before = await count();
+
+    expect(await codeOf(() => api().registerBook(owner, manual({ acknowledgeDuplicateOf: "not-a-uuid" })))).toBe("VALIDATION_ERROR");
+    expect(await count()).toBe(before);
+
+    const book = await api().registerBook(owner, manual({ title: "확인 표시 대상", isbn: "9788900000777" }));
+    const update = (over: Record<string, unknown>) =>
+      api().updateBook(owner, { tenantId: T_A, bookId: book.id, expectedVersion: 1, changes: { title: "수정" }, reason: "r", changedAt: now(), idempotencyKey: key(), ...over } as any);
+    expect(await codeOf(() => update({ acknowledgeDuplicateOf: "not-a-uuid" }))).toBe("VALIDATION_ERROR");
+    expect((await db.pool().query("select version::int as v from public.ordering_books where id = $1", [book.id])).rows[0].v).toBe(1); // 버전이 오르지 않았다
+    // uuid 형식이면(없는 도서의 ID라도) 형식은 통과한다. 후보가 없으면 값은 쓰이지 않는다
+    expect((await update({ acknowledgeDuplicateOf: "0a000000-0000-4000-8000-0000000000ee" })).version).toBe(2);
+  });
+
+  it("권한(403)과 다른 입력 검증(400)이 이 검증보다 먼저이고, 도서가 없으면 404가 먼저다", async () => {
+    expect(await codeOf(() => api().registerBook({ userId: STRANGER }, manual({ acknowledgeDuplicateOf: "not-a-uuid" })))).toBe("FORBIDDEN");
+    expect(await codeOf(() => api().registerBook(owner, manual({ title: " ", acknowledgeDuplicateOf: "not-a-uuid" })))).toBe("VALIDATION_ERROR"); // 둘 다 틀렸으면 먼저 닿는 검증
+    const missing = "0a000000-0000-4000-8000-0000000000dd";
+    expect(await codeOf(() => api().updateBook(owner, { tenantId: T_A, bookId: missing, expectedVersion: 1, changes: { title: "x" }, reason: "r", changedAt: now(), idempotencyKey: key(), acknowledgeDuplicateOf: "not-a-uuid" } as any))).toBe("NOT_FOUND");
+  });
+});
+
 describe("도서 수정 (Postgres 영속화)", () => {
   const update = (bookId: string, expectedVersion: number, changes: Record<string, unknown>, actor = owner, over: Record<string, unknown> = {}) =>
     api().updateBook(actor, { tenantId: T_A, bookId, expectedVersion, changes, reason: "정가 인상", changedAt: now(), idempotencyKey: key(), ...over } as any);

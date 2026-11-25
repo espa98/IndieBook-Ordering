@@ -94,7 +94,7 @@ export function requestRefund(
   if (typeof request.amountKrw !== "string" || !/^[1-9]\d*$/.test(request.amountKrw)) {
     invalid("amountKrw", "must be a positive integer string in KRW");
   }
-  for (const field of ["evidence", "requestedBy"] as const) {
+  for (const field of ["paymentId", "evidence", "requestedBy"] as const) {
     if (!isNonEmptyString(request[field])) {
       invalid(field, "must be a non-empty string");
     }

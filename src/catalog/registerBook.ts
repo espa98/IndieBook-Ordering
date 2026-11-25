@@ -106,6 +106,10 @@ export function registerBook(deps: RegisterBookDeps, request: RegisterBookReques
   if (!isNonEmptyString(request.registeredBy)) {
     invalid("registeredBy", "must be a non-empty string");
   }
+  // 중복 확인 표시는 생략할 수 있지만, 제공했다면 확인한 도서의 ID(비어 있지 않은 문자열)여야 한다
+  if (request.acknowledgeDuplicateOf !== undefined && !isNonEmptyString(request.acknowledgeDuplicateOf)) {
+    invalid("acknowledgeDuplicateOf", "must be a non-empty string when provided");
+  }
   const now = (deps.now ?? (() => new Date()))();
   parseUtcTimestamp("registeredAt", request.registeredAt, now);
   if (request.source === "YES24") {

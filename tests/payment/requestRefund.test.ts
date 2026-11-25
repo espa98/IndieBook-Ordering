@@ -88,6 +88,22 @@ describe("requestRefund: Staff의 환급 완료 확인 요청 (ST-Y06, DEC-09, B
     expect(refundRequests.list("tenant-a", task.id)).toEqual([]);
   });
 
+  it("환급 대상 결제 ID(paymentId)가 비어 있지 않은 문자열이 아니면(빈 문자열·숫자·null·누락) 결제 조회(404)보다 먼저 VALIDATION_ERROR 400이고 아무것도 기록되지 않는다", () => {
+    const { deps, requestRefundRequest, task, refundRequests } = refundRequestScene();
+
+    for (const paymentId of ["", " ", 123, null, undefined]) {
+      let thrown: unknown;
+      try {
+        requestRefund(deps, requestRefundRequest({ paymentId } as never));
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, JSON.stringify(paymentId)).toBeInstanceOf(AppError);
+      expect((thrown as AppError).code, JSON.stringify(paymentId)).toBe("VALIDATION_ERROR");
+    }
+    expect(refundRequests.list("tenant-a", task.id)).toEqual([]);
+  });
+
   it("같은 멱등 키로 재호출하면 같은 요청을 돌려주고(한도 오류가 아니다) 중복 예약하지 않는다", () => {
     const { deps, requestRefundRequest, task, refundRequests } = refundRequestScene();
 

@@ -60,6 +60,10 @@ export function updateBook(deps: UpdateBookDeps, request: UpdateBookRequest): Bo
   if (!["title", "authors", "isbn", "listPriceKrw"].some((k) => k in changes)) {
     invalid("changes", "at least one field must change");
   }
+  // 중복 확인 표시는 생략할 수 있지만, 제공했다면 확인한 도서의 ID(비어 있지 않은 문자열)여야 한다
+  if (request.acknowledgeDuplicateOf !== undefined && !isNonEmptyString(request.acknowledgeDuplicateOf)) {
+    invalid("acknowledgeDuplicateOf", "must be a non-empty string when provided");
+  }
   for (const field of ["reason", "changedBy"] as const) {
     if (!isNonEmptyString(request[field])) {
       invalid(field, "must be a non-empty string");

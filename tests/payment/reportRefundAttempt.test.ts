@@ -54,6 +54,22 @@ describe("reportRefundAttempt: 환급 시도 실패·불명확 결과 보고 (ST
     expect(refundAttempts.list("tenant-a", task.id)).toEqual([]);
   });
 
+  it("환급 시도 대상 결제 ID(paymentId)가 비어 있지 않은 문자열이 아니면(빈 문자열·숫자·null·누락) 결제 조회(404)보다 먼저 VALIDATION_ERROR 400이고 아무것도 기록되지 않는다", () => {
+    const { deps, reportAttemptRequest, refundAttempts, task } = refundAttemptScene();
+
+    for (const paymentId of ["", " ", 123, null, undefined]) {
+      let thrown: unknown;
+      try {
+        reportRefundAttempt(deps, reportAttemptRequest({ paymentId } as never));
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, JSON.stringify(paymentId)).toBeInstanceOf(AppError);
+      expect((thrown as AppError).code, JSON.stringify(paymentId)).toBe("VALIDATION_ERROR");
+    }
+    expect(refundAttempts.list("tenant-a", task.id)).toEqual([]);
+  });
+
   it("UNKNOWN 시도의 금액은 환급 한도에서 예약되어 재환급 요청이 막히고(TC-90), FAILED 시도는 예약하지 않는다", () => {
     const { deps, reportAttemptRequest, requestRefundRequest } = refundAttemptScene();
     const requestCode = (amountKrw: string) => {

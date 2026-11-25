@@ -82,6 +82,9 @@ export function postFulfillment(
   deps: PostFulfillmentDeps,
   request: PostFulfillmentRequest,
 ): Fulfillment {
+  if (!isNonEmptyString(request.orderLineId)) {
+    invalid("orderLineId", "must be a non-empty string");
+  }
   if (!Array.isArray(request.sources) || request.sources.length === 0) {
     invalid("sources", "must be a non-empty array");
   }

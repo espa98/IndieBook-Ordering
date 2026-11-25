@@ -98,6 +98,18 @@ describe("updateBook: 도서 정보 수정 (ST-B03, BOOK-003/007)", () => {
     expect(deps.books.get("tenant-a", book.id)!.version).toBe(1);
   });
 
+  it("중복 확인 표시(acknowledgeDuplicateOf)가 제공됐는데 비어 있지 않은 문자열이 아니면(빈 문자열·숫자·null) 중복 후보가 없어도 VALIDATION_ERROR 400이고 아무것도 바뀌지 않는다", () => {
+    const { deps, revisions, updateRequest, book } = updateScene();
+
+    for (const bad of ["", 123, null, true, []]) {
+      expect(codeOf(() => updateBook(deps, updateRequest({ changes: { title: "개정판" }, acknowledgeDuplicateOf: bad as never }))), JSON.stringify(bad)).toBe("VALIDATION_ERROR");
+    }
+    // 생략하면 선택 필드이므로 그대로 수정된다
+    expect(codeOf(() => updateBook(deps, updateRequest({ changes: { title: "개정판" } })))).toBeUndefined();
+    expect(revisions).toHaveLength(1);
+    expect(deps.books.get("tenant-a", book.id)!.version).toBe(2);
+  });
+
   it("ISBN을 다른 도서와 같게 바꾸면 중복 후보로 거부하고 확인 표시가 있으면 허용하며, 자기 자신의 ISBN을 그대로 두는 수정은 중복이 아니다", () => {
     const { deps, book, manualRequest, updateRequest } = updateScene();
     const other = registerBook(deps, manualRequest({ isbn: "9780000000002" }));

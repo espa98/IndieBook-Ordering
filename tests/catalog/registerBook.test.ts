@@ -99,4 +99,15 @@ describe("registerBook: 도서 등록 (ST-B01 YES24 선택, ST-B02 수기 등록
 
     expect(codeOf(() => registerBook(deps, yes24Request({ tenantId: "tenant-b", externalId: "Y24-5" })))).toBeUndefined();
   });
+
+  it("중복 확인 표시(acknowledgeDuplicateOf)가 제공됐는데 비어 있지 않은 문자열이 아니면(빈 문자열·숫자·null) 중복 후보가 없어도 VALIDATION_ERROR 400이고 등록되지 않는다", () => {
+    const { deps, books, yes24Request } = catalogScene();
+
+    for (const bad of ["", 123, null, true, []]) {
+      expect(codeOf(() => registerBook(deps, yes24Request({ acknowledgeDuplicateOf: bad as never }))), JSON.stringify(bad)).toBe("VALIDATION_ERROR");
+    }
+    expect(books).toEqual([]);
+    expect(codeOf(() => registerBook(deps, yes24Request()))).toBeUndefined(); // 생략하면 선택 필드라 그대로 등록된다
+    expect(books).toHaveLength(1);
+  });
 });
