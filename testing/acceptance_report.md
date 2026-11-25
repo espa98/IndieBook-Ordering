@@ -1188,3 +1188,26 @@
 - 안내 대상의 `renoticeOfTargetId`(재안내로 생긴 대상) 분기와 시도·결과가 없는 `PENDING` 대상, 실패(`FAILED`) 결과의 응답은 검증하지 않았다.
 - **쓰기(POST) 62개 경로의 응답은 여전히 자유 형식**이다.
 
+## 65. 응답 스키마: 쓰기 12개 경로 (도서·공급처·템플릿·결제·배정·발주, T8 일부)
+
+테스트 1개 추가(`tests/openapi/responseContract.test.ts`, 검증 헬퍼는 POST도 받도록 일반화). 먼저 "쓰기 응답의 `data` 스키마가 선언되어 있다"에서 **실패함을 확인**한 뒤 채웠다. 이미 만든 조회용 스키마를 재사용했다.
+
+| 경로(성공 상태) | 스키마 |
+|---|---|
+| `POST /books`(201), `POST /books/{bookId}/updates`(200) | `Book` |
+| `POST /suppliers`(201), `.../updates`(200), `.../activation`(200) | `Supplier` |
+| `POST /message-templates`(201) | `TemplateVersion` |
+| `POST /orders/{orderId}/payments`(201) | `Payment`(신규) |
+| `POST /payments/{paymentId}/confirmation`(201) | `PaymentConfirmation`(신규) |
+| `POST /orders/{orderId}/lines/{lineId}/sourcing-allocations`(201) | `SourcingAllocation`(신규) |
+| `POST /purchase-orders`(201), `.../ready`(200), `.../delivery`(200) | `PurchaseOrder` |
+
+테스트 입력 오류 1건: 공급처 `activation`에 `expectedVersion`을 보냈으나 그 경로는 이 필드를 받지 않아 400이었다(명세와 서버는 일치). 입력에서 뺐다.
+
+이로써 응답 `data`를 선언한 경로는 **76개 중 26개**(조회 14 + 쓰기 12)다.
+
+**한계**
+- 나머지 **50개 쓰기 경로**(취소·종결·반품·환급·안내 쓰기·직원·입고·배분 등)의 응답은 자유 형식이다.
+- 한 번의 정상 시나리오 응답만 검증했다. 선택 필드가 채워지는 다른 분기(예: YES24 도서, 발주 취소 응답)는 확인하지 못했다.
+- 오류 응답(4xx/5xx)의 발생 조건 검증은 여전히 401뿐이다.
+

@@ -43,18 +43,21 @@ async function call(method: "GET" | "POST", path: string, body?: unknown, query 
   return { status: response.status, body: JSON.parse(JSON.stringify(response.body)) as any };
 }
 
-/** 명세의 `GET <template>` 200 응답 스키마(참조를 풀지 않은 원본)를 찾는다 */
-const responseSchema = (template: string) => spec.paths[`/v1/tenants/{tenantId}${template}`].get.responses["200"].content["application/json"].schema as Record<string, any>;
+/** 명세의 `<method> <template>` 성공(2xx) 응답 스키마(참조를 풀지 않은 원본)를 찾는다 */
+const responseSchema = (template: string, method: "get" | "post" = "get") => {
+  const responses = spec.paths[`/v1/tenants/{tenantId}${template}`][method].responses as Record<string, any>;
+  return responses[Object.keys(responses).find((code) => code.startsWith("2"))!].content["application/json"].schema as Record<string, any>;
+};
 const ajv = new Ajv2020({ strict: false, allErrors: true });
 ajv.addFormat("date-time", (v) => /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?(Z|[+-]\d\d:\d\d)$/.test(v) && !Number.isNaN(Date.parse(v)));
 ajv.addFormat("date", (v) => /^\d{4}-\d\d-\d\d$/.test(v) && !Number.isNaN(Date.parse(v)));
 ajv.addFormat("uuid", (v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v));
-const conforms = (template: string, body: unknown) => {
-  const schema = { ...responseSchema(template), components: spec.components };
+const conforms = (template: string, body: unknown, method: "get" | "post" = "get") => {
+  const schema = { ...responseSchema(template, method), components: spec.components };
   const ok = ajv.validate(schema, body);
   return { ok, errors: ajv.errorsText() };
 };
-const declared = (template: string) => Object.keys(responseSchema(template).properties?.data ?? {}).length > 0;
+const declared = (template: string, method: "get" | "post" = "get") => Object.keys(responseSchema(template, method).properties?.data ?? {}).length > 0;
 
 const READS = ["/suppliers", "/suppliers/{code}"] as const;
 
@@ -179,6 +182,39 @@ describe("응답 계약: 템플릿·안내 대상·미수령 경고 조회", () 
     expect(conforms("/message-templates", templates.body)).toMatchObject({ ok: true });
     expect(conforms("/orders/{orderId}/notification-targets", targets.body)).toMatchObject({ ok: true });
     expect(conforms("/long-unreceived-warnings", warnings.body)).toMatchObject({ ok: true });
+  });
+});
+
+type Checked = { template: string; body: unknown };
+describe("응답 계약(쓰기): 도서·공급처·발주·결제", () => {
+  it("쓰기 응답의 data 스키마가 선언되어 있고 실제 응답이 그것을 만족한다", async () => {
+    const checked: Checked[] = [];
+    const write = async (template: string, path: string, body: unknown, status: number) => {
+      const res = await call("POST", path, body);
+      expect(res.status, `${template} 상태`).toBe(status);
+      checked.push({ template, body: res.body });
+      return res.body.data;
+    };
+    const book = await write("/books", "/books", { source: "MANUAL", title: "쓰기 책", listPriceKrw: "11000", reason: "수기 등록", registeredAt: "2026-03-04T06:00:00.000Z" }, 201);
+    await write("/books/{bookId}/updates", `/books/${book.id}/updates`, { expectedVersion: 1, changes: { title: "쓰기 책 2판" }, reason: "정정", changedAt: "2026-03-04T06:10:00.000Z" }, 200);
+    await write("/suppliers", "/suppliers", { code: "gamma", name: "감마 도매", orderChannel: "WEB", registeredAt: "2026-03-04T06:00:00.000Z" }, 201);
+    await write("/suppliers/{code}/updates", "/suppliers/gamma/updates", { expectedVersion: 1, changes: { name: "감마 유통" }, reason: "상호 변경", changedAt: "2026-03-04T06:10:00.000Z" }, 200);
+    await write("/suppliers/{code}/activation", "/suppliers/gamma/activation", { active: false, reason: "거래 중단", changedAt: "2026-03-04T06:20:00.000Z" }, 200);
+    await write("/message-templates", "/message-templates", { key: "WRITE_READY", body: "{{storeName}}입니다", expectedVersion: 0, publishedAt: "2026-03-04T06:00:00.000Z" }, 201);
+
+    const draft = await call("POST", "/orders", { lines: [{ bookId: book.id, quantity: 2, unitPriceKrw: "11000" }] });
+    const orderId = draft.body.data.id as string;
+    const confirmed = await call("POST", `/orders/${orderId}/confirm`, { expectedVersion: 1 });
+    const lineId = confirmed.body.data.lines[0].lineId as string;
+    const payment = await write("/orders/{orderId}/payments", `/orders/${orderId}/payments`, { method: "CARD", amountKrw: "22000", externalReference: "WRITE-1", paidAt: "2026-03-04T06:00:00.000Z" }, 201);
+    await write("/payments/{paymentId}/confirmation", `/payments/${payment.id}/confirmation`, { evidence: "승인 내역", confirmedAt: "2026-03-04T06:30:00.000Z" }, 201);
+    const allocation = await write("/orders/{orderId}/lines/{lineId}/sourcing-allocations", `/orders/${orderId}/lines/${lineId}/sourcing-allocations`, { supplierCode: "alpha", quantity: 2 }, 201);
+    const po = await write("/purchase-orders", "/purchase-orders", { supplierCode: "alpha", allocationIds: [allocation.id] }, 201);
+    await write("/purchase-orders/{purchaseOrderId}/ready", `/purchase-orders/${po.id}/ready`, { expectedVersion: 1 }, 200);
+    await write("/purchase-orders/{purchaseOrderId}/delivery", `/purchase-orders/${po.id}/delivery`, { expectedVersion: 2, method: "EMAIL", deliveredAt: "2026-03-04T07:00:00.000Z" }, 200);
+
+    for (const { template } of checked) expect(declared(template, "post"), `${template} data 스키마`).toBe(true);
+    for (const { template, body } of checked) expect(conforms(template, body, "post"), template).toMatchObject({ ok: true });
   });
 });
 
