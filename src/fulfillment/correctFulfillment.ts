@@ -74,6 +74,10 @@ export function correctFulfillment(
   if (!Number.isInteger(request.quantity) || request.quantity < 1) {
     invalid("quantity", "must be an integer >= 1");
   }
+  // 불리언이 아닌 값은 형식 오류다. false(실물 반입 미확인)는 아래에서 업무 규칙으로 거부한다
+  if (typeof request.physicalReturnConfirmed !== "boolean") {
+    invalid("physicalReturnConfirmed", "must be a boolean");
+  }
   if (!Array.isArray(request.restorations) || request.restorations.length === 0) {
     invalid("restorations", "must be a non-empty array");
   }

@@ -3,7 +3,7 @@ import {
   executeIdempotent,
   type IdempotencyStore,
 } from "../idempotency/executeIdempotent";
-import { invalid, isNonEmptyString } from "../procurement/validation";
+import { invalid, isNonEmptyString, parseUtcTimestamp } from "../procurement/validation";
 import type { GoodsReceiptRepository } from "./receiveGoods";
 
 /** 초과입고 결정 기록 (추가 전용). 입고 기록 자체는 바꾸지 않는다. */
@@ -50,12 +50,17 @@ export function decideExcessReceipt(
   if (request.actorRole !== "OWNER") {
     throw new AppError("FORBIDDEN");
   }
+  if (request.decision !== "APPROVED" && request.decision !== "REJECTED") {
+    invalid("decision", "must be APPROVED or REJECTED");
+  }
   if (!isNonEmptyString(request.reason)) {
     invalid("reason", "must be a non-empty string");
   }
   if (!Number.isInteger(request.quantity) || request.quantity < 1) {
     invalid("quantity", "must be an integer >= 1");
   }
+  const now = (deps.now ?? (() => new Date()))();
+  parseUtcTimestamp("decidedAt", request.decidedAt, now);
   return executeIdempotent(
     deps.idempotency,
     {
@@ -94,7 +99,7 @@ export function decideExcessReceipt(
         reason: request.reason,
         decidedBy: request.decidedBy,
         decidedAt: request.decidedAt,
-        recordedAt: (deps.now ?? (() => new Date()))().toISOString(),
+        recordedAt: now.toISOString(),
       };
       deps.excessDecisions.save(decision);
       return decision;

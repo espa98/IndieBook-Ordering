@@ -1622,3 +1622,36 @@ vitest는 타입을 검사하지 않아 §73에서 제가 만든 테스트의 �
 - 문자열 길이 상한(1000자), 배열 크기 상한(100개)은 변이에 넣지 않았다(서버의 `INPUT_LIMITS`).
 - 기준 본문이 400인 4개 경로는 건너뛰었다.
 
+## 86. 판단 불가였던 거부 입력 69건을 실제 대상으로 확인 (§85 한계 해소, `tests/openapi/requestSchemaConclusive.test.ts`)
+
+테스트 6개 추가(`requestSchemaConclusive` 3, 도메인 3). §85의 판단 불가 69건은 서버가 대상 조회(404)를 입력 검증보다 먼저 하는 경로에서 **대상이 없어서** 명세가 거부하는 입력을 서버가 정말 400으로 거부하는지 알 수 없던 것이다. 이 69건을 **대상이 실제로 존재하는 요청**(HTTP로 만든 세계: 도서·주문·결제·수령·공급처·발주·입고·배분·환급 업무)으로 다시 보냈다. 거부 입력만 보내므로 서버가 400을 내면 상태가 바뀌지 않는다.
+
+**69건의 분류(13개 경로):** 본문의 참조 ID 필드 48건, 경로 대상이 있어야 검증까지 가는 경로 21건.
+
+| 대상 | 건수 | 결과 |
+|---|---|---|
+| `orders/{orderId}/confirm`의 `expectedVersion` | 6 | 서버가 이미 400. 검사를 끄는 변이에서 6건이 모두 422로 새는 것을 확인(원복) |
+| `excess-decisions`의 `decision`·`decidedAt` | 11 | **서버 결함**(아래) |
+| `fulfillments/{id}/corrections`의 `physicalReturnConfirmed` | 4 | **서버 결함**(아래) |
+| 본문의 참조 ID 필드 | 48 | **알려진 불일치로 고정**(아래, 정책 결정 대기) |
+
+**서버 결함 1: `decideExcessReceipt`가 `decision`과 `decidedAt`을 검증하지 않았다.** 실제 수령에 보내자 `decision`에 없는 값·빈 문자열·숫자·`null`·누락을 보내면 **500**(DB 제약 위반이 샘) 5건, `decidedAt`에 빈 문자열·숫자·`null`·잘못된 문자열은 **500** 4건, `decidedAt: "2026-03-04"`(날짜만)는 **201로 그대로 기록**되었고, 누락은 422였다. 다른 명령(`adjustStock` 등)은 `parseUtcTimestamp`로 검증하는데 이 명령만 빠져 있었다. 도메인 테스트를 먼저 써서 RED → `decision`을 `APPROVED`·`REJECTED`로 검증, 시각은 `parseUtcTimestamp`(미래도 거부)로 검증 → GREEN. `now`를 한 곳으로 모으는 리팩터 뒤에도 11개 통과.
+
+**서버 결함 2: `correctFulfillment`가 `physicalReturnConfirmed`가 불리언이 아닌 것을 업무 규칙(422)으로 분류했다.** `"true"`·`1`·`null`·누락이 422(`BUSINESS_INVARIANT`)였다. `false`(실물 반입 미확인)는 정당한 422이고 기존 테스트가 그것을 요구해서 수정하지 않았다. **불리언이 아닌 값만** 입력 형식 오류(`VALIDATION_ERROR` 400)로 분리했다. 기존 테스트를 고치지 않고 새 테스트를 추가했다(`false`는 계속 422임도 같은 테스트가 확인한다).
+
+**알려진 불일치(정책 결정 대기): 본문의 참조 ID 필드가 형식 검사 없이 조회된다.** `orderLineId`·`paymentId`·`poLineId`·`purchaseOrderId`·`toOrderId` 등에 형식이 틀린 값을 보내면 명세는 거부하지만 서버는 400이 아니라 404·422(조회 실패)로 응답한다. 관찰 결과는 필드마다 검증 수준이 세 갈래였다.
+
+| 검증 수준 | 필드 | 응답 |
+|---|---|---|
+| 타입까지 검증, uuid 형식만 못 봄 | `reallocations`의 `toOrderId`·`toOrderLineId`, `receipts/allocations`의 `orderId`·`orderLineId`, `receipts`·`supplier-replies`의 `poLineId` | `"not-a-uuid"`만 404·422, 빈 문자열·숫자·`null`·누락은 400 |
+| **타입도 검증하지 않음** | `cancellation-requests`·`fulfillments`의 `orderLineId`, `refund-requests`·`refund-attempts`의 `paymentId`, `duplicate-risk-approvals`의 `poLineId`·`purchaseOrderId` | 모든 형식 오류가 404·422. **`null`·누락도 조회로 흘러간다** |
+| 그 외 | `books/{id}/updates`의 `acknowledgeDuplicateOf` | `"not-a-uuid"`는 **200(성공)**, 빈 문자열·숫자·`null`은 409 |
+
+도메인 명령에 uuid를 강제할 수 없다: 도메인 테스트가 메모리 저장소로 `"order-1"` 같은 비-uuid ID를 쓰고(그 테스트들은 수정하지 않는다), PG 어댑터는 이미 `isUuid`로 형식을 확인하되 틀리면 "조회 결과 없음(404)"으로 흘려 보낸다. 형식 오류를 400으로 응답하게 할지는 **클라이언트가 보는 계약을 바꾸는 결정**이라 임의로 바꾸지 않았다. 대신 현재 동작을 **(경로, 필드)·값 종류별 표로 그대로 고정**했다. 서버가 개선되면 이 표가 실패해 갱신을 알려 준다(변이 확인: `postFulfillment`의 `orderLineId`를 검증하게 하자 그 항목의 404가 400으로 바뀐 것이 정확히 차이로 드러났고 원복했다).
+
+**테스트 입력 오류 3건(구현 문제 아님):** 세계를 만드는 중 수령이 결제 확인 전이라 422(결제를 먼저 입력·확인하도록 수정), 결제 외부 참조와 공급처 코드가 두 번째 세계 구성에서 중복되어 422(호출마다 고유하게 수정).
+
+**한계**
+- 참조 ID 48건은 **서버가 400을 내지 않는 것을 확인했을 뿐 고치지 않았다.** `books/{id}/updates`의 `acknowledgeDuplicateOf: "not-a-uuid"`가 200으로 성공하는 것은 중복 도서 확인 표시가 잘못된 값으로도 통과한다는 뜻이라 별도로 검토할 가치가 있다.
+- 세계에 포함하지 않은 대상(반품 요청·반품 예외 등)이 필요한 경로의 거부 입력은 확인하지 않았다. §85의 판단 불가 69건은 위 13개 경로가 전부이므로 이 69건은 모두 다뤘지만, 최상위 필드만 비교했다는 §85의 한계는 그대로다.
+

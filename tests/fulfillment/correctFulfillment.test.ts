@@ -125,6 +125,25 @@ describe("correctFulfillment: 수령 오기록 정정 역거래 (ST-F02, D21, BR
     expect(level()).toEqual(before);
   });
 
+  it("실물 복귀 확인이 불리언이 아니면(문자열·숫자·null·누락) 업무 규칙(422)이 아니라 VALIDATION_ERROR 400이고, false는 여전히 BUSINESS_INVARIANT 422이다", () => {
+    const { deps, correctRequest, netDelivered, fulfillmentCorrections } = correctionScene();
+    const before = netDelivered();
+    const codeOf = (extra: Parameters<typeof correctRequest>[0]) => {
+      try {
+        correctFulfillment(deps, correctRequest(extra));
+      } catch (error) {
+        return (error as AppError).code;
+      }
+    };
+
+    for (const bad of ["true", 1, null, undefined]) {
+      expect(codeOf({ physicalReturnConfirmed: bad as never }), JSON.stringify(bad)).toBe("VALIDATION_ERROR");
+    }
+    expect(codeOf({ physicalReturnConfirmed: false })).toBe("BUSINESS_INVARIANT"); // 실물 반입을 확인하지 못한 것은 업무 규칙이다
+    expect(fulfillmentCorrections).toEqual([]);
+    expect(netDelivered()).toBe(before);
+  });
+
   it("복원 수량 합계가 정정 수량과 다르거나, 원 수령에 없던 출처이거나, 누적 정정이 원 수령량·출처별 인도량을 넘으면 BUSINESS_INVARIANT 422이고 기록되지 않는다", () => {
     const { deps, correctRequest, netDelivered, level, reservation, fulfillmentCorrections } = correctionScene();
     const codeOf = (extra: Parameters<typeof correctRequest>[0]) => {

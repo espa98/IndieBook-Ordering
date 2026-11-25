@@ -122,6 +122,38 @@ describe("decideExcessReceipt: 초과입고 Owner 승인·거절 (ST-R02, D30)",
     expect(deps.excessDecisions.list("tenant-a", receipt.id)).toEqual([]);
   });
 
+  it("결정이 APPROVED·REJECTED가 아니면(없는 값·빈 문자열·숫자·null·누락) VALIDATION_ERROR 400이고 아무것도 기록되지 않는다", () => {
+    const { deps, request, receipt } = excessScene();
+
+    for (const decision of ["BOGUS", "", 123, null, undefined]) {
+      let thrown: unknown;
+      try {
+        decideExcessReceipt(deps, request({ decision } as never));
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, JSON.stringify(decision)).toBeInstanceOf(AppError);
+      expect((thrown as AppError).code, JSON.stringify(decision)).toBe("VALIDATION_ERROR");
+    }
+    expect(deps.excessDecisions.list("tenant-a", receipt.id)).toEqual([]);
+  });
+
+  it("결정 시각이 RFC3339 UTC 시각이 아니거나(빈 문자열·숫자·null·누락·날짜만) 미래이면 VALIDATION_ERROR 400이고 아무것도 기록되지 않는다", () => {
+    const { deps, request, receipt } = excessScene();
+
+    for (const decidedAt of ["", 123, null, undefined, "not-a-date", "2026-03-04", "2999-01-01T00:00:00.000Z"]) {
+      let thrown: unknown;
+      try {
+        decideExcessReceipt(deps, request({ decidedAt } as never));
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, JSON.stringify(decidedAt)).toBeInstanceOf(AppError);
+      expect((thrown as AppError).code, JSON.stringify(decidedAt)).toBe("VALIDATION_ERROR");
+    }
+    expect(deps.excessDecisions.list("tenant-a", receipt.id)).toEqual([]);
+  });
+
   it("같은 멱등 키로 재호출하면 같은 결정을 돌려주고 중복 기록하지 않는다", () => {
     const { deps, request, receipt } = excessScene();
 
