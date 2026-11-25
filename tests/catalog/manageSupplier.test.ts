@@ -67,6 +67,17 @@ describe("updateSupplier: 공급처 수정 (ST-B04, SUP-002)", () => {
     expect(changes).toHaveLength(before);
     expect(codeOf(() => updateSupplier(deps, updateRequest({ actorRole: "STAFF", changedBy: "staff-delegated" })))).toBeUndefined();
   });
+
+  it("changes가 객체가 아니면(문자열·숫자·불리언·배열) 내부 오류(TypeError)가 아니라 VALIDATION_ERROR 400이고 이력이 늘지 않는다", () => {
+    const { deps, changes, updateRequest } = updateScene();
+    const before = changes.length;
+
+    for (const bad of ["name", 5, true, ["name"]]) {
+      expect(() => updateSupplier(deps, updateRequest({ changes: bad as never })), JSON.stringify(bad)).toThrow(AppError);
+      expect(codeOf(() => updateSupplier(deps, updateRequest({ changes: bad as never }))), JSON.stringify(bad)).toBe("VALIDATION_ERROR");
+    }
+    expect(changes).toHaveLength(before);
+  });
 });
 
 describe("setSupplierActive: 공급처 비활성화·복구 (ST-B04)", () => {

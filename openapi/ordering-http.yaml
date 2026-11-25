@@ -52,7 +52,7 @@ paths:
               additionalProperties: false
               required: [quantity, reservedAt]
               properties:
-                quantity: { type: integer }
+                quantity: { type: integer, minimum: 1 }
                 reservedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -106,7 +106,7 @@ paths:
               additionalProperties: false
               required: [quantity, actedAt]
               properties:
-                quantity: { type: integer }
+                quantity: { type: integer, minimum: 1 }
                 actedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -161,8 +161,8 @@ paths:
               required: [direction, quantity, reason, actedAt]
               properties:
                 direction: { type: string, enum: [IN, OUT] }
-                quantity: { type: integer }
-                reason: { type: string }
+                quantity: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 1 }
                 actedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -293,8 +293,8 @@ paths:
               additionalProperties: false
               required: [quantity, reason, releasedAt]
               properties:
-                quantity: { type: integer }
-                reason: { type: string }
+                quantity: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 1 }
                 releasedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -348,7 +348,7 @@ paths:
               additionalProperties: false
               required: [reason, voidedAt]
               properties:
-                reason: { type: string }
+                reason: { type: string, minLength: 1 }
                 voidedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -473,7 +473,7 @@ paths:
               additionalProperties: false
               required: [quantity, restorations, reason, evidence, physicalReturnConfirmed, correctedAt]
               properties:
-                quantity: { type: integer }
+                quantity: { type: integer, minimum: 1 }
                 restorations:
                   type: array
                   minItems: 1
@@ -485,8 +485,8 @@ paths:
                       kind: { type: string, enum: [STOCK_RESERVATION, RECEIPT_ALLOCATION] }
                       sourceId: { type: string, minLength: 1 }
                       quantity: { type: integer, minimum: 1 }
-                reason: { type: string }
-                evidence: { type: string }
+                reason: { type: string, minLength: 1 }
+                evidence: { type: string, minLength: 1 }
                 physicalReturnConfirmed: { type: boolean }
                 correctedAt: { type: string, format: date-time }
       responses:
@@ -541,9 +541,9 @@ paths:
               additionalProperties: false
               required: [reducedKrw, reason, evidence, correctedAt]
               properties:
-                reducedKrw: { type: string }
-                reason: { type: string }
-                evidence: { type: string }
+                reducedKrw: { type: string, minLength: 1, pattern: '^[1-9][0-9]{0,14}$' }
+                reason: { type: string, minLength: 1 }
+                evidence: { type: string, minLength: 1 }
                 correctedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -598,9 +598,9 @@ paths:
               required: [orderLineId, quantity, reason, expectedVersion, requestedAt]
               properties:
                 orderLineId: { type: string, format: uuid }
-                quantity: { type: integer }
-                reason: { type: string }
-                expectedVersion: { type: integer }
+                quantity: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 1 }
+                expectedVersion: { type: integer, minimum: 1 }
                 requestedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -761,7 +761,7 @@ paths:
               additionalProperties: false
               required: [expectedVersion, requestedAt]
               properties:
-                expectedVersion: { type: integer }
+                expectedVersion: { type: integer, minimum: 1 }
                 requestedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -815,7 +815,7 @@ paths:
               additionalProperties: false
               required: [quantity, actedAt]
               properties:
-                quantity: { type: integer }
+                quantity: { type: integer, minimum: 1 }
                 actedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -874,7 +874,7 @@ paths:
               additionalProperties: false
               required: [quantity, requestedAt]
               properties:
-                quantity: { type: integer }
+                quantity: { type: integer, minimum: 1 }
                 requestedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -928,9 +928,9 @@ paths:
               additionalProperties: false
               required: [acceptedQuantity, rejectedQuantity, evidence, repliedAt]
               properties:
-                acceptedQuantity: { type: integer }
-                rejectedQuantity: { type: integer }
-                evidence: { type: string }
+                acceptedQuantity: { type: integer, minimum: 0 }
+                rejectedQuantity: { type: integer, minimum: 0 }
+                evidence: { type: string, minLength: 1 }
                 repliedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -984,9 +984,9 @@ paths:
               additionalProperties: false
               required: [quantity, dispatchedAt]
               properties:
-                quantity: { type: integer }
+                quantity: { type: integer, minimum: 1 }
                 dispatchedAt: { type: string, format: date-time }
-                referenceNumber: { type: string }
+                referenceNumber: { type: string, minLength: 1 }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -1039,8 +1039,8 @@ paths:
               additionalProperties: false
               required: [quantity, evidence, confirmedAt]
               properties:
-                quantity: { type: integer }
-                evidence: { type: string }
+                quantity: { type: integer, minimum: 1 }
+                evidence: { type: string, minLength: 1 }
                 confirmedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -1094,9 +1094,9 @@ paths:
               additionalProperties: false
               required: [quantity, kind, evidence, reportedAt]
               properties:
-                quantity: { type: integer }
+                quantity: { type: integer, minimum: 1 }
                 kind: { type: string, enum: [LOST, REFUSED, RETURNED_BACK] }
-                evidence: { type: string }
+                evidence: { type: string, minLength: 1 }
                 reportedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -1150,8 +1150,8 @@ paths:
               additionalProperties: false
               required: [quantity, retryReason, requestedAt]
               properties:
-                quantity: { type: integer }
-                retryReason: { type: string }
+                quantity: { type: integer, minimum: 1 }
+                retryReason: { type: string, minLength: 1 }
                 requestedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -1206,8 +1206,8 @@ paths:
               required: [outcome, quantity, evidence, resolvedAt]
               properties:
                 outcome: { type: string, enum: [RECOVERED, RETURNED] }
-                quantity: { type: integer }
-                evidence: { type: string }
+                quantity: { type: integer, minimum: 1 }
+                evidence: { type: string, minLength: 1 }
                 resolvedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -1288,8 +1288,8 @@ paths:
               required: [method, amountKrw, externalReference, paidAt]
               properties:
                 method: { type: string, enum: [BANK_TRANSFER, CARD, EASY_PAY] }
-                amountKrw: { type: string }
-                externalReference: { type: string }
+                amountKrw: { type: string, minLength: 1, pattern: '^[1-9][0-9]{0,14}$' }
+                externalReference: { type: string, minLength: 1 }
                 paidAt: { type: string, format: date-time }
       responses:
         "201":
@@ -1343,7 +1343,7 @@ paths:
               additionalProperties: false
               required: [evidence, confirmedAt]
               properties:
-                evidence: { type: string }
+                evidence: { type: string, minLength: 1 }
                 confirmedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -1451,8 +1451,8 @@ paths:
               required: [paymentId, amountKrw, evidence, requestedAt]
               properties:
                 paymentId: { type: string, format: uuid }
-                amountKrw: { type: string }
-                evidence: { type: string }
+                amountKrw: { type: string, minLength: 1, pattern: '^[1-9][0-9]{0,14}$' }
+                evidence: { type: string, minLength: 1 }
                 requestedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -1507,9 +1507,9 @@ paths:
               required: [paymentId, amountKrw, result, reason, reportedAt]
               properties:
                 paymentId: { type: string, format: uuid }
-                amountKrw: { type: string }
+                amountKrw: { type: string, minLength: 1, pattern: '^[1-9][0-9]{0,14}$' }
                 result: { type: string, enum: [FAILED, UNKNOWN] }
-                reason: { type: string }
+                reason: { type: string, minLength: 1 }
                 reportedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -1564,7 +1564,7 @@ paths:
               required: [outcome, evidence, resolvedAt]
               properties:
                 outcome: { type: string, enum: [CONFIRMED, FAILED] }
-                evidence: { type: string }
+                evidence: { type: string, minLength: 1 }
                 resolvedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -1831,7 +1831,7 @@ paths:
               required: [channel, messageSnapshot, attemptedAt]
               properties:
                 channel: { type: string, enum: [MESSENGER, OTHER, PHONE, SMS, VISIT] }
-                messageSnapshot: { type: string }
+                messageSnapshot: { type: string, minLength: 1 }
                 attemptedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -1939,7 +1939,7 @@ paths:
               required: [outcome, note, resultAt]
               properties:
                 outcome: { type: string, enum: [FAILED, MANUAL_RECORDED] }
-                note: { type: string }
+                note: { type: string, minLength: 1 }
                 resultAt: { type: string, format: date-time }
       responses:
         "201":
@@ -2249,7 +2249,7 @@ paths:
               additionalProperties: false
               required: [expectedVersion, changes, reason, changedAt]
               properties:
-                expectedVersion: { type: integer }
+                expectedVersion: { type: integer, minimum: 1 }
                 changes:
                   type: object
                   minProperties: 1
@@ -2258,7 +2258,7 @@ paths:
                     authors: { type: array, items: { type: string } }
                     isbn: { type: string }
                     listPriceKrw: { type: string, pattern: '^[1-9][0-9]*$' }
-                reason: { type: string }
+                reason: { type: string, minLength: 1 }
                 acknowledgeDuplicateOf: { type: string, format: uuid }
                 changedAt: { type: string, format: date-time }
       responses:
@@ -2571,8 +2571,8 @@ paths:
               additionalProperties: false
               required: [code, name, orderChannel, registeredAt]
               properties:
-                code: { type: string }
-                name: { type: string }
+                code: { type: string, minLength: 1 }
+                name: { type: string, minLength: 1 }
                 orderChannel: { type: string, enum: [API, EMAIL, FILE, MESSENGER, PHONE, WEB] }
                 registeredAt: { type: string, format: date-time }
       responses:
@@ -2658,14 +2658,14 @@ paths:
               additionalProperties: false
               required: [expectedVersion, changes, reason, changedAt]
               properties:
-                expectedVersion: { type: integer }
+                expectedVersion: { type: integer, minimum: 1 }
                 changes:
                   type: object
                   minProperties: 1
                   properties:
                     name: { type: string }
                     orderChannel: { type: string, enum: [API, EMAIL, FILE, MESSENGER, PHONE, WEB] }
-                reason: { type: string }
+                reason: { type: string, minLength: 1 }
                 changedAt: { type: string, format: date-time }
       responses:
         "200":
@@ -2719,7 +2719,7 @@ paths:
               required: [active, reason, changedAt]
               properties:
                 active: { type: boolean }
-                reason: { type: string }
+                reason: { type: string, minLength: 1 }
                 changedAt: { type: string, format: date-time }
       responses:
         "200":
@@ -2779,8 +2779,8 @@ paths:
               additionalProperties: false
               required: [supplierCode, quantity]
               properties:
-                supplierCode: { type: string }
-                quantity: { type: integer }
+                supplierCode: { type: string, minLength: 1 }
+                quantity: { type: integer, minimum: 1 }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -2842,7 +2842,7 @@ paths:
                 purchaseOrderId: { type: string, format: uuid }
                 poLineId: { type: string, format: uuid }
                 surplusPlan: { type: string, enum: [STOCK_INTAKE, SUPPLIER_RETURN] }
-                planNote: { type: string }
+                planNote: { type: string, minLength: 1 }
                 approvedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -2896,7 +2896,7 @@ paths:
               additionalProperties: false
               required: [reason, releasedAt]
               properties:
-                reason: { type: string }
+                reason: { type: string, minLength: 1 }
                 releasedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -2994,8 +2994,8 @@ paths:
               additionalProperties: false
               required: [supplierCode, allocationIds]
               properties:
-                supplierCode: { type: string }
-                allocationIds: { type: array, items: { type: string, format: uuid } }
+                supplierCode: { type: string, minLength: 1 }
+                allocationIds: { type: array, items: { type: string, format: uuid }, minItems: 1 }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -3080,7 +3080,7 @@ paths:
               additionalProperties: false
               required: [expectedVersion]
               properties:
-                expectedVersion: { type: integer }
+                expectedVersion: { type: integer, minimum: 1 }
       responses:
         "200":
           description: 성공(`data`는 도메인 객체)
@@ -3133,11 +3133,11 @@ paths:
               additionalProperties: false
               required: [expectedVersion, method, deliveredAt]
               properties:
-                expectedVersion: { type: integer }
+                expectedVersion: { type: integer, minimum: 1 }
                 method: { type: string, enum: [API, EMAIL, FILE, MESSENGER, PHONE, WEB] }
                 deliveredAt: { type: string, format: date-time }
-                referenceNumber: { type: string }
-                fileVersion: { type: integer }
+                referenceNumber: { type: string, minLength: 1 }
+                fileVersion: { type: integer, minimum: 1 }
       responses:
         "200":
           description: 성공(`data`는 도메인 객체)
@@ -3190,8 +3190,8 @@ paths:
               additionalProperties: false
               required: [expectedVersion, reason, cancelledAt]
               properties:
-                expectedVersion: { type: integer }
-                reason: { type: string }
+                expectedVersion: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 1 }
                 cancelledAt: { type: string, format: date-time }
       responses:
         "200":
@@ -3251,8 +3251,8 @@ paths:
               additionalProperties: false
               required: [quantity, reason]
               properties:
-                quantity: { type: integer }
-                reason: { type: string }
+                quantity: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 1 }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)
@@ -3311,9 +3311,9 @@ paths:
               additionalProperties: false
               required: [acceptedQuantity, rejectedQuantity, evidence, repliedAt]
               properties:
-                acceptedQuantity: { type: integer }
-                rejectedQuantity: { type: integer }
-                evidence: { type: string }
+                acceptedQuantity: { type: integer, minimum: 0 }
+                rejectedQuantity: { type: integer, minimum: 0 }
+                evidence: { type: string, minLength: 1 }
                 repliedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -3367,7 +3367,7 @@ paths:
               additionalProperties: false
               required: [expectedVersion]
               properties:
-                expectedVersion: { type: integer }
+                expectedVersion: { type: integer, minimum: 1 }
       responses:
         "200":
           description: 성공(`data`는 도메인 객체)
@@ -3422,10 +3422,10 @@ paths:
               properties:
                 poLineId: { type: string, format: uuid }
                 kind: { type: string, enum: [CONFIRM, DELAY, OUT_OF_STOCK] }
-                quantity: { type: integer }
+                quantity: { type: integer, minimum: 1 }
                 source: { type: string, enum: [DELAYED, UNANSWERED] }
                 eta: { type: string, format: date }
-                evidence: { type: string }
+                evidence: { type: string, minLength: 1 }
                 repliedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -3480,9 +3480,9 @@ paths:
               required: [poLineId, normalQuantity, damagedQuantity, misdeliveredQuantity, receivedAt]
               properties:
                 poLineId: { type: string, format: uuid }
-                normalQuantity: { type: integer }
-                damagedQuantity: { type: integer }
-                misdeliveredQuantity: { type: integer }
+                normalQuantity: { type: integer, minimum: 0 }
+                damagedQuantity: { type: integer, minimum: 0 }
+                misdeliveredQuantity: { type: integer, minimum: 0 }
                 receivedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -3537,9 +3537,9 @@ paths:
               required: [kind, quantity, outcome, evidence, resolvedAt]
               properties:
                 kind: { type: string, enum: [DAMAGED, MISDELIVERED] }
-                quantity: { type: integer }
+                quantity: { type: integer, minimum: 1 }
                 outcome: { type: string, enum: [DISCARDED, RETURNED_TO_SUPPLIER, SUPPLIER_CREDIT] }
-                evidence: { type: string }
+                evidence: { type: string, minLength: 1 }
                 resolvedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -3594,8 +3594,8 @@ paths:
               required: [decision, quantity, reason, decidedAt]
               properties:
                 decision: { type: string, enum: [APPROVED, REJECTED] }
-                quantity: { type: integer }
-                reason: { type: string }
+                quantity: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 1 }
                 decidedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -3649,8 +3649,8 @@ paths:
               additionalProperties: false
               required: [quantity, reason, correctedAt]
               properties:
-                quantity: { type: integer }
-                reason: { type: string }
+                quantity: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 1 }
                 correctedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -3706,7 +3706,7 @@ paths:
               properties:
                 orderId: { type: string, format: uuid }
                 orderLineId: { type: string, format: uuid }
-                quantity: { type: integer }
+                quantity: { type: integer, minimum: 1 }
                 allocatedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -3760,8 +3760,8 @@ paths:
               additionalProperties: false
               required: [quantity, reason, cancelledAt]
               properties:
-                quantity: { type: integer }
-                reason: { type: string }
+                quantity: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 1 }
                 cancelledAt: { type: string, format: date-time }
       responses:
         "201":
@@ -3817,8 +3817,8 @@ paths:
               properties:
                 toOrderId: { type: string, format: uuid }
                 toOrderLineId: { type: string, format: uuid }
-                quantity: { type: integer }
-                reason: { type: string }
+                quantity: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 1 }
                 actedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -3877,8 +3877,8 @@ paths:
               additionalProperties: false
               required: [quantity, reason, releasedAt]
               properties:
-                quantity: { type: integer }
-                reason: { type: string }
+                quantity: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 1 }
                 releasedAt: { type: string, format: date-time }
       responses:
         "201":

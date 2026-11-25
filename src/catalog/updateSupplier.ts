@@ -36,6 +36,9 @@ export function updateSupplier(deps: UpdateSupplierDeps, request: UpdateSupplier
     invalid("expectedVersion", "must be an integer >= 1");
   }
   const changes = request.changes ?? {};
+  if (typeof changes !== "object" || Array.isArray(changes)) {
+    invalid("changes", "must be an object");
+  }
   if (!("name" in changes) && !("orderChannel" in changes)) {
     invalid("changes", "at least one field must change");
   }

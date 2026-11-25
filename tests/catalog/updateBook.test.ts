@@ -87,6 +87,17 @@ describe("updateBook: 도서 정보 수정 (ST-B03, BOOK-003/007)", () => {
     expect(deps.books.get("tenant-a", book.id)!.version).toBe(1);
   });
 
+  it("changes가 객체가 아니면(문자열·숫자·불리언·배열) 내부 오류(TypeError)가 아니라 VALIDATION_ERROR 400이다", () => {
+    const { deps, revisions, updateRequest, book } = updateScene();
+
+    for (const bad of ["title", 5, true, ["title"]]) {
+      expect(() => updateBook(deps, updateRequest({ changes: bad as never })), JSON.stringify(bad)).toThrow(AppError);
+      expect(codeOf(() => updateBook(deps, updateRequest({ changes: bad as never }))), JSON.stringify(bad)).toBe("VALIDATION_ERROR");
+    }
+    expect(revisions).toEqual([]);
+    expect(deps.books.get("tenant-a", book.id)!.version).toBe(1);
+  });
+
   it("ISBN을 다른 도서와 같게 바꾸면 중복 후보로 거부하고 확인 표시가 있으면 허용하며, 자기 자신의 ISBN을 그대로 두는 수정은 중복이 아니다", () => {
     const { deps, book, manualRequest, updateRequest } = updateScene();
     const other = registerBook(deps, manualRequest({ isbn: "9780000000002" }));

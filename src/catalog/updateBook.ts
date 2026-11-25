@@ -54,6 +54,9 @@ export function updateBook(deps: UpdateBookDeps, request: UpdateBookRequest): Bo
     invalid("expectedVersion", "must be an integer >= 1");
   }
   const changes = request.changes ?? {};
+  if (typeof changes !== "object" || Array.isArray(changes)) {
+    invalid("changes", "must be an object");
+  }
   if (!["title", "authors", "isbn", "listPriceKrw"].some((k) => k in changes)) {
     invalid("changes", "at least one field must change");
   }
