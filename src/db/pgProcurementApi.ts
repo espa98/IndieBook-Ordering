@@ -325,15 +325,22 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
       const { tenantId: _t, ...rest } = request;
       void _t;
       const none = { purchaseOrders: { get: () => undefined }, replies: { list: () => [] }, cancellations: { listResponses: () => [] }, receipts: { list: () => [] }, receiptCorrections: { list: () => [] }, sourcingReleases: { listByOrder: () => [] } };
-      const result = authorizedActions.approveDuplicateRisk(
-        {
-          supplierObligations: risk?.supplierObligations ?? none,
-          duplicateRiskApprovals: { list: () => risk?.approvals ?? [], save: (a) => void saved.push(a) },
-          idempotency,
-        },
-        principal,
-        rest,
-      );
+      let result: DuplicateRiskApproval;
+      try {
+        result = authorizedActions.approveDuplicateRisk(
+          {
+            supplierObligations: risk?.supplierObligations ?? none,
+            duplicateRiskApprovals: { list: () => risk?.approvals ?? [], save: (a) => void saved.push(a) },
+            idempotency,
+          },
+          principal,
+          rest,
+        );
+      } catch (error) {
+        // 권한·입력 검증 다음에는 대상 존재가 업무 규칙("열린 의무 없음")보다 먼저다. 없는 주문이나 그 주문에 없는 품목은 NOT_FOUND다
+        if (error instanceof AppError && error.code === "BUSINESS_INVARIANT" && !order?.lines.some((l) => l.lineId === request.lineId)) throw new AppError("NOT_FOUND");
+        throw error;
+      }
       for (const a of saved) {
         await client.query(
           "insert into public.ordering_duplicate_risk_approvals (id, tenant_id, order_id, order_line_id, purchase_order_id, po_line_id, surplus_plan, plan_note, approved_by, approved_at, recorded_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",

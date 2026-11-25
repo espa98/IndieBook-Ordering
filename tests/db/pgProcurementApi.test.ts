@@ -292,6 +292,39 @@ describe("중복 구매 위험 (이전 공급처 의무가 남은 품목의 재�
   });
 });
 
+describe("중복 구매 위험 승인은 없는 주문·품목을 NOT_FOUND로 거부한다", () => {
+  const MISSING = "0a000000-0000-4000-8000-0000000000fe";
+
+  it("존재하지 않는 주문의 승인은 '열린 의무 없음'(422)이 아니라 NOT_FOUND이고 아무것도 기록하지 않는다", async () => {
+    const api = createPgProcurementApi({ pool: db.pool() });
+    const before = (await rows("select count(*)::int as n from public.ordering_duplicate_risk_approvals"))[0].n;
+
+    expect(await codeOf(() => approveRisk(api, { orderId: MISSING, lineId: MISSING }, { purchaseOrderId: MISSING, poLineId: MISSING }))).toBe("NOT_FOUND");
+
+    expect((await rows("select count(*)::int as n from public.ordering_duplicate_risk_approvals"))[0].n).toBe(before);
+  });
+
+  it("주문은 있지만 그 주문에 없는 품목의 승인도 NOT_FOUND이고, 주문과 품목이 있는데 열린 의무만 없으면 여전히 업무 규칙 위반(422)이다", async () => {
+    const api = createPgProcurementApi({ pool: db.pool() });
+    const line = await confirmedLine(18, 1);
+    const otherLine = await confirmedLine(19, 1); // 다른 주문의 품목
+
+    expect(await codeOf(() => approveRisk(api, { orderId: line.orderId, lineId: MISSING }, { purchaseOrderId: MISSING, poLineId: MISSING }))).toBe("NOT_FOUND"); // 없는 품목
+    expect(await codeOf(() => approveRisk(api, { orderId: line.orderId, lineId: otherLine.lineId }, { purchaseOrderId: MISSING, poLineId: MISSING }))).toBe("NOT_FOUND"); // 다른 주문의 품목
+    expect(await codeOf(() => approveRisk(api, line, { purchaseOrderId: MISSING, poLineId: MISSING }))).toBe("BUSINESS_INVARIANT"); // 실제 품목이지만 열린 의무가 없다
+  });
+
+  it("권한(403)과 입력 검증(400)이 대상 존재(404)보다 먼저라서, 권한 없는 사용자에게 주문 존재 여부가 드러나지 않는다", async () => {
+    const api = createPgProcurementApi({ pool: db.pool() });
+    const missing = { orderId: MISSING, lineId: MISSING };
+    const obligation = { purchaseOrderId: MISSING, poLineId: MISSING };
+
+    expect(await codeOf(() => approveRisk(api, missing, obligation, staff))).toBe("FORBIDDEN");
+    expect(await codeOf(() => approveRisk(api, missing, obligation, { userId: STRANGER }))).toBe("FORBIDDEN");
+    expect(await codeOf(() => api.approveDuplicateRisk(owner, { tenantId: T_A, ...missing, ...obligation, surplusPlan: "BOGUS" as never, planNote: "메모", approvedAt: "2026-03-04T06:40:00.000Z", idempotencyKey: key() }))).toBe("VALIDATION_ERROR");
+  });
+});
+
 const cancelUndelivered = (api: Api, purchaseOrderId: string, expectedVersion: number, actor = staff) =>
   api.cancelUndeliveredPurchaseOrder(actor, { tenantId: T_A, purchaseOrderId, expectedVersion, reason: "공급처 변경", cancelledAt: "2026-03-04T06:15:00.000Z", idempotencyKey: key() });
 const requestCancel = (api: Api, purchaseOrderId: string, poLineId: string, quantity: number) =>

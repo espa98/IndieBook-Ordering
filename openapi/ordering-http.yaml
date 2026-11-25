@@ -11,7 +11,7 @@ info:
     **이 명세가 기술하지 않는 것(미구현·미검증):** 필수 여부(`required`)·열거값·타입은 도메인 요청 타입 기준이고
     런타임 400으로는 전수 검증하지 않았다, 응답 `data`의 필드별 스키마(76개 경로 전부 선언했고 `tests/openapi/responseContract.test.ts`가 실제 정상 응답 한 번으로 검증한다. 다른 분기의 응답은 도메인 타입 기준), 경로별 오류 응답의 실제 발생
     조건. DB 없이 판정되는 공통 오류(401·404 식별자 형식·400 쿼리/헤더/본문·415·405)는 `tests/openapi/errorContract.test.ts`가,
-    DB가 필요한 공통 오류(403 비멤버·404 없는 대상)는 `errorContractDb.test.ts`가 모든 서점 범위 경로에서 검증한다(알려진 불일치 1건 제외).
+    DB가 필요한 공통 오류(403 비멤버·404 없는 대상)는 `errorContractDb.test.ts`가 모든 서점 범위 경로에서 검증한다(예외 없음).
     409·422·500은 선언만 하고 경로별로 확인하지 않는다.
 
     **공통 규칙(`ordering.yaml`과 같다):** Bearer JWT, 모든 쓰기(POST)는 `Idempotency-Key` 필수, 경로 식별자는 UUID가 아니면 404

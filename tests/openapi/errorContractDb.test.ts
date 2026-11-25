@@ -98,33 +98,16 @@ async function check(routes: ReturnType<typeof tenantRoutes>, sub: string, idFil
   return problems;
 }
 
-/**
- * 알려진 불일치: 존재하지 않는 대상인데 404가 아닌 응답을 주는 경로. 동작을 바꾸는 일이라 사용자 결정 전에는 고치지 않았고,
- * 현재 동작을 그대로 고정한다. 고치면 이 목록의 단언이 실패해 갱신을 알려 준다.
- */
-const KNOWN_GAPS: Record<string, { status: number; why: string }> = {
-  "POST /v1/tenants/{tenantId}/orders/{orderId}/lines/{lineId}/duplicate-risk-approvals": { status: 422, why: "없는 주문 품목을 404가 아니라 '열린 공급처 의무 없음'(BUSINESS_INVARIANT)으로 거부한다" },
-};
-const gapKey = (r: { method: string; template: string }) => specKey(r);
-
 describe("오류 응답 계약(DB): 모든 서점 범위 경로의 공통 오류", () => {
   it("서점의 멤버가 아닌 사용자의 요청은 모든 경로에서 403이고, 명세가 선언하며, 본문이 ErrorBody를 만족한다", async () => {
     expect(await check(tenantRoutes(), STRANGER, MISSING, 403)).toEqual([]);
   });
 
-  it("멤버가 존재하지 않는 대상(UUID 형식은 맞음)을 가리키면 알려진 불일치를 뺀 모든 경로에서 404이고, 명세가 선언하며, 본문이 ErrorBody를 만족한다", async () => {
-    const withTarget = tenantRoutes().filter((r) => /\{(?!code\})[^}]+\}/.test(r.template) && !(gapKey(r) in KNOWN_GAPS));
+  it("멤버가 존재하지 않는 대상(UUID 형식은 맞음)을 가리키면 모든 경로에서 404이고, 명세가 선언하며, 본문이 ErrorBody를 만족한다", async () => {
+    const withTarget = tenantRoutes().filter((r) => /\{(?!code\})[^}]+\}/.test(r.template));
     expect(withTarget.length).toBeGreaterThan(40);
-    // GET이 POST의 부수 효과(없는 도서에 기록된 재고)를 보지 않도록 GET을 먼저 확인한다
+    // 읽기(GET)와 쓰기(POST)를 나눠 확인한다. 쓰기가 실패해도 읽기 결과는 영향받지 않는다
     expect(await check(withTarget.filter((r) => r.method === "GET"), OWNER, MISSING, 404)).toEqual([]);
     expect(await check(withTarget.filter((r) => r.method === "POST"), OWNER, MISSING, 404)).toEqual([]);
-  });
-
-  it("알려진 불일치는 현재 동작 그대로다 (고치면 이 단언이 실패해 목록 갱신을 알려 준다)", async () => {
-    const ops = await loadOperations();
-    for (const r of tenantRoutes().filter((x) => gapKey(x) in KNOWN_GAPS)) {
-      const response = await app(request(r, OWNER, MISSING, sampleBody(ops.get(specKey(r)))));
-      expect(response.status, `${gapKey(r)}: ${KNOWN_GAPS[gapKey(r)]!.why}`).toBe(KNOWN_GAPS[gapKey(r)]!.status);
-    }
   });
 });
