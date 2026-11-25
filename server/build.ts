@@ -8,9 +8,9 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
  * 서버를 의존성까지 포함한 단일 ESM 파일로 묶는다(E8). 실행에는 Node.js만 필요하다.
  * `pg-native`는 선택 의존성이라 제외한다. 번들은 소스맵·시험용 값·개발 의존성을 담지 않는다.
  */
-export async function buildServer(outFile: string): Promise<void> {
+async function bundle(entry: string, outFile: string): Promise<void> {
   await build({
-    entryPoints: [resolve(root, "server/main.ts")],
+    entryPoints: [resolve(root, entry)],
     outfile: outFile,
     bundle: true,
     platform: "node",
@@ -25,9 +25,13 @@ export async function buildServer(outFile: string): Promise<void> {
   });
 }
 
-// `node server/build.ts [출력 파일]`로 직접 실행하면 dist/server.mjs를 만든다
+export const buildServer = (outFile: string) => bundle("server/main.ts", outFile);
+/** 마이그레이션 적용 도구(`server/migrate.ts`)도 같은 방식으로 단일 파일로 묶는다 */
+export const buildMigrate = (outFile: string) => bundle("server/migrate.ts", outFile);
+
+// `node server/build.ts [출력 파일] [server|migrate]`로 직접 실행하면 dist/server.mjs(또는 지정한 파일)를 만든다
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const out = resolve(process.argv[2] ?? resolve(root, "dist/server.mjs"));
-  await buildServer(out);
+  await (process.argv[3] === "migrate" ? buildMigrate(out) : buildServer(out));
   console.log(`built ${out}`);
 }

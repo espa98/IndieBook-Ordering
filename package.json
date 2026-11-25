@@ -7,7 +7,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build": "node server/build.ts",
-    "start": "node dist/server.mjs"
+    "start": "node dist/server.mjs",
+    "migrate": "node server/build.ts dist/migrate.mjs migrate && node dist/migrate.mjs"
   },
   "devDependencies": {
     "@apidevtools/swagger-parser": "^13.1.0",
