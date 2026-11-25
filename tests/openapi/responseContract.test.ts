@@ -43,9 +43,19 @@ async function call(method: "GET" | "POST", path: string, body?: unknown, query 
   return { status: response.status, body: JSON.parse(JSON.stringify(response.body)) as any };
 }
 
+/** 지정한 사용자(와 이메일 claim)로 전체 경로(`/v1/...`)를 호출한다. 계정 범위 경로와 다른 사용자의 요청에 쓴다 */
+async function callAs(sub: string, email: string | undefined, method: "GET" | "POST", fullPath: string, body?: unknown) {
+  const token = signHs256({ sub, aud: "authenticated", role: "authenticated", exp: nowSec() + 3600, iat: nowSec(), ...(email ? { email } : {}) }, SECRET, { kid: "k1" });
+  const headers: Record<string, string> = { authorization: `Bearer ${token}` };
+  if (method === "POST") headers["idempotency-key"] = `contract-${++seq}`;
+  if (body !== undefined) headers["content-type"] = "application/json";
+  const response = await app({ method, path: fullPath, query: new URLSearchParams(), headers, rawBody: body === undefined ? undefined : JSON.stringify(body) });
+  return { status: response.status, body: JSON.parse(JSON.stringify(response.body)) as any };
+}
+
 /** 명세의 `<method> <template>` 성공(2xx) 응답 스키마(참조를 풀지 않은 원본)를 찾는다 */
 const responseSchema = (template: string, method: "get" | "post" = "get") => {
-  const responses = spec.paths[`/v1/tenants/{tenantId}${template}`][method].responses as Record<string, any>;
+  const responses = spec.paths[template.startsWith("/v1/") ? template : `/v1/tenants/{tenantId}${template}`][method].responses as Record<string, any>;
   return responses[Object.keys(responses).find((code) => code.startsWith("2"))!].content["application/json"].schema as Record<string, any>;
 };
 const ajv = new Ajv2020({ strict: false, allErrors: true });
@@ -338,6 +348,29 @@ describe("응답 계약(쓰기): 주문 취소·종결·취소 물량 처분·�
     await write("/return-exceptions/{exceptionId}/resolutions", `/return-exceptions/${exception.id}/resolutions`, { outcome: "RETURNED", quantity: 1, evidence: "공급처 확인", resolvedAt: "2026-03-05T08:20:00.000Z" }, 201);
     await write("/return-requests/{requestId}/renegotiations", `/return-requests/${returnRequest.id}/renegotiations`, { quantity: 1, retryReason: "재협의", requestedAt: "2026-03-05T08:30:00.000Z" }, 201);
     await write("/return-requests/{requestId}/completions", `/return-requests/${returnRequest.id}/completions`, { quantity: 2, evidence: "반품 완료 확인", confirmedAt: "2026-03-05T08:40:00.000Z" }, 201);
+
+    for (const { template } of checked) expect(declared(template, "post"), `${template} data 스키마`).toBe(true);
+    for (const { template, body } of checked) expect(conforms(template, body, "post"), template).toMatchObject({ ok: true });
+  });
+});
+
+describe("응답 계약(쓰기): 직원 초대·계정", () => {
+  it("서점 개설·직원 초대·수락·철회·상태 변경 응답이 선언한 스키마를 만족한다", async () => {
+    const checked: Checked[] = [];
+    const record = (template: string, res: { status: number; body: any }, status: number) => {
+      expect(res.status, `${template} 상태 ${JSON.stringify(res.body)}`).toBe(status);
+      checked.push({ template, body: res.body });
+      return res.body.data;
+    };
+    const ownerId = "55555555-0000-4000-8000-000000000001";
+    const staffId = "55555555-0000-4000-8000-000000000002";
+    const store = record("/v1/stores", await callAs(ownerId, "owner@shop.test", "POST", "/v1/stores", { storeName: "계약 서점" }), 201);
+    const base = `/v1/tenants/${store.tenant.id}`;
+    const invited = record("/staff-invitations", await callAs(ownerId, "owner@shop.test", "POST", `${base}/staff-invitations`, { email: "staff@shop.test", expiresAt: new Date(Date.now() + 86_400_000).toISOString() }), 201);
+    record("/v1/invitations/accept", await callAs(staffId, "staff@shop.test", "POST", "/v1/invitations/accept", { token: invited.token }), 201);
+    record("/members/{targetUserId}/status", await callAs(ownerId, "owner@shop.test", "POST", `${base}/members/${staffId}/status`, { status: "INACTIVE" }), 200);
+    const second = record("/staff-invitations", await callAs(ownerId, "owner@shop.test", "POST", `${base}/staff-invitations`, { email: "other@shop.test", expiresAt: new Date(Date.now() + 86_400_000).toISOString() }), 201);
+    record("/staff-invitations/{invitationId}/revocation", await callAs(ownerId, "owner@shop.test", "POST", `${base}/staff-invitations/${second.invitation.id}/revocation`, {}), 201);
 
     for (const { template } of checked) expect(declared(template, "post"), `${template} data 스키마`).toBe(true);
     for (const { template, body } of checked) expect(conforms(template, body, "post"), template).toMatchObject({ ok: true });
