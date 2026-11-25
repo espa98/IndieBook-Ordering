@@ -60,13 +60,15 @@
 | `ordering_order_lines` | `ordered_qty`, `cancelled_qty`, `unit_price_krw`, `version` | `quantity`, `position`, 도서 스냅샷 열, 확정 뒤 불변 트리거 | 수량 의미가 다르다(신규는 취소 적용 시 주문 수량을 제자리에서 줄이는 승인된 해석을 쓴다). 레거시 열은 ERD 설계서에서 '기존/확장'으로 표시되어 일부는 제안일 수 있다 |
 | `ordering_commands` | PK `(tenant_id, command_key)`, `payload_hash`, `result` | PK `(tenant_id, operation, command_key)` | 키 구조가 달라 같은 키가 다른 명령에 재사용될 수 있다 |
 
-**미확인(점검 필요):** 열의 실제 타입·널 허용, 제약·트리거 이름, `private` 스키마에 같은 이름의 함수가 있는지(`private.is_ordering_member`, `private.forbid_mutation`, `private.protect_last_owner`는 신규가 `create function` 한다), 확장(`pgcrypto`·`gen_random_uuid`), 테이블별 행 수.
+**확인됨(11-25 점검):** `private` 스키마가 없어 신규 마이그레이션의 `private.*` 함수와 이름 충돌이 **없다**(#9). 충돌 5개 테이블은 모두 0행이다(#10).
+
+**미확인(점검 필요):** 열의 실제 타입·널 허용, 제약·트리거 이름(#3~#5), 정책·권한(#6~#8), 확장(`pgcrypto`·`gen_random_uuid`, #11), 나머지 테이블의 행 수.
 
 ## 5. 위험 분석
 
 | # | 위험 | 근거 | 심각도 | 대응 |
 |---|---|---|---|---|
-| R1 | 마이그레이션 적용 실패·부분 적용 | §4의 테이블 5개 충돌, 함수 이름 충돌 가능성 | 높음 | 같은 프로젝트에 적용하지 않는다(옵션 A) |
+| R1 | 마이그레이션 적용 실패·부분 적용 | §4의 테이블 5개 충돌(`create table`은 행이 0개여도 실패). **함수 이름 충돌은 없음**(`private` 스키마가 없음, 11-25) | 높음 | 같은 프로젝트에 적용하지 않는다(옵션 A). 충돌은 테이블 5개로 한정되고, 인덱스·트리거 이름 충돌 여부는 #4·#5로 확인한다 |
 | R2 | 두 쓰기 경로의 공존 | 레거시는 `authenticated`가 RPC로 쓰고, 신규는 `service_role`만 쓰며 `authenticated`는 SELECT뿐. 같은 테이블에 두 경로가 있으면 신규 가드(예약 합계 ≤ 보유 재고, 확정 주문 불변, 추가 전용 원장)에 레거시 쓰기가 막히거나, 레거시가 신규 불변식을 모르는 상태로 값을 바꾼다 | 높음 | 같은 테이블을 공유하지 않는다 |
 | R3 | 클라이언트 전환 | 레거시는 `supabase.rpc('ordering_v2_command', …)`를 프런트에서 직접 호출. 신규는 별도 백엔드의 HTTP API(`/v1/...`, Bearer JWT) | 중간 | 프런트의 호출 계층을 HTTP 클라이언트로 교체. 신규 OpenAPI가 계약 |
 | R4 | 권한 정책 불일치 | 레거시는 Staff의 `payment`·`complete`를 일률 차단(`보안 비판적재검토` P0-1). 신규는 OPDS V1.1대로 Staff가 결제 기록·확인·종결 요청 가능, 환급 승인·정정은 Owner 전용 | 중간 | 신규 정책이 승인된 문서에 맞다. 전환 시 직원 권한이 **넓어진다**는 점을 알린다 |
@@ -122,7 +124,7 @@
 | #6 RLS 사용 여부 | 미실행 | — |
 | #7 정책 | 미실행 | — |
 | #8 테이블 권한 | 미실행 | — |
-| #9 `private` 스키마 | 미실행 | — |
+| #9 `private` 스키마 | **완료** | **`private` 스키마가 없다**(사용자 보고, 11-25). 따라서 신규 마이그레이션의 `private.*` 함수(`is_ordering_member`, `forbid_mutation`, `protect_last_owner`, 각종 `guard_*`)와 **이름 충돌이 없다.** 레거시의 접근 제어는 `private.is_ordering_member`에 의존하지 않는다(정책이 무엇을 쓰는지는 #7로 확인) |
 | #10 테이블별 행 수 | **부분** | 이름이 겹치는 5개 테이블이 **모두 0행**: `ordering_tenants` 0, `ordering_members` 0, `ordering_orders` 0, `ordering_order_lines` 0, `ordering_commands` 0. 나머지 `ordering%` 테이블의 행 수는 **미보고** |
 | #11~#12 확장·서버 버전 | 미실행 | — |
 
