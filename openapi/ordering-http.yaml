@@ -9,7 +9,7 @@ info:
     본문 허용 필드(`additionalProperties: false`), 쿼리 파라미터, `Idempotency-Key` 필수 여부가 어긋나면 테스트가 실패한다.
 
     **이 명세가 기술하지 않는 것(미구현·미검증):** 필수 여부(`required`)·열거값·타입은 도메인 요청 타입 기준이고
-    런타임 400으로는 전수 검증하지 않았다, 응답 `data`의 필드별 스키마(공급처·도서·재고 조회 7개 경로만 선언했고 `tests/openapi/responseContract.test.ts`가 실제 응답으로 검증한다. 나머지는 자유 형식), 경로별 오류 응답의 실제 발생
+    런타임 400으로는 전수 검증하지 않았다, 응답 `data`의 필드별 스키마(조회 11개 경로(공급처·도서·재고·감사 로그·결제 현황·발주)만 선언했고 `tests/openapi/responseContract.test.ts`가 실제 응답으로 검증한다. 나머지는 자유 형식), 경로별 오류 응답의 실제 발생
     조건(공통 오류 응답을 선언만 하고 401만 계약 테스트로 확인한다).
 
     **공통 규칙(`ordering.yaml`과 같다):** Bearer JWT, 모든 쓰기(POST)는 `Idempotency-Key` 필수, 경로 식별자는 UUID가 아니면 404
@@ -1105,7 +1105,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/OrderPayments" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -1749,7 +1752,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/AuditLogEntry" } }
+                      nextCursor: { type: string }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -2579,7 +2590,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/PurchaseOrder" } }
+                      nextCursor: { type: string }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -2642,7 +2661,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/PurchaseOrder" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -3450,6 +3472,110 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    PurchaseOrder:
+      type: object
+      required: [id, tenantId, supplierCode, status, version, lines]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        supplierCode: { type: string }
+        status: { type: string, enum: [DRAFT, READY, SENT, ACKNOWLEDGED, CANCELLED, CLOSED] }
+        version: { type: integer }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [poLineId, bookId, quantity, links]
+            properties:
+              poLineId: { type: string, format: uuid }
+              bookId: { type: string }
+              quantity: { type: integer }
+              links:
+                type: array
+                items:
+                  type: object
+                  required: [allocationId, orderId, orderLineId, quantity]
+                  properties:
+                    allocationId: { type: string, format: uuid }
+                    orderId: { type: string, format: uuid }
+                    orderLineId: { type: string, format: uuid }
+                    quantity: { type: integer }
+        delivery:
+          type: object
+          required: [method, deliveredAt, recordedAt, deliveredBy, poVersion]
+          properties:
+            method: { type: string, enum: [API, EMAIL, FILE, MESSENGER, PHONE, WEB] }
+            deliveredAt: { type: string, format: date-time }
+            recordedAt: { type: string, format: date-time }
+            deliveredBy: { type: string }
+            referenceNumber: { type: string }
+            poVersion: { type: integer }
+            fileVersion: { type: integer }
+        cancelledAt: { type: string, format: date-time }
+        cancelledBy: { type: string }
+        cancelReason: { type: string }
+        closedAt: { type: string, format: date-time }
+    OrderPayments:
+      type: object
+      required: [summary, payments, confirmations, voids, corrections, refundTasks, refundRequests, refunds]
+      properties:
+        summary:
+          type: object
+          required: [totalKrw, confirmedKrw, pendingKrw, balanceKrw, refundRequiredKrw]
+          properties:
+            totalKrw: { type: string }
+            confirmedKrw: { type: string }
+            pendingKrw: { type: string }
+            balanceKrw: { type: string }
+            refundRequiredKrw: { type: string }
+        payments:
+          type: array
+          items:
+            type: object
+            required: [id, tenantId, orderId, method, amountKrw, externalReference, paidAt, recordedBy, recordedAt, status]
+            properties:
+              id: { type: string, format: uuid }
+              tenantId: { type: string, format: uuid }
+              orderId: { type: string, format: uuid }
+              method: { type: string, enum: [BANK_TRANSFER, CARD, EASY_PAY] }
+              amountKrw: { type: string }
+              externalReference: { type: string }
+              paidAt: { type: string, format: date-time }
+              recordedBy: { type: string }
+              recordedAt: { type: string, format: date-time }
+              status: { type: string, enum: [CONFIRMED, PENDING, VOIDED] }
+        confirmations:
+          type: array
+          items:
+            type: object
+            required: [id, tenantId, paymentId, evidence, confirmedBy, confirmedAt, verificationSource, recordedAt]
+            properties:
+              id: { type: string, format: uuid }
+              tenantId: { type: string, format: uuid }
+              paymentId: { type: string, format: uuid }
+              evidence: { type: string }
+              confirmedBy: { type: string }
+              confirmedAt: { type: string, format: date-time }
+              verificationSource: { type: string, enum: [STAFF_MANUAL_EVIDENCE] }
+              recordedAt: { type: string, format: date-time }
+        voids: { type: array, items: { type: object } }
+        corrections: { type: array, items: { type: object } }
+        refundTasks: { type: array, items: { type: object } }
+        refundRequests: { type: array, items: { type: object } }
+        refunds: { type: array, items: { type: object } }
+    AuditLogEntry:
+      type: object
+      required: [seq, id, tenantId, actorId, operation, requestHash, targets, recordedAt]
+      properties:
+        seq: { type: string }
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        actorId: { type: string }
+        operation: { type: string }
+        commandKey: { type: string }
+        requestHash: { type: string }
+        targets: { type: object, additionalProperties: { type: string } }
+        recordedAt: { type: string, format: date-time }
     StockLevel:
       type: object
       required: [bookId, onHand, reserved, available]

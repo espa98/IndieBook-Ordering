@@ -1155,3 +1155,20 @@
 - 검증기는 `ajv-formats`가 없어 `date-time`·`date`·`uuid` 형식만 테스트에서 직접 등록했다(새 의존성을 추가하지 않았다).
 - 응답 오류(4xx/5xx)의 발생 조건 검증은 여전히 401만 있다.
 
+## 63. 응답 스키마: 감사 로그·결제 현황·발주 조회 (T8 일부)
+
+테스트 2개 추가(`tests/openapi/responseContract.test.ts`). §62와 같은 방식으로 먼저 "`data` 스키마가 선언되어 있다"에서 실패함을 확인한 뒤 채웠다. 응답 `data`를 선언한 경로는 **11개**(76개 중)가 되었다.
+
+| 경로 | 스키마 | 검증한 응답 |
+|---|---|---|
+| `GET /audit-log` | `AuditLogEntry`(`items`·`nextCursor`) | 결제 확인까지의 실제 감사 기록 |
+| `GET /orders/{orderId}/payments` | `OrderPayments`(요약·결제·확인) | 확인된 결제 1건 |
+| `GET /purchase-orders`, `GET /purchase-orders/{purchaseOrderId}` | `PurchaseOrder`(품목·연결, 선택 `delivery`·취소·종결) | 전달 전(DRAFT)과 전달 뒤(SENT, `delivery` 포함) |
+
+테스트 입력 오류 1건: 발주 전달 기록의 성공 상태를 201로 잘못 기대했으나 서버는 200이다(명세와 서버가 이미 일치). 기대값만 고쳤다.
+
+**한계**
+- 결제 현황의 `voids`·`corrections`·`refundTasks`·`refundRequests`·`refunds`는 검증 시나리오에서 비어 있어 항목 구조를 **확인하지 못했다**. 항목은 `type: object`로만 선언했다.
+- 발주의 취소·종결(`cancelledAt`·`cancelledBy`·`cancelReason`·`closedAt`) 분기 응답은 검증하지 않았다(필드는 도메인 타입에서 옮겼다).
+- 남은 조회 3개(`/message-templates`, `/orders/{orderId}/notification-targets`, `/long-unreceived-warnings`)와 쓰기 응답 62개는 자유 형식이다.
+

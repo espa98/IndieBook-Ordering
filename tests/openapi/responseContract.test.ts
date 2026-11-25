@@ -103,3 +103,52 @@ describe("응답 계약: 재고 현황 조회", () => {
   });
 });
 
+describe("응답 계약: 감사 로그·주문 결제 현황 조회", () => {
+  it("감사 로그와 주문 결제 현황의 data 스키마가 선언되어 있고 실제 응답이 그것을 만족한다", async () => {
+    const book = await call("POST", "/books", { source: "MANUAL", title: "결제 책", listPriceKrw: "15000", reason: "수기 등록", registeredAt: "2026-03-04T06:00:00.000Z" });
+    const draft = await call("POST", "/orders", { lines: [{ bookId: book.body.data.id, quantity: 2, unitPriceKrw: "15000" }] });
+    expect(draft.status).toBe(201);
+    const orderId = draft.body.data.id as string;
+    expect((await call("POST", `/orders/${orderId}/confirm`, { expectedVersion: 1 })).status).toBe(200);
+    const paid = await call("POST", `/orders/${orderId}/payments`, { method: "BANK_TRANSFER", amountKrw: "30000", externalReference: "CONTRACT-1", paidAt: "2026-03-04T06:00:00.000Z" });
+    expect(paid.status).toBe(201);
+    expect((await call("POST", `/payments/${paid.body.data.id}/confirmation`, { evidence: "입금 확인", confirmedAt: "2026-03-04T06:30:00.000Z" })).status).toBe(201);
+    const audit = await call("GET", "/audit-log");
+    const payments = await call("GET", `/orders/${orderId}/payments`);
+    expect([audit.status, payments.status]).toEqual([200, 200]);
+    for (const t of ["/audit-log", "/orders/{orderId}/payments"]) expect(declared(t), `${t} data 스키마`).toBe(true);
+    expect(conforms("/audit-log", audit.body)).toMatchObject({ ok: true });
+    expect(conforms("/orders/{orderId}/payments", payments.body)).toMatchObject({ ok: true });
+  });
+});
+
+describe("응답 계약: 발주 조회", () => {
+  it("발주 목록·상세의 data 스키마가 선언되어 있고, 전달 전(DRAFT)과 전달 뒤(SENT)의 실제 응답이 그것을 만족한다", async () => {
+    const book = await call("POST", "/books", { source: "MANUAL", title: "발주 책", listPriceKrw: "8000", reason: "수기 등록", registeredAt: "2026-03-04T06:00:00.000Z" });
+    const draft = await call("POST", "/orders", { lines: [{ bookId: book.body.data.id, quantity: 3, unitPriceKrw: "8000" }] });
+    const orderId = draft.body.data.id as string;
+    const confirmed = await call("POST", `/orders/${orderId}/confirm`, { expectedVersion: 1 });
+    const lineId = confirmed.body.data.lines[0].lineId as string;
+    const allocation = await call("POST", `/orders/${orderId}/lines/${lineId}/sourcing-allocations`, { supplierCode: "alpha", quantity: 3 });
+    expect(allocation.status).toBe(201);
+    const po = await call("POST", "/purchase-orders", { supplierCode: "alpha", allocationIds: [allocation.body.data.id] });
+    expect(po.status).toBe(201);
+    const poId = po.body.data.id as string;
+
+    const before = await call("GET", `/purchase-orders/${poId}`);
+    const list = await call("GET", "/purchase-orders");
+    expect([before.status, list.status]).toEqual([200, 200]);
+    expect((await call("POST", `/purchase-orders/${poId}/ready`, { expectedVersion: 1 })).status).toBe(200);
+    const sent = await call("POST", `/purchase-orders/${poId}/delivery`, { expectedVersion: 2, method: "EMAIL", deliveredAt: "2026-03-04T07:00:00.000Z", referenceNumber: "REF-1" });
+    expect(sent.status).toBe(200);
+    const after = await call("GET", `/purchase-orders/${poId}`);
+    expect(after.status).toBe(200);
+
+    for (const t of ["/purchase-orders", "/purchase-orders/{purchaseOrderId}"]) expect(declared(t), `${t} data 스키마`).toBe(true);
+    expect(conforms("/purchase-orders/{purchaseOrderId}", before.body)).toMatchObject({ ok: true });
+    expect(conforms("/purchase-orders/{purchaseOrderId}", after.body)).toMatchObject({ ok: true });
+    expect(conforms("/purchase-orders", list.body)).toMatchObject({ ok: true });
+    expect(after.body.data.delivery).toMatchObject({ method: "EMAIL", referenceNumber: "REF-1" });
+  });
+});
+
