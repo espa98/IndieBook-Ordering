@@ -1,6 +1,6 @@
 # 릴리스 Go / No-Go (10단계)
 
-작성일: 2026-11-24 (갱신) · 기준 커밋: 최신(테스트 129 files / 1271 tests 통과, 마이그레이션 001~022)
+작성일: 2026-11-24 (갱신) · 기준 커밋: 최신(테스트 129 files / 1276 tests 통과, 마이그레이션 001~023)
 
 ## 결정: **NO-GO**
 
@@ -29,17 +29,17 @@ P0인데 **여전히 미구현**인 항목: 인증·테넌트(ST-A06/A07 중지�
 
 ### 2.1 명령 영속화 현황 (기계적으로 센 값)
 
-`authorizedActions`에 바인딩된 도메인 명령 70개 중 **58개를 어댑터(`src/db/pg*Api.ts`)가 직접 실행**하고, 7개(`createOrderService`·`confirmOrderService`는 `createOrder`·`confirmOrder`가 내부에서 실행, `deliverAllocation`·`deliverStockReservation`은 수령 경로, `confirmRefund`는 환급 승인 경로, `getOrder`·`listOrders`는 읽기 경로)는 그 명령을 통해 간접 실행되어 **65개가 영속화**되었다. **5개는 아직 영속화되지 않았다**(그 명령은 메모리 저장소 도메인 테스트로만 검증된다):
+`authorizedActions`에 바인딩된 도메인 명령 70개 중 **63개를 어댑터(`src/db/pg*Api.ts`)가 직접 실행**하고, 7개(`createOrderService`·`confirmOrderService`는 `createOrder`·`confirmOrder`가 내부에서 실행, `deliverAllocation`·`deliverStockReservation`은 수령 경로, `confirmRefund`는 환급 승인 경로, `getOrder`·`listOrders`는 읽기 경로)는 그 명령을 통해 간접 실행되어 **70개 전부가 영속화**되었다. **영속화되지 않은 명령은 없다**(그 명령은 메모리 저장소 도메인 테스트로만 검증된다):
 
 | 영역 | 영속화되지 않은 명령 | 영향 |
 |---|---|---|
 | 결제 | (환급 시도 실패·UNKNOWN은 §39에서 영속화) 남은 것 없음 | — |
 | 직원·인증 | (초대·철회·비활성화는 §37에서 영속화) 남은 것: **초대 수락**(`acceptInvitation`), 서점 개설(`openStore`), 계정 등록·이메일 인증 | 직원이 초대를 수락해 멤버가 되는 경로가 없다(멤버는 SQL로만 추가). 수락은 JWT의 이메일 claim 신뢰 범위 결정이 필요하다(E3 후속) |
 | 도서·템플릿 | (도서 등록·수정은 §38, 템플릿 게시는 §40에서 영속화) 남은 것 없음 | YES24 검색 연동은 없어 도서는 수기 또는 호출자가 보낸 YES24 결과로만 등록된다 |
-| 고객 안내 | `createNotificationTarget`·`recordNotificationAttempt`·`recordNotificationCopy`·`recordNotificationResult`·`renotify` | 안내(알림) 전체가 영속화되지 않음. `longUnreceivedWarnings`도 마찬가지 |
+| 고객 안내 | (대상 생성·문구 복사·시도·결과·재안내는 §42에서 영속화) 남은 것: 조회 `longUnreceivedWarnings`(명령이 아닌 읽기, 어댑터·HTTP 없음) | 7일 이상 미수령 경고 목록을 서버가 내지 못한다 |
 | 기타 | 발주 CSV 출력 이력(`exportPurchaseOrderCsv`, 바인딩 없음) | 전달 기록의 `fileVersion`을 지정하면 거부된다 |
 
-위 표가 **다음 구현 우선순위의 근거**다. 남은 것 중 **초대 수락·서점 개설**(E3 후속 결정 필요)이 운영 시작에 필수인 P0 흐름이다.
+위 표가 **다음 구현 우선순위의 근거**다. 명령 영속화는 모두 끝났고, 남은 것은 인증·계정 쪽 결정과 읽기 API다. 남은 것 중 **초대 수락·서점 개설**(E3 후속 결정 필요)이 운영 시작에 필수인 P0 흐름이다.
 
 추가 차단·주의(10단계 이후): 새 검사 중 일부는 선택 의존성을 서버 조립에서 연결해야 동작한다(`testing/acceptance_report.md` §9.1). **현재 어댑터 연결 상태:** `allocateSourcing`·주문 종결·주문 재개의 `supplierObligations`(BR-P05), 재개의 `fulfillmentCorrections`, 환급 요청의 `refundAttempts`·`refundAttemptResolutions` 조회, 주문 생성의 `books`는 연결되었다. 환급 시도 기록 명령(`reportRefundAttempt`·`resolveRefundAttempt`)도 영속화되어(§39) 시도 기록이 실제로 쌓이고 한도 예약에 반영된다. 연결 누락을 배포 전 점검 항목에 넣어야 한다.
 

@@ -2,6 +2,7 @@ import { verifyJwt, type JwtVerifyOptions } from "../auth/jwt";
 import { createPgCancellationApi } from "../db/pgCancellationApi";
 import { createPgDispositionApi } from "../db/pgDispositionApi";
 import { createPgFulfillmentApi } from "../db/pgFulfillmentApi";
+import { createPgNotificationApi } from "../db/pgNotificationApi";
 import { createPgOrderApi } from "../db/pgOrderApi";
 import { createPgPaymentApi } from "../db/pgPaymentApi";
 import { createPgProcurementApi } from "../db/pgProcurementApi";
@@ -72,6 +73,7 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
   const suppliers = createPgSupplierApi({ pool: deps.pool });
   const staffAdmin = createPgStaffApi({ pool: deps.pool });
   const catalog = createPgCatalogApi({ pool: deps.pool });
+  const notifications = createPgNotificationApi({ pool: deps.pool });
   const cancellations = createPgCancellationApi({ pool: deps.pool });
   const dispositions = createPgDispositionApi({ pool: deps.pool });
   const actor = (c: Ctx) => ({ userId: c.userId });
@@ -248,6 +250,31 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
       success: 201,
       fields: ["key", "body", "expectedVersion", "publishedAt"],
       run: (c) => catalog.publishTemplateVersion(actor(c), merge(c, { tenantId: t(c), idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/orders/(?<orderId>[^/]+)/notification-targets", {
+      success: 201,
+      fields: ["mode", "createdAt"],
+      run: (c) => notifications.createNotificationTarget(actor(c), merge(c, { tenantId: t(c), orderId: c.params.orderId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/notification-targets/(?<targetId>[^/]+)/copies", {
+      success: 201,
+      fields: ["action", "actedAt"],
+      run: (c) => notifications.recordNotificationCopy(actor(c), merge(c, { tenantId: t(c), targetId: c.params.targetId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/notification-targets/(?<targetId>[^/]+)/attempts", {
+      success: 201,
+      fields: ["channel", "messageSnapshot", "attemptedAt"],
+      run: (c) => notifications.recordNotificationAttempt(actor(c), merge(c, { tenantId: t(c), targetId: c.params.targetId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/notification-targets/(?<targetId>[^/]+)/renotices", {
+      success: 201,
+      fields: ["createdAt"],
+      run: (c) => notifications.renotify(actor(c), merge(c, { tenantId: t(c), targetId: c.params.targetId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/notification-attempts/(?<attemptId>[^/]+)/result", {
+      success: 201,
+      fields: ["outcome", "note", "resultAt"],
+      run: (c) => notifications.recordNotificationResult(actor(c), merge(c, { tenantId: t(c), attemptId: c.params.attemptId!, idempotencyKey: c.idempotencyKey })),
     }),
     route("POST", "/books", {
       success: 201,

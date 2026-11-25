@@ -876,3 +876,28 @@
 ## 41. 영속화 현황 정정: 서비스 주문 2개 명령 (문서만 변경)
 
 `createOrderService`·`confirmOrderService`는 `createOrder`·`confirmOrder`(`orderApi`)가 내부에서 그대로 실행하므로, `pgOrderApi` 시험(주문 생성·확정·멱등·동시 확정·표시번호)이 이미 이 두 명령을 영속화 위에서 검증한다. 이전 문서의 "서비스 주문 경로 없음"은 잘못된 분류였다. 현황은 **65/70(직접 58 + 간접 7)**, 미영속화는 고객 안내 5개 명령뿐이다. 코드 변경은 없다.
+
+## 42. 고객 안내 영속화 (`src/db/pgNotificationApi.ts`, `023_notifications.sql`)
+
+테스트 5개 추가(`pgNotificationApi.test.ts` 4, HTTP 서버 테스트 1). `createNotificationTarget`·`recordNotificationCopy`·`recordNotificationAttempt`·`recordNotificationResult`·`renotify`(ST-M01~M06)를 닫아 **`authorizedActions`의 70개 명령이 모두 영속화**되었다. Owner·직원 모두 호출한다.
+
+- **대상 생성:** 주문의 현재 확보량(수령 원장 + 재고 예약 + 입고 배분 잔량)을 기존 적재 함수(`loadFulfillments`·`loadBookLedger`·`loadAllocationLedger`)로 읽어 도메인의 `securedSnapshot`에 그대로 넘긴다. 전체 안내는 전 품목이 확보된 주문만, 부분 안내는 확보량이 있을 때만, 같은 스냅샷의 대상은 중복 불가(BR-M01).
+- **문구 복사·미리보기·공유:** 추가 기록만 남기고 상태를 바꾸지 않는다(ST-M02).
+- **발송 시도:** 대상당 한 번(유일 제약), 확보량이 바뀌어 obsolete가 된 대상은 거부(ST-M06). 발송 당시 문구를 보존한다.
+- **결과:** 시도당 한 번(유일 제약), `MANUAL_RECORDED`·`FAILED`만 — 수신·읽음은 저장하지 않는다(MSG-010).
+- **재안내:** 실패한 안내만, 원 대상당 한 번(부분 유일 인덱스). 원 대상·시도·결과는 보존된다(ST-M05).
+- 같은 주문의 안내 쓰기는 `ntf:<서점>:<주문>` 어드바이저리 락으로 직렬화한다. 고객 연락처는 어느 테이블에도 없다(DEC-12).
+- HTTP: `POST /orders/:id/notification-targets`, `/notification-targets/:id/{copies,attempts,renotices}`, `/notification-attempts/:id/result`.
+
+| 검증한 것 | 결과 |
+|---|---|
+| 확보 스냅샷 대상 생성(전체·부분 규칙, 비멤버 403, 없는 주문 404, 같은 스냅샷 중복 거부, 확보량 변경 뒤 새 대상) | 통과 |
+| 복사 3종 기록이 시도·상태에 영향 없음, 잘못된 채널·빈 문구 거부, 대상당 시도 1회, obsolete 대상 거부 | 통과 |
+| 결과(READ 같은 값 거부, 시도당 1회), 실패 뒤 재안내 1회, 원 시도·결과 보존, 재안내 대상 재시도, 성공한 안내는 재안내 불가 | 통과 |
+| **같은 시도에 두 결과를 동시에 → 하나만, 같은 대상을 3세션이 동시에 재안내 → 하나만**, 직접 SQL로 중복 결과(23505)·수정·삭제 거부 | 통과 |
+| HTTP: 비멤버 403, 행위자 위조 400, 중복 대상·두 번째 시도·두 번째 재안내 422, 잘못된 복사 동작·결과 400 | 통과 |
+
+**한계**
+- 확보량 확인(obsolete 검사)은 시점 기준이다. 재고 예약·입고 배분은 다른 락을 쓰므로, 시도를 기록하는 순간과 확보량 변경이 겹치면 변경 직전 스냅샷으로 기록될 수 있다. 시도는 직원이 시스템 밖에서 한 행동의 사후 기록이라 허용 범위로 보지만 승인이 필요하다.
+- `longUnreceivedWarnings`(7일 이상 미수령 경고)는 명령이 아닌 읽기이고 어댑터·HTTP가 없다. 안내 조회 API도 없다(기록만 쌓인다).
+- 문구 생성(템플릿 렌더링)은 서버에 없다: 클라이언트가 보낸 `messageSnapshot`을 그대로 보존한다.

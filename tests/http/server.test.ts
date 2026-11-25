@@ -813,3 +813,36 @@ describe("HTTP 서버: 안내 문구 템플릿 게시", () => {
   });
 });
 
+describe("HTTP 서버: 고객 안내", () => {
+  it("대상 생성 → 문구 복사 → 발송 시도 → 실패 결과 → 재안내가 이어지고 행위자는 토큰의 사용자이며, 위조·중복은 거부된다", async () => {
+    await seedStock(4, 5);
+    const o = await confirmedOrder(4, 2);
+    await call(`${orders()}/${o.orderId}/lines/${o.lineId}/stock-reservations`, { method: "POST", sub: STAFF_A, body: { quantity: 2, reservedAt: "2026-03-04T06:40:00.000Z" } });
+    const targets = `${orders()}/${o.orderId}/notification-targets`;
+    expect((await call(targets, { method: "POST", sub: "33333333-0000-4000-8000-0000000000ff", body: { createdAt: "2026-03-04T07:00:00.000Z" } })).status).toBe(403);
+    expect((await call(targets, { method: "POST", sub: STAFF_A, body: { createdBy: OWNER_A, createdAt: "2026-03-04T07:00:00.000Z" } })).status).toBe(400);
+    const target = await call(targets, { method: "POST", sub: STAFF_A, body: { createdAt: "2026-03-04T07:00:00.000Z" } });
+    expect(target.status).toBe(201);
+    expect(target.json.data).toMatchObject({ mode: "FULL", securedTotal: 2, createdBy: STAFF_A });
+    expect((await call(targets, { method: "POST", sub: STAFF_A, body: { createdAt: "2026-03-04T07:00:00.000Z" } })).status).toBe(422); // 같은 확보 스냅샷
+
+    const base = `/v1/tenants/${T_A}/notification-targets/${target.json.data.id}`;
+    expect((await call(`${base}/copies`, { method: "POST", sub: STAFF_A, body: { action: "COPY", actedAt: "2026-03-04T07:00:00.000Z" } })).status).toBe(201);
+    expect((await call(`${base}/copies`, { method: "POST", sub: STAFF_A, body: { action: "PRINT", actedAt: "2026-03-04T07:00:00.000Z" } })).status).toBe(400);
+    const attempt = await call(`${base}/attempts`, { method: "POST", sub: STAFF_A, body: { channel: "PHONE", messageSnapshot: "입고되었습니다.", attemptedAt: "2026-03-04T07:00:00.000Z" } });
+    expect(attempt.status).toBe(201);
+    expect(attempt.json.data).toMatchObject({ channel: "PHONE", attemptedBy: STAFF_A });
+    expect((await call(`${base}/attempts`, { method: "POST", sub: STAFF_A, body: { channel: "PHONE", messageSnapshot: "again", attemptedAt: "2026-03-04T07:00:00.000Z" } })).status).toBe(422);
+
+    const resultPath = `/v1/tenants/${T_A}/notification-attempts/${attempt.json.data.id}/result`;
+    expect((await call(resultPath, { method: "POST", sub: STAFF_A, body: { outcome: "READ", note: "읽음", resultAt: "2026-03-04T07:00:00.000Z" } })).status).toBe(400);
+    const result = await call(resultPath, { method: "POST", sub: STAFF_A, body: { outcome: "FAILED", note: "부재중", resultAt: "2026-03-04T07:00:00.000Z" } });
+    expect(result.status).toBe(201);
+    expect(result.json.data).toMatchObject({ outcome: "FAILED", recordedBy: STAFF_A });
+    const next = await call(`${base}/renotices`, { method: "POST", sub: STAFF_A, body: { createdAt: "2026-03-04T07:00:00.000Z" } });
+    expect(next.status).toBe(201);
+    expect(next.json.data).toMatchObject({ renoticeOfTargetId: target.json.data.id });
+    expect((await call(`${base}/renotices`, { method: "POST", sub: STAFF_A, body: { createdAt: "2026-03-04T07:00:00.000Z" } })).status).toBe(422);
+  });
+});
+
