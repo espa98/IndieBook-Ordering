@@ -1127,3 +1127,13 @@
 
 **한계:** 값은 요청 **TypeScript 타입** 기준이고 런타임 검증으로 전수 확인하지 않았다. 타입이 `string`인 필드(예: 결제 외부 참조)와 조건부 허용(예: 회신 종류별 `eta`)은 반영하지 못한다. 객체 배열 내부 구조와 응답 스키마는 아직 없다.
 
+## 61. OpenAPI 객체 필드 내부 구조 (T8 일부, `openapi/ordering-http.yaml`)
+
+테스트 1개 추가(`tests/openapi/ordering.http.test.ts`). `sources`·`restorations`(배열)와 도서·공급처 `changes`(객체)는 `type: array/object`만 선언되어 내부 구조가 비어 있었다. "객체 필드는 내부 구조를 선언한다"를 먼저 추가해 **실패함을 확인**한 뒤 도메인 검증 규칙대로 채웠다.
+
+- `sources`(수령 입력)·`restorations`(수령 정정): 비어 있지 않은 배열(`minItems: 1`), 항목은 `kind`(`STOCK_RESERVATION`/`RECEIPT_ALLOCATION`)·`sourceId`(비어 있지 않은 문자열)·`quantity`(1 이상 정수) 모두 필수, 알 수 없는 키 금지. 규칙은 `postFulfillment.ts`·`correctFulfillment.ts`의 검증에서 가져왔다.
+- 도서 수정 `changes`: `title`·`authors`·`isbn`·`listPriceKrw`, 최소 한 필드(`minProperties: 1`, `updateBook.ts`).
+- 공급처 수정 `changes`: `name`·`orderChannel`(6개 값), 최소 한 필드(`updateSupplier.ts`).
+
+**한계:** `changes` 안의 알 수 없는 키는 도메인이 조용히 무시하므로 `additionalProperties`를 막지 않았다(명세가 서버보다 엄격해지지 않게). `sourceId`는 도메인이 비어 있지 않은 문자열만 요구해 uuid 형식으로 제한하지 않았다(DB 단계에서 거부될 수 있음). 배열 상한(100개, E4)은 명세에 넣지 않았다. 응답 `data` 스키마와 경로별 오류 발생 조건은 아직 없다.
+

@@ -8,8 +8,8 @@ info:
     이 파일은 `tests/openapi/ordering.http.test.ts`가 서버 경로표와 대조한다: (메서드, 경로) 집합, 성공 상태,
     본문 허용 필드(`additionalProperties: false`), 쿼리 파라미터, `Idempotency-Key` 필수 여부가 어긋나면 테스트가 실패한다.
 
-    **이 명세가 기술하지 않는 것(미구현·미검증):** 객체 배열(`sources`·`restorations`·`changes`)의 내부 구조. 필수 여부(`required`)는
-    도메인 요청 타입에서 `?`가 아닌 필드로 정했고 런타임 400으로는 전수 검증하지 않았다, 응답 `data`의 필드별 스키마(`data`는 도메인 객체이며 자유 형식으로 둔다), 경로별 오류 응답의 실제 발생
+    **이 명세가 기술하지 않는 것(미구현·미검증):** 필수 여부(`required`)·열거값·타입은 도메인 요청 타입 기준이고
+    런타임 400으로는 전수 검증하지 않았다, 응답 `data`의 필드별 스키마(`data`는 도메인 객체이며 자유 형식으로 둔다), 경로별 오류 응답의 실제 발생
     조건(공통 오류 응답을 선언만 하고 401만 계약 테스트로 확인한다).
 
     **공통 규칙(`ordering.yaml`과 같다):** Bearer JWT, 모든 쓰기(POST)는 `Idempotency-Key` 필수, 경로 식별자는 UUID가 아니면 404
@@ -351,7 +351,17 @@ paths:
               required: [orderLineId, sources, receivedAt]
               properties:
                 orderLineId: { type: string, format: uuid }
-                sources: { type: array, items: { type: object } }
+                sources:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [kind, sourceId, quantity]
+                    properties:
+                      kind: { type: string, enum: [STOCK_RESERVATION, RECEIPT_ALLOCATION] }
+                      sourceId: { type: string, minLength: 1 }
+                      quantity: { type: integer, minimum: 1 }
                 receivedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -405,7 +415,17 @@ paths:
               required: [quantity, restorations, reason, evidence, physicalReturnConfirmed, correctedAt]
               properties:
                 quantity: { type: integer }
-                restorations: { type: array, items: { type: object } }
+                restorations:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [kind, sourceId, quantity]
+                    properties:
+                      kind: { type: string, enum: [STOCK_RESERVATION, RECEIPT_ALLOCATION] }
+                      sourceId: { type: string, minLength: 1 }
+                      quantity: { type: integer, minimum: 1 }
                 reason: { type: string }
                 evidence: { type: string }
                 physicalReturnConfirmed: { type: boolean }
@@ -1922,7 +1942,14 @@ paths:
               required: [expectedVersion, changes, reason, changedAt]
               properties:
                 expectedVersion: { type: integer }
-                changes: { type: object }
+                changes:
+                  type: object
+                  minProperties: 1
+                  properties:
+                    title: { type: string }
+                    authors: { type: array, items: { type: string } }
+                    isbn: { type: string }
+                    listPriceKrw: { type: string }
                 reason: { type: string }
                 acknowledgeDuplicateOf: { type: string, format: uuid }
                 changedAt: { type: string, format: date-time }
@@ -2255,7 +2282,12 @@ paths:
               required: [expectedVersion, changes, reason, changedAt]
               properties:
                 expectedVersion: { type: integer }
-                changes: { type: object }
+                changes:
+                  type: object
+                  minProperties: 1
+                  properties:
+                    name: { type: string }
+                    orderChannel: { type: string, enum: [API, EMAIL, FILE, MESSENGER, PHONE, WEB] }
                 reason: { type: string }
                 changedAt: { type: string, format: date-time }
       responses:

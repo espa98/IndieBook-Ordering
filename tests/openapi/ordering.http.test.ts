@@ -151,6 +151,36 @@ describe("openapi/ordering-http.yaml: 서버 경로표와 명세의 드리프트
     expect(sorted(actual)).toEqual(sorted(EXPECTED));
   });
 
+  it("객체 필드(sources·restorations·changes)는 내부 구조를 선언한다 (도메인 검증과 같은 규칙)", () => {
+    const find = (suffix: string, field: string) => {
+      const found = operations(load(HTTP_SPEC)).find((o) => o.path.endsWith(suffix));
+      return found?.op.requestBody?.content?.["application/json"]?.schema?.properties?.[field] as Json | undefined;
+    };
+    const source = {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind", "sourceId", "quantity"],
+      properties: {
+        kind: { type: "string", enum: ["STOCK_RESERVATION", "RECEIPT_ALLOCATION"] },
+        sourceId: { type: "string", minLength: 1 },
+        quantity: { type: "integer", minimum: 1 },
+      },
+    };
+    for (const [suffix, field] of [["/orders/{orderId}/fulfillments", "sources"], ["/fulfillments/{fulfillmentId}/corrections", "restorations"]] as const) {
+      expect(find(suffix, field), `${suffix} ${field}`).toMatchObject({ type: "array", minItems: 1, items: source });
+    }
+    expect(find("/books/{bookId}/updates", "changes")).toMatchObject({
+      type: "object",
+      minProperties: 1,
+      properties: { title: { type: "string" }, authors: { type: "array", items: { type: "string" } }, isbn: { type: "string" }, listPriceKrw: { type: "string" } },
+    });
+    expect(find("/suppliers/{code}/updates", "changes")).toMatchObject({
+      type: "object",
+      minProperties: 1,
+      properties: { name: { type: "string" }, orderChannel: { type: "string", enum: ["API", "EMAIL", "FILE", "MESSENGER", "PHONE", "WEB"] } },
+    });
+  });
+
   it("모든 경로는 인증이 없으면 같은 401이고, 그 본문은 명세의 ErrorBody를 만족한다", async () => {
     const spec = (await SwaggerParser.dereference(HTTP_SPEC)) as unknown as Json;
     const ajv = new Ajv2020({ strict: false, allErrors: true });
