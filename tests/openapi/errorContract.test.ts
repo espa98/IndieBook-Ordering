@@ -51,7 +51,7 @@ const hasFields = (r: (typeof app.routes)[number]) => isPost(r) && (r.fields?.le
 const CASES: Case[] = [
   { name: "알 수 없는 쿼리 → 400", applies: () => true, expected: 400, request: (r) => ({ ...base(r), query: new URLSearchParams("__unknown__=1") }) },
   { name: "경로 식별자가 UUID가 아님 → 404", applies: (r) => /\{(?!code\})[^}]+\}/.test(r.template), expected: 404, request: (r) => ({ ...base(r), path: pathOf(r, "not-a-uuid") }) },
-  { name: "Idempotency-Key 없음 → 400", applies: isPost, expected: 400, request: (r) => { const q = post(r, { rawBody: "{}" }); delete q.headers["idempotency-key"]; return q; } },
+  { name: "Idempotency-Key 없음 → 400", applies: isPost, expected: 400, request: (r) => { const { "idempotency-key": _omitted, ...headers } = post(r, { rawBody: "{}" }).headers; void _omitted; return { ...post(r, { rawBody: "{}" }), headers }; } },
   { name: "본문 없음 → 400", applies: isPost, expected: 400, request: (r) => post(r, {}) },
   { name: "JSON이 아닌 본문 → 400", applies: isPost, expected: 400, request: (r) => post(r, { rawBody: "{not json" }) },
   { name: "본문이 객체가 아님 → 400", applies: isPost, expected: 400, request: (r) => post(r, { rawBody: "[]" }) },

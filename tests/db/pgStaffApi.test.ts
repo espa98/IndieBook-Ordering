@@ -119,6 +119,31 @@ describe("직원 초대·철회 (Postgres 영속화)", () => {
   });
 });
 
+describe("초대 응답에서 토큰 해시를 내보내지 않는다 (Postgres 영속화)", () => {
+  const sha256 = (token: string) => createHash("sha256").update(token).digest("hex");
+
+  it("초대 응답에는 토큰 원문이 있고, 서버 내부 값인 토큰 해시(tokenHash)는 없다", async () => {
+    const result = await invite("no-hash@shop.test");
+
+    expect(result.token.length).toBeGreaterThanOrEqual(32);
+    expect("tokenHash" in result.invitation).toBe(false);
+    expect(JSON.stringify(result)).not.toContain(sha256(result.token));
+    // 해시는 서버에는 계속 저장되어 수락 때 토큰을 대조할 수 있다
+    expect((await rows("select token_hash from public.ordering_staff_invitations where id = $1", [result.invitation.id]))[0]).toEqual({ token_hash: sha256(result.token) });
+  });
+
+  it("같은 멱등 키로 다시 요청한 응답에도 토큰 해시가 없고, 토큰 원문은 다시 주지 않는다", async () => {
+    const request = { tenantId: T_A, email: "replay-hash@shop.test", expiresAt: inDays(7), idempotencyKey: key() };
+    const first = await api().inviteStaff(owner, request);
+    const replay = await api().inviteStaff(owner, request);
+
+    expect(replay.invitation.id).toBe(first.invitation.id);
+    expect(replay.token).toBeNull();
+    expect("tokenHash" in replay.invitation).toBe(false);
+    expect(JSON.stringify(replay)).not.toContain(sha256(first.token));
+  });
+});
+
 describe("직원 비활성화·복구 (Postgres 영속화)", () => {
   it("Owner만 직원을 비활성화·복구하고 변경 이력이 남으며, 비활성 직원은 즉시 접근이 막히고, 같은 상태·없는 직원·비멤버는 거부된다", async () => {
     expect(await codeOf(() => setStatus(STAFF_B, "INACTIVE", staff))).toBe("FORBIDDEN");

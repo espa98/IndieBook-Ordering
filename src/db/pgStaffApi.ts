@@ -22,6 +22,8 @@ const iso = (value: Date) => value.toISOString();
 
 /** 호출자가 보내는 요청. 행위자(역할·이름)는 인증된 사용자에서 주입되므로 보낼 필요가 없다 */
 export type InviteStaffBody = Omit<InviteStaffRequest, "actorRole" | "invitedBy">;
+/** 클라이언트에 나가는 초대: 서버 내부 값인 토큰 해시는 뺀다(토큰 원문은 처음 응답에만 있다) */
+export type InviteStaffResult = { invitation: Omit<StaffInvitation, "tokenHash">; token: string };
 export type RevokeInvitationBody = Omit<RevokeInvitationRequest, "actorRole" | "revokedBy">;
 export type SetMembershipStatusBody = Omit<SetMembershipStatusRequest, "actorRole" | "changedBy">;
 
@@ -195,7 +197,12 @@ export function createPgStaffApi(deps: { pool: PoolLike }) {
 
   return {
     acceptInvitation: (actor: Actor & { email: string }, request: { token: string; idempotencyKey: string }) => withRetry(() => acceptOnce(actor, request)),
-    inviteStaff: (actor: Actor, request: InviteStaffBody) => withRetry(() => inviteOnce(actor, request)),
+    inviteStaff: async (actor: Actor, request: InviteStaffBody): Promise<InviteStaffResult> => {
+      const { invitation, token } = await withRetry(() => inviteOnce(actor, request));
+      const { tokenHash: _tokenHash, ...publicInvitation } = invitation;
+      void _tokenHash;
+      return { invitation: publicInvitation, token };
+    },
     revokeInvitation: (actor: Actor, request: RevokeInvitationBody) => withRetry(() => revokeOnce(actor, request)),
     setMembershipStatus: (actor: Actor, request: SetMembershipStatusBody) => withRetry(() => statusOnce(actor, request)),
   };
