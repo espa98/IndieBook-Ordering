@@ -2995,7 +2995,7 @@ paths:
               required: [supplierCode, allocationIds]
               properties:
                 supplierCode: { type: string, minLength: 1 }
-                allocationIds: { type: array, items: { type: string, format: uuid }, minItems: 1 }
+                allocationIds: { type: array, items: { type: string, format: uuid }, minItems: 1, uniqueItems: true }
       responses:
         "201":
           description: 성공(`data`는 도메인 객체)

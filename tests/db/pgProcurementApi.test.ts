@@ -317,6 +317,21 @@ describe("조달 명령의 본문 참조 ID는 uuid 형식이어야 한다", () 
     expect(await replies()).toBe(repliesBefore);
     expect(await approvals()).toBe(approvalsBefore);
   });
+
+  it("발주 생성의 allocationIds에 uuid가 아닌 원소가 섞여 있으면 그 원소를 조용히 버리고 나머지로 만들지 않고 VALIDATION_ERROR이며 발주가 생성되지 않는다", async () => {
+    const api = createPgProcurementApi({ pool: db.pool() });
+    const line = await confirmedLine(19, 2);
+    const allocation = await allocate(api, line, "sup-a", 2);
+    const pos = () => rows("select count(*)::int as n from public.ordering_purchase_orders").then((r) => r[0].n as number);
+    const before = await pos();
+
+    for (const ids of [["not-a-uuid"], [allocation.id, "not-a-uuid"], ["not-a-uuid", allocation.id], [allocation.id, ""], [allocation.id, 123 as never]]) {
+      expect(await codeOf(() => create(api, "sup-a", ids as never)), JSON.stringify(ids)).toBe("VALIDATION_ERROR");
+    }
+    expect(await pos()).toBe(before);
+    // 유효한 uuid만이면 만들어진다(위의 거부가 배정을 소모하지 않았다)
+    expect((await create(api, "sup-a", [allocation.id])).lines[0]!.quantity).toBe(2);
+  });
 });
 
 describe("중복 구매 위험 승인은 없는 주문·품목을 NOT_FOUND로 거부한다", () => {

@@ -20,8 +20,13 @@ export const isUuid = (value: unknown): value is string => typeof value === "str
  */
 export function assertReferenceIds(request: object, fields: readonly string[]): void {
   for (const field of fields) {
-    const value = (request as Record<string, unknown>)[field];
-    if (value !== undefined && !isUuid(value)) throw new AppError("VALIDATION_ERROR", `${field} must be a valid id`);
+    // 이름이 `[]`로 끝나면 배열 필드이고 모든 원소가 uuid여야 한다. 배열이 아니거나 비어 있는지는 도메인이 판단한다
+    const isArrayField = field.endsWith("[]");
+    const name = isArrayField ? field.slice(0, -2) : field;
+    const value = (request as Record<string, unknown>)[name];
+    if (value === undefined) continue;
+    const bad = isArrayField ? Array.isArray(value) && !value.every(isUuid) : !isUuid(value);
+    if (bad) throw new AppError("VALIDATION_ERROR", `${name} must be a valid id`);
   }
 }
 

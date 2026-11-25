@@ -128,7 +128,7 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
       const saved: PurchaseOrder[] = [];
       const { tenantId: _t, ...rest } = request;
       void _t;
-      const result = authorizedActions.createPurchaseOrder(
+      const result = withReferenceIds(request, ["allocationIds[]"], () => authorizedActions.createPurchaseOrder(
         {
           orders: { get: (t, id) => orders.find((o) => o.tenantId === t && o.id === id), list: () => orders, save: forbidden },
           suppliers: {
@@ -146,7 +146,7 @@ export function createPgProcurementApi(deps: { pool: PoolLike }) {
         },
         principal,
         rest,
-      );
+      ));
       for (const po of saved) await insertPurchaseOrder(client, po);
       await saveNewCommands(client, idempotency, known);
       return result;

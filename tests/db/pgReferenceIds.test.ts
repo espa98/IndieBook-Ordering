@@ -39,6 +39,27 @@ describe("assertReferenceIds: 본문의 참조 ID는 uuid 형식이어야 한다
   });
 });
 
+describe("assertReferenceIds: 배열 필드는 모든 원소가 uuid여야 한다", () => {
+  it("배열의 원소 중 하나라도 uuid가 아니면 VALIDATION_ERROR이고(어느 필드인지 이름만 알린다), 모두 uuid거나 빈 배열이면 통과한다", () => {
+    const B = "0a000000-0000-4000-8000-000000000002";
+    expect(codeOf(() => assertReferenceIds({ allocationIds: [UUID, B] }, ["allocationIds[]"]))).toBeUndefined();
+    expect(codeOf(() => assertReferenceIds({ allocationIds: [] }, ["allocationIds[]"]))).toBeUndefined(); // 비어 있는지는 도메인이 판단한다
+    for (const bad of [[UUID, "not-a-uuid"], ["not-a-uuid", UUID], [UUID, ""], [UUID, 123], [null]]) {
+      expect(codeOf(() => assertReferenceIds({ allocationIds: bad }, ["allocationIds[]"])), JSON.stringify(bad)).toBe("VALIDATION_ERROR");
+    }
+    // 배열이 아닌 값은 도메인이 형식 오류로 거부하므로 이 헬퍼는 건드리지 않는다
+    expect(codeOf(() => assertReferenceIds({ allocationIds: "x" }, ["allocationIds[]"]))).toBeUndefined();
+    let thrown: unknown;
+    try {
+      assertReferenceIds({ allocationIds: [UUID, "SECRET-VALUE"] }, ["allocationIds[]"]);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(String((thrown as AppError).detail)).toContain("allocationIds");
+    expect(String((thrown as AppError).detail)).not.toContain("SECRET-VALUE");
+  });
+});
+
 describe("withReferenceIds: 도메인 호출이 조회 실패(NOT_FOUND·BUSINESS_INVARIANT)로 끝날 때만 참조 ID 형식을 확인해 400으로 바꾼다", () => {
   const throwing = (error: unknown) => () => {
     throw error;

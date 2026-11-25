@@ -197,5 +197,45 @@ describe("판단 불가였던 거부 입력을 대상이 존재하는 요청으�
     expect(observed).toEqual(expected);
     expect(Object.keys(observed).length).toBeGreaterThanOrEqual(12);
   });
+
+  it("발주 생성의 allocationIds: 원소가 uuid가 아니거나 비어 있지 않은 문자열이 아니거나 배열이 아니거나 비어 있거나 중복이면 실제 배정이 있어도 서버가 모두 400이다", async () => {
+    const world = await buildWorld();
+    const ops = await loadOperations();
+    const schema = ops.get("POST /v1/tenants/{tenantId}/purchase-orders")!.requestBody.content["application/json"].schema as Json;
+    const ajv = new Ajv2020({ strict: false, allErrors: true });
+    ajv.addFormat("uuid", (v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v));
+    // 유효한 배정을 하나 만들고, 그 배정을 섞은 잘못된 입력을 보낸다
+    const lineOf = async () => {
+      const order = await must(call("POST", "/orders", { lines: [{ bookId: world.bookId, quantity: 1, unitPriceKrw: "10000" }] }), 201, "주문");
+      const confirmed = await must(call("POST", `/orders/${order.id}/confirm`, { expectedVersion: 1 }), 200, "확정");
+      return { orderId: order.id as string, lineId: confirmed.lines[0].lineId as string };
+    };
+    const line = await lineOf();
+    const supplier = `conc-po-${++seq}`;
+    await must(call("POST", "/suppliers", { code: supplier, name: "발주 도매", orderChannel: "EMAIL", registeredAt: PAST }), 201, "공급처");
+    const allocation = await must(call("POST", `/orders/${line.orderId}/lines/${line.lineId}/sourcing-allocations`, { supplierCode: supplier, quantity: 1 }), 201, "배정");
+
+    const cases: [string, unknown][] = [
+      ["uuid 아닌 원소 하나", ["not-a-uuid"]],
+      ["유효 + uuid 아님", [allocation.id, "not-a-uuid"]],
+      ["유효 + 빈 문자열", [allocation.id, ""]],
+      ["유효 + 숫자", [allocation.id, 123]],
+      ["유효 + null", [allocation.id, null]],
+      ["빈 배열", []],
+      ["배열이 아님", "x"],
+      ["null", null],
+      ["중복 원소", [allocation.id, allocation.id]],
+    ];
+    const problems: string[] = [];
+    for (const [label, ids] of cases) {
+      const body = { supplierCode: supplier, allocationIds: ids };
+      expect(ajv.validate(schema, body), `이 입력은 스키마가 거부해야 한다: ${label}`).toBe(false);
+      const { status } = await call("POST", "/purchase-orders", body);
+      if (status !== 400) problems.push(`${label} -> ${status}`);
+    }
+    expect(problems).toEqual([]);
+    // 거부된 요청이 배정을 소모하지 않았다: 유효한 입력은 만들어진다
+    expect((await call("POST", "/purchase-orders", { supplierCode: supplier, allocationIds: [allocation.id] })).status).toBe(201);
+  });
 });
 
