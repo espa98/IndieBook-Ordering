@@ -6,6 +6,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
     "build": "node server/build.ts",
     "start": "node dist/server.mjs",
     "migrate": "node server/build.ts dist/migrate.mjs migrate && node dist/migrate.mjs"
