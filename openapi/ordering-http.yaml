@@ -9,7 +9,7 @@ info:
     본문 허용 필드(`additionalProperties: false`), 쿼리 파라미터, `Idempotency-Key` 필수 여부가 어긋나면 테스트가 실패한다.
 
     **이 명세가 기술하지 않는 것(미구현·미검증):** 필수 여부(`required`)·열거값·타입은 도메인 요청 타입 기준이고
-    런타임 400으로는 전수 검증하지 않았다, 응답 `data`의 필드별 스키마(`data`는 도메인 객체이며 자유 형식으로 둔다), 경로별 오류 응답의 실제 발생
+    런타임 400으로는 전수 검증하지 않았다, 응답 `data`의 필드별 스키마(공급처·도서·재고 조회 7개 경로만 선언했고 `tests/openapi/responseContract.test.ts`가 실제 응답으로 검증한다. 나머지는 자유 형식), 경로별 오류 응답의 실제 발생
     조건(공통 오류 응답을 선언만 하고 401만 계약 테스트로 확인한다).
 
     **공통 규칙(`ordering.yaml`과 같다):** Bearer JWT, 모든 쓰기(POST)는 `Idempotency-Key` 필수, 경로 식별자는 UUID가 아니면 404
@@ -193,7 +193,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/StockLevel" } }
+                      nextCursor: { type: string }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -220,7 +228,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/StockLevel" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -1776,7 +1787,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/Book" } }
+                      nextCursor: { type: string }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -1848,7 +1867,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Book" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -1878,7 +1900,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/BookRevision" } }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -2182,7 +2207,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Supplier" } }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -2247,7 +2275,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Supplier" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -3419,6 +3450,65 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    StockLevel:
+      type: object
+      required: [bookId, onHand, reserved, available]
+      properties:
+        bookId: { type: string, format: uuid }
+        onHand: { type: integer }
+        reserved: { type: integer }
+        available: { type: integer }
+    Book:
+      type: object
+      required: [id, tenantId, title, authors, listPriceKrw, source, status, version, createdBy, createdAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        title: { type: string }
+        authors: { type: array, items: { type: string } }
+        isbn: { type: string }
+        listPriceKrw: { type: string }
+        source: { type: string, enum: [MANUAL, YES24] }
+        externalId: { type: string }
+        fetchedAt: { type: string, format: date-time }
+        manualReason: { type: string }
+        status: { type: string, enum: [ACTIVE] }
+        version: { type: integer }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    BookFields:
+      type: object
+      required: [title, authors, listPriceKrw]
+      properties:
+        title: { type: string }
+        authors: { type: array, items: { type: string } }
+        isbn: { type: string }
+        listPriceKrw: { type: string }
+    BookRevision:
+      type: object
+      required: [id, tenantId, bookId, versionBefore, versionAfter, before, after, reason, changedBy, changedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        bookId: { type: string, format: uuid }
+        versionBefore: { type: integer }
+        versionAfter: { type: integer }
+        before: { $ref: "#/components/schemas/BookFields" }
+        after: { $ref: "#/components/schemas/BookFields" }
+        reason: { type: string }
+        changedBy: { type: string }
+        changedAt: { type: string, format: date-time }
+    Supplier:
+      type: object
+      required: [tenantId, code, active]
+      properties:
+        tenantId: { type: string, format: uuid }
+        code: { type: string }
+        active: { type: boolean }
+        name: { type: string }
+        orderChannel: { type: string, enum: [API, EMAIL, FILE, MESSENGER, PHONE, WEB] }
+        version: { type: integer }
     DataResponse:
       type: object
       required: [data]

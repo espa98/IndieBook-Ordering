@@ -1137,3 +1137,21 @@
 
 **한계:** `changes` 안의 알 수 없는 키는 도메인이 조용히 무시하므로 `additionalProperties`를 막지 않았다(명세가 서버보다 엄격해지지 않게). `sourceId`는 도메인이 비어 있지 않은 문자열만 요구해 uuid 형식으로 제한하지 않았다(DB 단계에서 거부될 수 있음). 배열 상한(100개, E4)은 명세에 넣지 않았다. 응답 `data` 스키마와 경로별 오류 발생 조건은 아직 없다.
 
+## 62. OpenAPI 응답 스키마와 응답 계약 테스트 (T8 일부, `tests/openapi/responseContract.test.ts`)
+
+테스트 3개 추가. 응답 `data`는 80개 경로 모두 자유 형식(`{}`)이어서 어떤 응답이든 명세와 "일치"했다. 격리 DB에 서버 앱(`createApp`)을 올려 **실제 응답 본문을 명세의 200 응답 스키마로 검증**하는 계약 테스트를 만들고, 조회 경로부터 단계적으로 채우기 시작했다.
+
+| 경로 | 스키마 |
+|---|---|
+| `GET /suppliers`, `GET /suppliers/{code}` | `Supplier`(`tenantId`·`code`·`active` 필수, `name`·`orderChannel`·`version`은 공급처 관리로 등록한 경우에만) |
+| `GET /books`(`items`·`nextCursor`), `GET /books/{bookId}`, `GET /books/{bookId}/revisions` | `Book`, `BookRevision`(`before`·`after`는 `BookFields`) |
+| `GET /stock`(`items`·`nextCursor`), `GET /stock/{bookId}` | `StockLevel`(`bookId`·`onHand`·`reserved`·`available`) |
+
+각 테스트는 먼저 "`data` 스키마가 선언되어 있다"에서 **실패함을 확인**한 뒤 스키마를 채워 통과시켰다(재고 테스트는 처음에 경로를 `/stock-levels`로 잘못 써서 404가 났고, 구현이 아니라 테스트 입력의 오류라 경로만 `/stock`으로 고쳤다). 스키마를 일부러 틀리게(`code`를 integer로) 바꾸면 계약 테스트가 실패함도 확인한 뒤 되돌렸다.
+
+**한계**
+- 80개 경로 중 **7개만** 응답 `data`를 선언했다. 나머지 조회 경로(발주·결제 현황·감사 로그·템플릿·안내 대상·미수령 경고)와 모든 쓰기 응답은 아직 자유 형식이다.
+- 검증은 한 번의 시나리오 응답에 대한 것이다. 선택 필드가 비어 있을 때·다른 분기(예: YES24 도서의 `externalId`·`fetchedAt`)의 응답은 확인하지 못했다.
+- 검증기는 `ajv-formats`가 없어 `date-time`·`date`·`uuid` 형식만 테스트에서 직접 등록했다(새 의존성을 추가하지 않았다).
+- 응답 오류(4xx/5xx)의 발생 조건 검증은 여전히 401만 있다.
+
