@@ -1109,3 +1109,12 @@
 
 **한계:** 타입은 필드 이름 규칙과 도메인 요청 타입 일부에서 정했고 **필드별로 전수 대조하지는 않았다**. 필수 여부(`required`)와 경로별 열거값, 객체 배열(`sources`·`restorations`·`changes`)의 내부 구조, 응답 `data` 스키마, 경로별 오류 발생 조건은 아직 없다.
 
+## 59. OpenAPI 요청 필드 필수 여부 (T8 일부, `openapi/ordering-http.yaml`)
+
+테스트 1개 추가(`tests/openapi/ordering.http.test.ts`). 본문이 있는 61개 경로에 `required`를 선언했다. 먼저 "필수 여부가 도메인 요청 타입과 같다" 테스트를 추가해 **181개 위반으로 실패함을 확인**한 뒤 채웠다.
+
+- **출처:** 각 경로가 호출하는 도메인 함수의 요청 타입을 tsc 프로브(필드마다 "필수 키인가"를 타입 수준으로 판정하는 임시 파일, 저장소에 남기지 않음)로 조사했다. 경로의 본문 필드 194개 중 **13개만 선택**(`?`)이고 나머지 181개는 필수다. 요청 타입에 유니온이 없음을 확인해 판정이 모호하지 않다.
+- **선택 필드 13개:** 반품 발송 `referenceNumber`, 안내 대상 `mode`, 도서 등록 `authors`·`isbn`·`externalId`·`fetchedAt`·`reason`·`acknowledgeDuplicateOf`, 도서 수정 `acknowledgeDuplicateOf`, 발주 전달 `referenceNumber`·`fileVersion`, 공급처 회신 `source`·`eta`. 테스트는 이 목록을 코드에 적어 두어, 명세나 도메인 타입이 바뀌면 실패한다.
+
+**한계:** `required`는 **TypeScript 타입 기준**이고, "필수 필드를 빼면 실제로 400이 나온다"는 런타임 검증은 전수로 하지 않았다. 타입상 필수가 아니어도 도메인이 조건부로 요구하는 필드(예: 회신 종류가 `DELAY`일 때의 `eta`)는 선택으로 둔다. 열거값·객체 배열 내부 구조·응답 스키마는 아직 없다.
+

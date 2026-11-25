@@ -85,6 +85,34 @@ describe("openapi/ordering-http.yaml: 서버 경로표와 명세의 드리프트
     expect(wrong).toEqual([]);
   });
 
+  it("본문 필드의 필수 여부는 도메인 요청 타입과 같다: 아래 선택 필드만 required에서 빠진다", () => {
+    // 출처: 각 도메인 요청 타입(`src/db/pg*Api.ts`의 Body)에서 `?`로 선언된 필드를 tsc로 뽑았다(2026-11-25).
+    // 이 목록과 required가 어긋나면 명세나 도메인 타입 중 하나가 바뀐 것이다.
+    const OPTIONAL = new Set([
+      "POST /return-requests/{requestId}/dispatches referenceNumber",
+      "POST /orders/{orderId}/notification-targets mode",
+      "POST /books authors", "POST /books isbn", "POST /books externalId", "POST /books fetchedAt", "POST /books reason", "POST /books acknowledgeDuplicateOf",
+      "POST /books/{bookId}/updates acknowledgeDuplicateOf",
+      "POST /purchase-orders/{purchaseOrderId}/delivery referenceNumber",
+      "POST /purchase-orders/{purchaseOrderId}/delivery fileVersion",
+      "POST /purchase-orders/{purchaseOrderId}/supplier-replies source",
+      "POST /purchase-orders/{purchaseOrderId}/supplier-replies eta",
+    ]);
+    const problems: string[] = [];
+    for (const { key, path, op } of operations(load(HTTP_SPEC))) {
+      const schema: Json | undefined = op.requestBody?.content?.["application/json"]?.schema;
+      if (!schema?.properties) continue;
+      const route = `POST ${path.replace("/v1/tenants/{tenantId}", "")}`;
+      const required = new Set<string>(schema.required ?? []);
+      for (const name of Object.keys(schema.properties)) {
+        const optional = OPTIONAL.has(`${route} ${name}`);
+        if (optional === required.has(name)) problems.push(`${key} .${name} ${optional ? "선택인데 required에 있음" : "필수인데 required에 없음"}`);
+      }
+      for (const name of required) if (!(name in schema.properties)) problems.push(`${key} .${name} required가 properties에 없음`);
+    }
+    expect(problems).toEqual([]);
+  });
+
   it("모든 경로는 인증이 없으면 같은 401이고, 그 본문은 명세의 ErrorBody를 만족한다", async () => {
     const spec = (await SwaggerParser.dereference(HTTP_SPEC)) as unknown as Json;
     const ajv = new Ajv2020({ strict: false, allErrors: true });

@@ -8,8 +8,8 @@ info:
     이 파일은 `tests/openapi/ordering.http.test.ts`가 서버 경로표와 대조한다: (메서드, 경로) 집합, 성공 상태,
     본문 허용 필드(`additionalProperties: false`), 쿼리 파라미터, `Idempotency-Key` 필수 여부가 어긋나면 테스트가 실패한다.
 
-    **이 명세가 기술하지 않는 것(미구현·미검증):** 요청 필드의 필수 여부와 열거값(`kind`·`outcome` 등은 `type: string`만 선언한다. 타입은
-    선언했고 도메인 검증이 400으로 거부한다), 응답 `data`의 필드별 스키마(`data`는 도메인 객체이며 자유 형식으로 둔다), 경로별 오류 응답의 실제 발생
+    **이 명세가 기술하지 않는 것(미구현·미검증):** 요청 필드의 열거값(`kind`·`outcome` 등은 `type: string`만 선언한다)과 객체 배열의 내부 구조. 필수 여부(`required`)는
+    도메인 요청 타입에서 `?`가 아닌 필드로 정했고 런타임 400으로는 전수 검증하지 않았다, 응답 `data`의 필드별 스키마(`data`는 도메인 객체이며 자유 형식으로 둔다), 경로별 오류 응답의 실제 발생
     조건(공통 오류 응답을 선언만 하고 401만 계약 테스트로 확인한다).
 
     **공통 규칙(`ordering.yaml`과 같다):** Bearer JWT, 모든 쓰기(POST)는 `Idempotency-Key` 필수, 경로 식별자는 UUID가 아니면 404
@@ -48,6 +48,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [quantity, reservedAt]
               properties:
                 quantity: { type: integer }
                 reservedAt: { type: string, format: date-time }
@@ -94,6 +95,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [quantity, actedAt]
               properties:
                 quantity: { type: integer }
                 actedAt: { type: string, format: date-time }
@@ -140,6 +142,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [direction, quantity, reason, actedAt]
               properties:
                 direction: { type: string, enum: [IN, OUT] }
                 quantity: { type: integer }
@@ -250,6 +253,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [quantity, reason, releasedAt]
               properties:
                 quantity: { type: integer }
                 reason: { type: string }
@@ -297,6 +301,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [reason, voidedAt]
               properties:
                 reason: { type: string }
                 voidedAt: { type: string, format: date-time }
@@ -343,6 +348,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [orderLineId, sources, receivedAt]
               properties:
                 orderLineId: { type: string, format: uuid }
                 sources: { type: array, items: { type: object } }
@@ -396,6 +402,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [quantity, restorations, reason, evidence, physicalReturnConfirmed, correctedAt]
               properties:
                 quantity: { type: integer }
                 restorations: { type: array, items: { type: object } }
@@ -446,6 +453,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [reducedKrw, reason, evidence, correctedAt]
               properties:
                 reducedKrw: { type: string }
                 reason: { type: string }
@@ -494,6 +502,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [orderLineId, quantity, reason, expectedVersion, requestedAt]
               properties:
                 orderLineId: { type: string, format: uuid }
                 quantity: { type: integer }
@@ -543,6 +552,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [decision, decidedAt]
               properties:
                 decision: { type: string }
                 decidedAt: { type: string, format: date-time }
@@ -589,6 +599,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [appliedAt]
               properties:
                 appliedAt: { type: string, format: date-time }
       responses:
@@ -634,6 +645,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [expectedVersion, requestedAt]
               properties:
                 expectedVersion: { type: integer }
                 requestedAt: { type: string, format: date-time }
@@ -680,6 +692,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [quantity, actedAt]
               properties:
                 quantity: { type: integer }
                 actedAt: { type: string, format: date-time }
@@ -726,6 +739,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [quantity, requestedAt]
               properties:
                 quantity: { type: integer }
                 requestedAt: { type: string, format: date-time }
@@ -772,6 +786,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [acceptedQuantity, rejectedQuantity, evidence, repliedAt]
               properties:
                 acceptedQuantity: { type: integer }
                 rejectedQuantity: { type: integer }
@@ -820,6 +835,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [quantity, dispatchedAt]
               properties:
                 quantity: { type: integer }
                 dispatchedAt: { type: string, format: date-time }
@@ -867,6 +883,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [quantity, evidence, confirmedAt]
               properties:
                 quantity: { type: integer }
                 evidence: { type: string }
@@ -914,6 +931,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [quantity, kind, evidence, reportedAt]
               properties:
                 quantity: { type: integer }
                 kind: { type: string }
@@ -962,6 +980,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [quantity, retryReason, requestedAt]
               properties:
                 quantity: { type: integer }
                 retryReason: { type: string }
@@ -1009,6 +1028,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [outcome, quantity, evidence, resolvedAt]
               properties:
                 outcome: { type: string }
                 quantity: { type: integer }
@@ -1078,6 +1098,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [method, amountKrw, externalReference, paidAt]
               properties:
                 method: { type: string }
                 amountKrw: { type: string }
@@ -1126,6 +1147,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [evidence, confirmedAt]
               properties:
                 evidence: { type: string }
                 confirmedAt: { type: string, format: date-time }
@@ -1172,6 +1194,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [openedAt]
               properties:
                 openedAt: { type: string, format: date-time }
       responses:
@@ -1217,6 +1240,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [paymentId, amountKrw, evidence, requestedAt]
               properties:
                 paymentId: { type: string, format: uuid }
                 amountKrw: { type: string }
@@ -1265,6 +1289,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [paymentId, amountKrw, result, reason, reportedAt]
               properties:
                 paymentId: { type: string, format: uuid }
                 amountKrw: { type: string }
@@ -1314,6 +1339,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [outcome, evidence, resolvedAt]
               properties:
                 outcome: { type: string }
                 evidence: { type: string }
@@ -1355,6 +1381,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [key, body, expectedVersion, publishedAt]
               properties:
                 key: { type: string }
                 body: { type: string }
@@ -1426,6 +1453,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [createdAt]
               properties:
                 mode: { type: string }
                 createdAt: { type: string, format: date-time }
@@ -1493,6 +1521,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [action, actedAt]
               properties:
                 action: { type: string }
                 actedAt: { type: string, format: date-time }
@@ -1539,6 +1568,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [channel, messageSnapshot, attemptedAt]
               properties:
                 channel: { type: string }
                 messageSnapshot: { type: string }
@@ -1586,6 +1616,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [createdAt]
               properties:
                 createdAt: { type: string, format: date-time }
       responses:
@@ -1631,6 +1662,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [outcome, note, resultAt]
               properties:
                 outcome: { type: string }
                 note: { type: string }
@@ -1746,6 +1778,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [source, title, listPriceKrw, registeredAt]
               properties:
                 source: { type: string }
                 title: { type: string }
@@ -1886,6 +1919,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [expectedVersion, changes, reason, changedAt]
               properties:
                 expectedVersion: { type: integer }
                 changes: { type: object }
@@ -1929,6 +1963,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [email, expiresAt]
               properties:
                 email: { type: string }
                 expiresAt: { type: string, format: date-time }
@@ -2009,6 +2044,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [status]
               properties:
                 status: { type: string }
       responses:
@@ -2047,6 +2083,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [storeName]
               properties:
                 storeName: { type: string }
       responses:
@@ -2083,6 +2120,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [token]
               properties:
                 token: { type: string }
       responses:
@@ -2139,6 +2177,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [code, name, orderChannel, registeredAt]
               properties:
                 code: { type: string }
                 name: { type: string }
@@ -2213,6 +2252,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [expectedVersion, changes, reason, changedAt]
               properties:
                 expectedVersion: { type: integer }
                 changes: { type: object }
@@ -2260,6 +2300,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [active, reason, changedAt]
               properties:
                 active: { type: boolean }
                 reason: { type: string }
@@ -2313,6 +2354,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [supplierCode, quantity]
               properties:
                 supplierCode: { type: string }
                 quantity: { type: integer }
@@ -2365,6 +2407,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [purchaseOrderId, poLineId, surplusPlan, planNote, approvedAt]
               properties:
                 purchaseOrderId: { type: string, format: uuid }
                 poLineId: { type: string, format: uuid }
@@ -2414,6 +2457,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [reason, releasedAt]
               properties:
                 reason: { type: string }
                 releasedAt: { type: string, format: date-time }
@@ -2494,6 +2538,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [supplierCode, allocationIds]
               properties:
                 supplierCode: { type: string }
                 allocationIds: { type: array, items: { type: string, format: uuid } }
@@ -2567,6 +2612,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [expectedVersion]
               properties:
                 expectedVersion: { type: integer }
       responses:
@@ -2612,6 +2658,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [expectedVersion, method, deliveredAt]
               properties:
                 expectedVersion: { type: integer }
                 method: { type: string }
@@ -2661,6 +2708,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [expectedVersion, reason, cancelledAt]
               properties:
                 expectedVersion: { type: integer }
                 reason: { type: string }
@@ -2714,6 +2762,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [quantity, reason]
               properties:
                 quantity: { type: integer }
                 reason: { type: string }
@@ -2766,6 +2815,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [acceptedQuantity, rejectedQuantity, evidence, repliedAt]
               properties:
                 acceptedQuantity: { type: integer }
                 rejectedQuantity: { type: integer }
@@ -2814,6 +2864,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [expectedVersion]
               properties:
                 expectedVersion: { type: integer }
       responses:
@@ -2859,6 +2910,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [poLineId, kind, quantity, evidence, repliedAt]
               properties:
                 poLineId: { type: string, format: uuid }
                 kind: { type: string }
@@ -2910,6 +2962,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [poLineId, normalQuantity, damagedQuantity, misdeliveredQuantity, receivedAt]
               properties:
                 poLineId: { type: string, format: uuid }
                 normalQuantity: { type: integer }
@@ -2959,6 +3012,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [kind, quantity, outcome, evidence, resolvedAt]
               properties:
                 kind: { type: string }
                 quantity: { type: integer }
@@ -3008,6 +3062,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [decision, quantity, reason, decidedAt]
               properties:
                 decision: { type: string }
                 quantity: { type: integer }
@@ -3056,6 +3111,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [quantity, reason, correctedAt]
               properties:
                 quantity: { type: integer }
                 reason: { type: string }
@@ -3103,6 +3159,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [orderId, orderLineId, quantity, allocatedAt]
               properties:
                 orderId: { type: string, format: uuid }
                 orderLineId: { type: string, format: uuid }
@@ -3151,6 +3208,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [quantity, reason, cancelledAt]
               properties:
                 quantity: { type: integer }
                 reason: { type: string }
@@ -3198,6 +3256,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [toOrderId, toOrderLineId, quantity, reason, actedAt]
               properties:
                 toOrderId: { type: string, format: uuid }
                 toOrderLineId: { type: string, format: uuid }
@@ -3247,6 +3306,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [quantity, reason, releasedAt]
               properties:
                 quantity: { type: integer }
                 reason: { type: string }
@@ -3294,6 +3354,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [decision, decidedAt]
               properties:
                 decision: { type: string }
                 decidedAt: { type: string, format: date-time }
