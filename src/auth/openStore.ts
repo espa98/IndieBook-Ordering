@@ -8,6 +8,8 @@ import type { AccountPrincipal } from "./accountPrincipal";
 import type { Membership, MembershipRepository } from "./authorizeTenantAccess";
 
 const MAX_STORE_NAME_LENGTH = 60;
+/** 한 계정이 소유할 수 있는 서점 수 상한(사용자 결정 2026-11-25). 남용 방지 */
+export const MAX_STORES_PER_OWNER = 99;
 
 /** 서점(테넌트). 중지·해지(ST-A06/A07)는 아직 없어 ACTIVE만 있다. */
 export type Tenant = {
@@ -60,7 +62,11 @@ export function openStore(
       payload: { name },
     },
     () => {
-      if (deps.tenants.listByOwner(principal.userId).some((t) => t.name.toLowerCase() === name.toLowerCase())) {
+      const owned = deps.tenants.listByOwner(principal.userId);
+      if (owned.length >= MAX_STORES_PER_OWNER) {
+        throw new AppError("BUSINESS_INVARIANT", `an owner can open at most ${MAX_STORES_PER_OWNER} stores`);
+      }
+      if (owned.some((t) => t.name.toLowerCase() === name.toLowerCase())) {
         throw new AppError("BUSINESS_INVARIANT", "the owner already has a store with this name");
       }
       const tenant: Tenant = {

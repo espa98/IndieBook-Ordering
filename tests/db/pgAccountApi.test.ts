@@ -70,4 +70,16 @@ describe("서점 개설 (Postgres 영속화)", () => {
     expect(results.map((r) => (r.status === "fulfilled" ? "OK" : (r.reason as AppError).code)).sort()).toEqual(["BUSINESS_INVARIANT", "OK"]);
     expect((await rows("select count(*)::int as n from public.ordering_tenants where owner_user_id = $1", [racer.userId]))[0].n).toBe(2);
   });
+
+  it("한 계정은 서점을 99개까지만 열 수 있고, 98개일 때 두 세션이 동시에 열면 하나만 성공한다", async () => {
+    const user = { userId: "55555555-0000-4000-8000-000000000005", email: "many@shop.test" };
+    await rows(`insert into public.ordering_tenants (name, owner_user_id) select '서점 ' || n, $1 from generate_series(1, 98) n`, [user.userId]);
+
+    const results = await Promise.allSettled([api().openStore(user, { storeName: "99번째 A", idempotencyKey: key() }), api().openStore(user, { storeName: "99번째 B", idempotencyKey: key() })]);
+    expect(results.map((r) => (r.status === "fulfilled" ? "OK" : (r.reason as AppError).code)).sort()).toEqual(["BUSINESS_INVARIANT", "OK"]);
+    expect((await rows("select count(*)::int as n from public.ordering_tenants where owner_user_id = $1", [user.userId]))[0].n).toBe(99);
+    expect(await codeOf(() => api().openStore(user, { storeName: "100번째", idempotencyKey: key() }))).toBe("BUSINESS_INVARIANT");
+    expect((await rows("select count(*)::int as n from public.ordering_tenants where owner_user_id = $1", [user.userId]))[0].n).toBe(99);
+    expect((await api().openStore({ userId: "55555555-0000-4000-8000-000000000006", email: "few@shop.test" }, { storeName: "서점 1", idempotencyKey: key() })).tenant.name).toBe("서점 1"); // 다른 계정은 영향 없음
+  });
 });

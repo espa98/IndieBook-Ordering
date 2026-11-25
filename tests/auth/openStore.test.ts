@@ -105,4 +105,19 @@ describe("openStore: 서점 개설 (ST-A02, AUTH-002)", () => {
     expect(tenants).toEqual([]);
     expect(members).toEqual([]);
   });
+
+  it("한 소유자는 서점을 99개까지만 열 수 있고, 100번째는 BUSINESS_INVARIANT이며 다른 소유자·이미 연 서점의 재시도에는 영향이 없다", () => {
+    const { deps, tenants, signUp, principalOf } = storeScene();
+    signUp("u-1", "a@example.com", true);
+    signUp("u-2", "b@example.com", true);
+    const p = principalOf("u-1");
+
+    for (let n = 1; n <= 99; n++) openStore(deps, p, { storeName: `서점 ${n}`, idempotencyKey: `cap-${n}` });
+    expect(tenants.filter((t) => t.ownerUserId === "u-1")).toHaveLength(99);
+
+    expect(codeOf(() => openStore(deps, p, { storeName: "서점 100", idempotencyKey: "cap-100" }))).toBe("BUSINESS_INVARIANT");
+    expect(tenants).toHaveLength(99); // 거부는 아무것도 만들지 않는다
+    expect(openStore(deps, p, { storeName: "서점 99", idempotencyKey: "cap-99" }).tenant.name).toBe("서점 99"); // 같은 키의 재시도는 기존 결과
+    expect(codeOf(() => openStore(deps, principalOf("u-2"), { storeName: "서점 1", idempotencyKey: "other-1" }))).toBeUndefined(); // 다른 소유자
+  });
 });
