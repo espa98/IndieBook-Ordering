@@ -30,7 +30,7 @@
 | `ordering_v2_transfer_bucket` | 아니오 | 8버킷 이동 | 8버킷 프로젝션 대신 배분·해제·인도·편입·반품 원장(§5 R6) |
 | `ordering_p0_command` | 아니오(철회됨) | 구형 명령 | 대응 없음. 이미 막힘 |
 | `ordering_guard_ledger_write`, `ordering_check_lot_conservation`, `ordering_block_completed_refund` | 아니오 | 원장 보호 트리거 | 신규 가드 트리거와 주문 재개 명령으로 대체 |
-| `ordering_v23_request_close` | 문서(11-22)는 **DB에 없음**. **2026-11-25 점검에서 DB에 있음을 확인**(사용자 보고) | 종결 요청 RPC. 배포된 뒤의 정의·`authenticated` 실행 권한은 **미확인**(#1·#2 필요) | 종결은 `POST /orders/{id}/closure-requests` + 서버 종결 스위퍼 |
+| `ordering_v23_request_close` | **아니오**(2026-11-25 점검, 사용자 보고). DB에는 있음(문서 11-22는 "없음") | 종결 요청 RPC. **`authenticated`에 노출되지 않는다.** 정의·`SECURITY DEFINER` 여부·`service_role` 실행 권한은 미확인(#1 다른 열, #2 필요) | 종결은 `POST /orders/{id}/closure-requests` + 서버 종결 스위퍼 |
 
 ### 3.1 `ordering_v2_command` action → 신규 경로
 
@@ -114,7 +114,7 @@
 
 | 점검 | 상태 | 보고된 사실(출처: 사용자, 2026-11-25) |
 |---|---|---|
-| #1 함수 목록 | **부분** | 총 **11행**. 문서의 11개 함수가 모두 있고 문서에 없는 다른 `ordering%` 함수는 **없다**. 문서와의 유일한 차이는 `ordering_v23_request_close`가 **이제 DB에 있다**는 것(문서 기준 11-22에는 없었음 → 그 이후 배포). 함수별 `security_definer`·소유자·`function_settings`·`anon`/`authenticated`/`service_role` 실행 권한은 **미보고** |
+| #1 함수 목록 | **부분** | 총 **11행**. 문서의 11개 함수가 모두 있고 문서에 없는 다른 `ordering%` 함수는 **없다**. `ordering_v23_request_close`는 **이제 DB에 있다**(문서 11-22에는 없음 → 그 이후 배포). **`authenticated` 실행 가능은 정확히 4개**: `ordering_v2_command`, `ordering_request_approval`, `ordering_decide_approval`, `ordering_v2_refund_confirm` — **문서와 같다.** `ordering_v23_request_close`를 포함한 나머지 7개는 `authenticated` 실행 **불가**. `security_definer`·소유자·`function_settings`(`search_path` 고정 여부)·`anon`·`service_role` 실행 권한은 **미보고** |
 | #2 함수 정의 | 미실행 | — |
 | #3 열 | 미실행 | — |
 | #4 제약 | 미실행 | — |
@@ -126,7 +126,7 @@
 | #10 테이블별 행 수 | **부분** | 이름이 겹치는 5개 테이블이 **모두 0행**: `ordering_tenants` 0, `ordering_members` 0, `ordering_orders` 0, `ordering_order_lines` 0, `ordering_commands` 0. 나머지 `ordering%` 테이블의 행 수는 **미보고** |
 | #11~#12 확장·서버 버전 | 미실행 | — |
 
-**#1에서 얻은 판단:** 레거시의 RPC 목록이 문서 그대로이므로 §3의 인벤토리와 §3.1 대응표는 함수 단위로는 유효하다. 다만 `ordering_v23_request_close`가 배포되었으므로 (a) 그 함수의 정의(종결 불변식 검사 범위, Staff 허용 여부)와 (b) `authenticated`에 노출되었는지를 확인해야 R4·R8의 판단이 완성된다. 문서가 11-22 이후 갱신되지 않았다는 점도 확인되었으므로, 나머지 레거시 사실(§4의 열 구성 등)도 문서가 아니라 점검 결과로 확정해야 한다.
+**#1에서 얻은 판단:** (1) 레거시 RPC 목록과 `authenticated` 노출 범위(4개)는 문서 그대로이므로 §3 인벤토리·§3.1 대응표·R8(노출된 `SECURITY DEFINER` 함수 4개)은 그대로 유효하다. (2) 배포된 `ordering_v23_request_close`는 `authenticated`에 노출되지 않으므로 **클라이언트가 직접 호출할 수 없고**, 종결 RPC 노출에 따른 위험(R4·R8의 종결 부분)은 커지지 않았다. 다만 이 함수가 어떤 경로(서버 전용? 다른 RPC 내부?)로 호출되는지, 정의가 종결 불변식을 얼마나 검사하는지는 #2가 있어야 안다. (3) 문서가 11-22 이후 갱신되지 않았으므로 나머지 레거시 사실(§4의 열 구성 등)은 문서가 아니라 점검 결과로 확정해야 한다. (4) `anon` 실행 권한이 보고되지 않았으므로 "비로그인이 호출할 수 있는 함수가 없다"는 결론은 아직 내릴 수 없다.
 
 ## 8. 결정 요청
 
