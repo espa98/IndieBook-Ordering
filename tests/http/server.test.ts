@@ -1004,3 +1004,16 @@ describe("HTTP 서버: 서점 개설 (서점에 속하기 전의 계정)", () =>
     expect((await call(open, { method: "POST", headers: as("new@owner.test"), body: { storeName: "새 책방" } })).status).toBe(422); // 같은 이름
   });
 });
+
+describe("HTTP 서버: 입력 상한 (E4)", () => {
+  it("품목 100개 초과·문자열 1,000자 초과·금액 15자리 초과는 400이고, 상한 이내는 통과한다", async () => {
+    const one = lines(1, 1)[0]!;
+    expect((await call(orders(), { method: "POST", body: { lines: Array(101).fill(one) } })).status).toBe(400);
+    expect((await call(orders(), { method: "POST", body: { lines: [{ ...one, unitPriceKrw: "1".repeat(16) }] } })).status).toBe(400);
+    const tooLong = await call(`/v1/tenants/${T_A}/books`, { method: "POST", sub: STAFF_A, body: { source: "MANUAL", title: "가".repeat(1001), listPriceKrw: "8000", reason: "수기", registeredAt: new Date().toISOString() } });
+    expect(tooLong.status).toBe(400);
+    expect(tooLong.json.error.code).toBe("VALIDATION_ERROR");
+    const atLimit = await call(`/v1/tenants/${T_A}/books`, { method: "POST", sub: STAFF_A, body: { source: "MANUAL", title: "가".repeat(200), listPriceKrw: "8000", reason: "나".repeat(1000), registeredAt: new Date().toISOString() } });
+    expect(atLimit.status).toBe(201);
+  });
+});

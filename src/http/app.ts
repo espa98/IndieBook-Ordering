@@ -8,6 +8,7 @@ import { createPgOrderApi } from "../db/pgOrderApi";
 import { createPgPaymentApi } from "../db/pgPaymentApi";
 import { createPgProcurementApi } from "../db/pgProcurementApi";
 import { createPgReceivingApi } from "../db/pgReceivingApi";
+import { assertWithinLimits } from "./inputLimits";
 import { createPgAccountApi } from "../db/pgAccountApi";
 import { createPgCatalogApi } from "../db/pgCatalogApi";
 import { createPgStaffApi } from "../db/pgStaffApi";
@@ -540,6 +541,7 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
     if (Object.keys(parsed).some((key) => !fields.includes(key))) {
       throw validation(`Request contains fields that are not allowed (allowed: ${fields.join(", ")})`);
     }
+    assertWithinLimits(parsed);
     return parsed as Record<string, unknown>;
   }
 
