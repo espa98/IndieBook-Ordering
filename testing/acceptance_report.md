@@ -1258,3 +1258,26 @@
 - 정상 분기 한 번만 검증했다. 수령 정정 응답에는 정정 행(`reversalFulfillmentId`)만 있고 역거래 수령 자체는 응답에 없다.
 - 오류 응답(4xx/5xx)의 발생 조건 검증은 여전히 401뿐이다.
 
+## 68. 응답 스키마: 주문 취소·종결·취소 물량 처분·반품 쓰기 12개 경로 (T8 일부)
+
+테스트 1개 추가(`tests/openapi/responseContract.test.ts`). 주문 취소 요청 → 결정 → 적용 → 종결 요청, 그리고 입고·배분·배분 취소 뒤 재고 편입 → 반품 요청 → 회신 → 출고 → 예외 → 해소 → 재협의 → 완료까지를 한 시나리오로 실제 실행했다(모든 선행 호출이 처음부터 성공). **먼저 "`data` 스키마가 선언되어 있다"에서 실패함을 확인**한 뒤 채웠다.
+
+| 경로 | 스키마 |
+|---|---|
+| `POST /orders/{orderId}/cancellation-requests` | `OrderCancellationRequest` |
+| `POST /order-cancellation-requests/{requestId}/decision`(200), `.../application`(201) | `OrderCancellationDecision`(선택 `note`, `kind`는 5개 값) |
+| `POST /orders/{orderId}/closure-requests` | `OrderClosureRequest` |
+| `POST /allocation-cancellations/{cancellationId}/stock-intakes` | `{ intake: StockIntake, movement: StockMovement }` |
+| `POST .../return-requests`, `POST /return-requests/{requestId}/renegotiations` | `ReturnRequest`(선택 `retryOfRequestId`·`retryReason`) |
+| `.../replies`, `.../dispatches`(선택 `referenceNumber`), `.../exceptions`, `.../completions` | `ReturnReply`, `ReturnDispatch`, `ReturnException`, `ReturnCompletion` |
+| `POST /return-exceptions/{exceptionId}/resolutions` | `ReturnExceptionResolution` |
+
+응답 `data`를 선언한 경로는 **76개 중 54개**(조회 14 + 쓰기 40)다.
+
+**한계**
+- **남은 22개 쓰기 경로**(환급 5개, 안내 쓰기 4개, 직원·계정 5개, 발주 취소·회신 5개, 배정 해제·중복 위험 승인 3개)의 응답은 자유 형식이다.
+- 정상 분기 한 번만 검증했다. 결정 `kind`의 `REJECTED`·`WITHDRAWN`·`STALE`, 반품 `exceptions`의 `REFUSED`·`RETURNED_BACK`, 해소 `RECOVERED` 같은 다른 값의 응답은 확인하지 못했다(열거값은 도메인 타입 기준).
+- 오류 응답(4xx/5xx)의 발생 조건 검증은 여전히 401뿐이다.
+
+**알려진 간헐 실패(이번 변경과 무관, 미해결):** 전체 실행(10회 중 3회)에서 `tests/db/pgStaffApi.test.ts`의 초대 수락 테스트 2개가 `FORBIDDEN`으로 실패했고, 그 파일만 단독 실행하면 6회 모두 통과했다(재현 못 함). 실패 지점은 두 테스트 모두 Owner(`OWNER_A`)로 초대를 만드는 첫 줄이다. **추정 원인(검증하지 못함):** 바로 앞 테스트가 "두 Owner를 두 세션이 동시에 서로 내려도 한쪽만 성공"을 확인하는데, 어느 쪽이 성공할지는 경쟁으로 정해진다. 부하가 큰 전체 실행에서 `OWNER_A`가 비활성화되면 뒤 테스트의 초대가 거부된다. 수정하려면 그 테스트의 상태 공유(경쟁 뒤 Owner 복구 또는 초대에 쓰는 Owner 선택)를 바꿔야 하는데, 테스트를 수정하는 일이라 사용자 확인을 받기 전에는 건드리지 않았다.
+

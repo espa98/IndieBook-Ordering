@@ -292,3 +292,55 @@ describe("응답 계약(쓰기): 재고·수령·결제 정정", () => {
   });
 });
 
+describe("응답 계약(쓰기): 주문 취소·종결·취소 물량 처분·반품", () => {
+  it("취소 요청·결정·적용·종결 요청과 재고 편입·반품 요청·회신·출고·예외·해소·재협의·완료 응답이 선언한 스키마를 만족한다", async () => {
+    const checked: Checked[] = [];
+    const write = async (template: string, path: string, body: unknown, status: number) => {
+      const res = await call("POST", path, body);
+      expect(res.status, `${template} 상태 ${JSON.stringify(res.body)}`).toBe(status);
+      checked.push({ template, body: res.body });
+      return res.body.data;
+    };
+    const book = await call("POST", "/books", { source: "MANUAL", title: "취소 책", listPriceKrw: "9000", reason: "수기 등록", registeredAt: "2026-03-04T06:00:00.000Z" });
+    const bookId = book.body.data.id as string;
+    await call("POST", `/books/${bookId}/initial-stock`, { quantity: 1, actedAt: "2026-03-04T06:05:00.000Z" });
+    const lineOf = async (quantity: number) => {
+      const draft = await call("POST", "/orders", { lines: [{ bookId, quantity, unitPriceKrw: "9000" }] });
+      const confirmed = await call("POST", `/orders/${draft.body.data.id}/confirm`, { expectedVersion: 1 });
+      return { orderId: draft.body.data.id as string, lineId: confirmed.body.data.lines[0].lineId as string, version: 2 };
+    };
+
+    // 주문 취소 → 결정 → 적용 → 종결 요청
+    const plain = await lineOf(2);
+    const request = await write("/orders/{orderId}/cancellation-requests", `/orders/${plain.orderId}/cancellation-requests`, { orderLineId: plain.lineId, quantity: 2, reason: "고객 요청", expectedVersion: plain.version, requestedAt: "2026-03-04T07:00:00.000Z" }, 201);
+    await write("/order-cancellation-requests/{requestId}/decision", `/order-cancellation-requests/${request.id}/decision`, { decision: "APPROVED", decidedAt: "2026-03-04T07:10:00.000Z" }, 200);
+    await write("/order-cancellation-requests/{requestId}/application", `/order-cancellation-requests/${request.id}/application`, { appliedAt: "2026-03-04T07:20:00.000Z" }, 201);
+    const version = (await call("GET", `/orders/${plain.orderId}`)).body.data.version as number;
+    await write("/orders/{orderId}/closure-requests", `/orders/${plain.orderId}/closure-requests`, { expectedVersion: version, requestedAt: "2026-03-04T07:30:00.000Z" }, 201);
+
+    // 입고 후 배분했다가 취소한 물량의 처분
+    const target = await lineOf(5);
+    const sourcing = await call("POST", `/orders/${target.orderId}/lines/${target.lineId}/sourcing-allocations`, { supplierCode: "alpha", quantity: 5 });
+    const po = await call("POST", "/purchase-orders", { supplierCode: "alpha", allocationIds: [sourcing.body.data.id] });
+    const poId = po.body.data.id as string;
+    await call("POST", `/purchase-orders/${poId}/ready`, { expectedVersion: 1 });
+    await call("POST", `/purchase-orders/${poId}/delivery`, { expectedVersion: 2, method: "EMAIL", deliveredAt: "2026-03-04T08:00:00.000Z" });
+    const poLineId = (await call("GET", `/purchase-orders/${poId}`)).body.data.lines[0].poLineId as string;
+    const receipt = await call("POST", `/purchase-orders/${poId}/receipts`, { poLineId, normalQuantity: 5, damagedQuantity: 0, misdeliveredQuantity: 0, receivedAt: "2026-03-05T06:00:00.000Z" });
+    const allocation = await call("POST", `/receipts/${receipt.body.data.id}/allocations`, { orderId: target.orderId, orderLineId: target.lineId, quantity: 5, allocatedAt: "2026-03-05T07:00:00.000Z" });
+    const cancelOne = await call("POST", `/allocations/${allocation.body.data.id}/cancellations`, { quantity: 1, reason: "취소 1", cancelledAt: "2026-03-05T07:10:00.000Z" });
+    const cancelRest = await call("POST", `/allocations/${allocation.body.data.id}/cancellations`, { quantity: 4, reason: "취소 4", cancelledAt: "2026-03-05T07:20:00.000Z" });
+    await write("/allocation-cancellations/{cancellationId}/stock-intakes", `/allocation-cancellations/${cancelOne.body.data.id}/stock-intakes`, { quantity: 1, actedAt: "2026-03-05T07:30:00.000Z" }, 201);
+    const returnRequest = await write("/allocation-cancellations/{cancellationId}/return-requests", `/allocation-cancellations/${cancelRest.body.data.id}/return-requests`, { quantity: 4, requestedAt: "2026-03-05T07:40:00.000Z" }, 201);
+    await write("/return-requests/{requestId}/replies", `/return-requests/${returnRequest.id}/replies`, { acceptedQuantity: 3, rejectedQuantity: 1, evidence: "공급처 회신", repliedAt: "2026-03-05T07:50:00.000Z" }, 201);
+    await write("/return-requests/{requestId}/dispatches", `/return-requests/${returnRequest.id}/dispatches`, { quantity: 3, dispatchedAt: "2026-03-05T08:00:00.000Z", referenceNumber: "TRK-1" }, 201);
+    const exception = await write("/return-requests/{requestId}/exceptions", `/return-requests/${returnRequest.id}/exceptions`, { quantity: 1, kind: "LOST", evidence: "운송장 분실", reportedAt: "2026-03-05T08:10:00.000Z" }, 201);
+    await write("/return-exceptions/{exceptionId}/resolutions", `/return-exceptions/${exception.id}/resolutions`, { outcome: "RETURNED", quantity: 1, evidence: "공급처 확인", resolvedAt: "2026-03-05T08:20:00.000Z" }, 201);
+    await write("/return-requests/{requestId}/renegotiations", `/return-requests/${returnRequest.id}/renegotiations`, { quantity: 1, retryReason: "재협의", requestedAt: "2026-03-05T08:30:00.000Z" }, 201);
+    await write("/return-requests/{requestId}/completions", `/return-requests/${returnRequest.id}/completions`, { quantity: 2, evidence: "반품 완료 확인", confirmedAt: "2026-03-05T08:40:00.000Z" }, 201);
+
+    for (const { template } of checked) expect(declared(template, "post"), `${template} data 스키마`).toBe(true);
+    for (const { template, body } of checked) expect(conforms(template, body, "post"), template).toMatchObject({ ok: true });
+  });
+});
+

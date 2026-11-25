@@ -9,7 +9,7 @@ info:
     본문 허용 필드(`additionalProperties: false`), 쿼리 파라미터, `Idempotency-Key` 필수 여부가 어긋나면 테스트가 실패한다.
 
     **이 명세가 기술하지 않는 것(미구현·미검증):** 필수 여부(`required`)·열거값·타입은 도메인 요청 타입 기준이고
-    런타임 400으로는 전수 검증하지 않았다, 응답 `data`의 필드별 스키마(조회 14개 경로 전부와 쓰기 28개 경로(나머지 34개는 아직 자유 형식)를 선언했고 `tests/openapi/responseContract.test.ts`가 실제 응답으로 검증한다. 나머지는 자유 형식), 경로별 오류 응답의 실제 발생
+    런타임 400으로는 전수 검증하지 않았다, 응답 `data`의 필드별 스키마(조회 14개 경로 전부와 쓰기 40개 경로(나머지 22개는 아직 자유 형식)를 선언했고 `tests/openapi/responseContract.test.ts`가 실제 응답으로 검증한다. 나머지는 자유 형식), 경로별 오류 응답의 실제 발생
     조건(공통 오류 응답을 선언만 하고 401만 계약 테스트로 확인한다).
 
     **공통 규칙(`ordering.yaml`과 같다):** Bearer JWT, 모든 쓰기(POST)는 `Idempotency-Key` 필수, 경로 식별자는 UUID가 아니면 404
@@ -570,7 +570,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/OrderCancellationRequest" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -617,7 +620,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/OrderCancellationDecision" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -663,7 +669,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/OrderCancellationDecision" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -710,7 +719,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/OrderClosureRequest" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -757,7 +769,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [intake, movement]
+                    properties:
+                      intake: { $ref: "#/components/schemas/StockIntake" }
+                      movement: { $ref: "#/components/schemas/StockMovement" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -804,7 +824,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/ReturnRequest" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -853,7 +876,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/ReturnReply" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -901,7 +927,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/ReturnDispatch" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -949,7 +978,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/ReturnCompletion" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -998,7 +1030,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/ReturnException" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -1046,7 +1081,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/ReturnRequest" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -1095,7 +1133,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/ReturnExceptionResolution" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -3570,6 +3611,138 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    ReturnCompletion:
+      type: object
+      required: [id, tenantId, returnRequestId, quantity, evidence, confirmedBy, confirmedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        returnRequestId: { type: string, format: uuid }
+        quantity: { type: integer }
+        evidence: { type: string }
+        confirmedBy: { type: string }
+        confirmedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    ReturnExceptionResolution:
+      type: object
+      required: [id, tenantId, returnExceptionId, returnRequestId, outcome, quantity, evidence, resolvedBy, resolvedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        returnExceptionId: { type: string, format: uuid }
+        returnRequestId: { type: string, format: uuid }
+        outcome: { type: string, enum: [RECOVERED, RETURNED] }
+        quantity: { type: integer }
+        evidence: { type: string }
+        resolvedBy: { type: string }
+        resolvedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    ReturnException:
+      type: object
+      required: [id, tenantId, returnRequestId, quantity, kind, evidence, reportedBy, reportedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        returnRequestId: { type: string, format: uuid }
+        quantity: { type: integer }
+        kind: { type: string, enum: [LOST, REFUSED, RETURNED_BACK] }
+        evidence: { type: string }
+        reportedBy: { type: string }
+        reportedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    ReturnDispatch:
+      type: object
+      required: [id, tenantId, returnRequestId, quantity, dispatchedBy, dispatchedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        returnRequestId: { type: string, format: uuid }
+        quantity: { type: integer }
+        dispatchedBy: { type: string }
+        dispatchedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+        referenceNumber: { type: string }
+    ReturnReply:
+      type: object
+      required: [id, tenantId, returnRequestId, acceptedQuantity, rejectedQuantity, evidence, repliedBy, repliedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        returnRequestId: { type: string, format: uuid }
+        acceptedQuantity: { type: integer }
+        rejectedQuantity: { type: integer }
+        evidence: { type: string }
+        repliedBy: { type: string }
+        repliedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    ReturnRequest:
+      type: object
+      required: [id, tenantId, bookId, cancellationId, receiptId, supplierCode, quantity, requestedBy, requestedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        bookId: { type: string }
+        cancellationId: { type: string, format: uuid }
+        receiptId: { type: string, format: uuid }
+        supplierCode: { type: string }
+        quantity: { type: integer }
+        requestedBy: { type: string }
+        requestedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+        retryOfRequestId: { type: string, format: uuid }
+        retryReason: { type: string }
+    StockIntake:
+      type: object
+      required: [id, tenantId, bookId, cancellationId, receiptId, orderId, orderLineId, quantity, actedBy, actedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        bookId: { type: string }
+        cancellationId: { type: string, format: uuid }
+        receiptId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        orderLineId: { type: string, format: uuid }
+        quantity: { type: integer }
+        actedBy: { type: string }
+        actedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    OrderClosureRequest:
+      type: object
+      required: [id, tenantId, orderId, expectedVersion, requestedBy, requestedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        expectedVersion: { type: integer }
+        requestedBy: { type: string }
+        requestedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    OrderCancellationDecision:
+      type: object
+      required: [id, tenantId, requestId, kind, decidedBy, decidedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        requestId: { type: string, format: uuid }
+        kind: { type: string, enum: [APPLIED, APPROVED, REJECTED, STALE, WITHDRAWN] }
+        decidedBy: { type: string }
+        decidedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+        note: { type: string }
+    OrderCancellationRequest:
+      type: object
+      required: [id, tenantId, orderId, orderLineId, quantity, reason, baseVersion, requestedBy, requestedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        orderLineId: { type: string, format: uuid }
+        quantity: { type: integer }
+        reason: { type: string }
+        baseVersion: { type: integer }
+        requestedBy: { type: string }
+        requestedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
     FulfillmentCorrection:
       type: object
       required: [id, tenantId, orderId, fulfillmentId, reversalFulfillmentId, quantity, restorations, reason, evidence, correctedBy, correctedAt, recordedAt]
