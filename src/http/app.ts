@@ -46,6 +46,8 @@ type Ctx = {
 type Route = {
   method: "GET" | "POST";
   pattern: RegExp;
+  /** OpenAPI 표기의 경로(`/orders/{orderId}`). 명세와의 드리프트 검사에 쓴다 */
+  template: string;
   /** 허용하는 본문 필드. 없으면 본문을 받지 않는다 */
   fields?: readonly string[];
   /** 허용하는 쿼리 파라미터 */
@@ -55,15 +57,19 @@ type Route = {
 };
 
 const T = "/v1/tenants/(?<tenantId>[^/]+)";
-const route = (method: Route["method"], path: string, spec: Omit<Route, "method" | "pattern">): Route => ({
+const route = (method: Route["method"], path: string, spec: Omit<Route, "method" | "pattern" | "template">): Route => ({
   method,
   pattern: new RegExp(`^${T}${path}$`),
+  template: path.replace(/\(\?<(\w+)>[^)]*\)/g, "{$1}"),
   ...spec,
 });
 
 const validation = (message: string) => new AppError("VALIDATION_ERROR", message);
 
-export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppResponse> {
+/** 서버가 제공하는 경로의 공개 정보(명세 대조용) */
+export type RouteInfo = { method: "GET" | "POST"; template: string; fields?: readonly string[]; queryFields?: readonly string[]; success: number };
+
+export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppResponse>) & { routes: RouteInfo[] } {
   const orders = createPgOrderApi({ pool: deps.pool });
   const stock = createPgStockApi({ pool: deps.pool });
   const payments = createPgPaymentApi({ pool: deps.pool });
@@ -443,7 +449,7 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
     return parsed as Record<string, unknown>;
   }
 
-  return async (request) => {
+  const handler = async (request: AppRequest): Promise<AppResponse> => {
     try {
       if (request.path === "/healthz") {
         if (request.method !== "GET") return { status: 405, body: errorBody("METHOD_NOT_ALLOWED", "Method not allowed"), headers: { allow: "GET" } };
@@ -495,6 +501,8 @@ export function createApp(deps: AppDeps): (request: AppRequest) => Promise<AppRe
       return { status: response.status, body: response.body };
     }
   };
+  const info: RouteInfo[] = routes.map(({ method, template, fields, queryFields, success }) => ({ method, template, ...(fields ? { fields } : {}), ...(queryFields ? { queryFields } : {}), success }));
+  return Object.assign(handler, { routes: info });
 }
 
 /** AppError에 없는 HTTP 전용 오류(415 등) */

@@ -1,0 +1,2853 @@
+openapi: 3.1.0
+
+info:
+  title: BookFlow Ordering API - 주문 외 경로 (초안)
+  version: 0.1.0-draft
+  description: |
+    `src/http/app.ts`가 제공하는 **주문 4개 경로(`ordering.yaml`)를 제외한 모든 경로**의 계약 초안이다.
+    이 파일은 `tests/openapi/ordering.http.test.ts`가 서버 경로표와 대조한다: (메서드, 경로) 집합, 성공 상태,
+    본문 허용 필드(`additionalProperties: false`), 쿼리 파라미터, `Idempotency-Key` 필수 여부가 어긋나면 테스트가 실패한다.
+
+    **이 명세가 기술하지 않는 것(미구현·미검증):** 요청 필드의 타입·필수 여부(도메인이 400으로 검증하며 필드별 스키마는
+    아직 옮기지 않았다), 응답 `data`의 필드별 스키마(`data`는 도메인 객체이며 자유 형식으로 둔다), 경로별 오류 응답의 실제 발생
+    조건(공통 오류 응답을 선언만 하고 401만 계약 테스트로 확인한다).
+
+    **공통 규칙(`ordering.yaml`과 같다):** Bearer JWT, 모든 쓰기(POST)는 `Idempotency-Key` 필수, 경로 식별자는 UUID가 아니면 404
+    (공급처 `code`만 예외), 본문의 알 수 없는 필드와 알 수 없는 쿼리는 400, 행위자(역할·이름)는 토큰에서 도출하므로 본문으로 보낼 수 없다.
+    오류 본문은 `{ error: { code, message } }`.
+
+security:
+  - bearerAuth: []
+
+paths:
+  /v1/tenants/{tenantId}/orders/{orderId}/lines/{lineId}/stock-reservations:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: orderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: lineId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [stock]
+      operationId: reserveStock
+      summary: reserveStock
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                quantity: {}
+                reservedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/books/{bookId}/initial-stock:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: bookId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [stock]
+      operationId: registerInitialStock
+      summary: registerInitialStock
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                quantity: {}
+                actedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/books/{bookId}/stock-adjustments:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: bookId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [stock]
+      operationId: adjustStock
+      summary: adjustStock
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                direction: {}
+                quantity: {}
+                reason: {}
+                actedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/stock-reservations/{reservationId}/releases:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: reservationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [stock]
+      operationId: releaseStockReservation
+      summary: releaseStockReservation
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                quantity: {}
+                reason: {}
+                releasedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/payments/{paymentId}/void:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: paymentId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [payments]
+      operationId: voidPayment
+      summary: voidPayment
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason: {}
+                voidedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/orders/{orderId}/fulfillments:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: orderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [fulfillments]
+      operationId: postFulfillment
+      summary: postFulfillment
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                orderLineId: {}
+                sources: {}
+                receivedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/orders/{orderId}/fulfillments/{fulfillmentId}/corrections:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: orderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: fulfillmentId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [fulfillments]
+      operationId: correctFulfillment
+      summary: correctFulfillment
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                quantity: {}
+                restorations: {}
+                reason: {}
+                evidence: {}
+                physicalReturnConfirmed: {}
+                correctedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/payments/{paymentId}/corrections:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: paymentId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [payments]
+      operationId: correctPayment
+      summary: correctPayment
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reducedKrw: {}
+                reason: {}
+                evidence: {}
+                correctedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/orders/{orderId}/cancellation-requests:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: orderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [fulfillments]
+      operationId: requestOrderCancellation
+      summary: requestOrderCancellation
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                orderLineId: {}
+                quantity: {}
+                reason: {}
+                expectedVersion: {}
+                requestedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/order-cancellation-requests/{requestId}/decision:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: requestId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [cancellations]
+      operationId: decideOrderCancellation
+      summary: decideOrderCancellation
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                decision: {}
+                decidedAt: {}
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/order-cancellation-requests/{requestId}/application:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: requestId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [cancellations]
+      operationId: applyOrderCancellation
+      summary: applyOrderCancellation
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                appliedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/orders/{orderId}/closure-requests:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: orderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [cancellations]
+      operationId: requestOrderClosure
+      summary: requestOrderClosure
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                expectedVersion: {}
+                requestedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/allocation-cancellations/{cancellationId}/stock-intakes:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: cancellationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [dispositions]
+      operationId: transferCancelledToStock
+      summary: transferCancelledToStock
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                quantity: {}
+                actedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/allocation-cancellations/{cancellationId}/return-requests:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: cancellationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [dispositions]
+      operationId: requestReturn
+      summary: requestReturn
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                quantity: {}
+                requestedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/return-requests/{requestId}/replies:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: requestId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [dispositions]
+      operationId: recordReturnReply
+      summary: recordReturnReply
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                acceptedQuantity: {}
+                rejectedQuantity: {}
+                evidence: {}
+                repliedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/return-requests/{requestId}/dispatches:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: requestId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [dispositions]
+      operationId: dispatchReturn
+      summary: dispatchReturn
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                quantity: {}
+                dispatchedAt: {}
+                referenceNumber: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/return-requests/{requestId}/completions:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: requestId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [dispositions]
+      operationId: completeReturn
+      summary: completeReturn
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                quantity: {}
+                evidence: {}
+                confirmedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/return-requests/{requestId}/exceptions:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: requestId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [dispositions]
+      operationId: reportReturnException
+      summary: reportReturnException
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                quantity: {}
+                kind: {}
+                evidence: {}
+                reportedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/return-requests/{requestId}/renegotiations:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: requestId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [dispositions]
+      operationId: renegotiateReturn
+      summary: renegotiateReturn
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                quantity: {}
+                retryReason: {}
+                requestedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/return-exceptions/{exceptionId}/resolutions:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: exceptionId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [dispositions]
+      operationId: resolveReturnException
+      summary: resolveReturnException
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                outcome: {}
+                quantity: {}
+                evidence: {}
+                resolvedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/orders/{orderId}/payments:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: orderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [payments]
+      operationId: recordPayment
+      summary: recordPayment
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                method: {}
+                amountKrw: {}
+                externalReference: {}
+                paidAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/payments/{paymentId}/confirmation:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: paymentId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [payments]
+      operationId: confirmPayment
+      summary: confirmPayment
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                evidence: {}
+                confirmedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/orders/{orderId}/refund-tasks:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: orderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [payments]
+      operationId: openRefundTask
+      summary: openRefundTask
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                openedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/refund-tasks/{taskId}/refund-requests:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [payments]
+      operationId: requestRefund
+      summary: requestRefund
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                paymentId: {}
+                amountKrw: {}
+                evidence: {}
+                requestedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/refund-tasks/{taskId}/refund-attempts:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [payments]
+      operationId: reportRefundAttempt
+      summary: reportRefundAttempt
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                paymentId: {}
+                amountKrw: {}
+                result: {}
+                reason: {}
+                reportedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/refund-attempts/{attemptId}/resolution:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: attemptId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [payments]
+      operationId: resolveRefundAttempt
+      summary: resolveRefundAttempt
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                outcome: {}
+                evidence: {}
+                resolvedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/message-templates:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+    post:
+      tags: [catalog]
+      operationId: publishTemplateVersion
+      summary: publishTemplateVersion
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                key: {}
+                body: {}
+                expectedVersion: {}
+                publishedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/orders/{orderId}/notification-targets:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: orderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [notifications]
+      operationId: createNotificationTarget
+      summary: createNotificationTarget
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                mode: {}
+                createdAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/notification-targets/{targetId}/copies:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: targetId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [notifications]
+      operationId: recordNotificationCopy
+      summary: recordNotificationCopy
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                action: {}
+                actedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/notification-targets/{targetId}/attempts:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: targetId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [notifications]
+      operationId: recordNotificationAttempt
+      summary: recordNotificationAttempt
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                channel: {}
+                messageSnapshot: {}
+                attemptedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/notification-targets/{targetId}/renotices:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: targetId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [notifications]
+      operationId: renotify
+      summary: renotify
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                createdAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/notification-attempts/{attemptId}/result:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: attemptId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [notifications]
+      operationId: recordNotificationResult
+      summary: recordNotificationResult
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                outcome: {}
+                note: {}
+                resultAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/books:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+    post:
+      tags: [catalog]
+      operationId: registerBook
+      summary: registerBook
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                source: {}
+                title: {}
+                authors: {}
+                isbn: {}
+                listPriceKrw: {}
+                externalId: {}
+                fetchedAt: {}
+                reason: {}
+                acknowledgeDuplicateOf: {}
+                registeredAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/books/{bookId}/updates:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: bookId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [catalog]
+      operationId: updateBook
+      summary: updateBook
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                expectedVersion: {}
+                changes: {}
+                reason: {}
+                acknowledgeDuplicateOf: {}
+                changedAt: {}
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/staff-invitations:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+    post:
+      tags: [staffAdmin]
+      operationId: inviteStaff
+      summary: inviteStaff
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                email: {}
+                expiresAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/staff-invitations/{invitationId}/revocation:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: invitationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [staffAdmin]
+      operationId: revokeInvitation
+      summary: revokeInvitation
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/members/{targetUserId}/status:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: targetUserId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [staffAdmin]
+      operationId: setMembershipStatus
+      summary: setMembershipStatus
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                status: {}
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/suppliers:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+    post:
+      tags: [suppliers]
+      operationId: registerSupplier
+      summary: registerSupplier
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                code: {}
+                name: {}
+                orderChannel: {}
+                registeredAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/suppliers/{code}/updates:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: code
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [suppliers]
+      operationId: updateSupplier
+      summary: updateSupplier
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                expectedVersion: {}
+                changes: {}
+                reason: {}
+                changedAt: {}
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/suppliers/{code}/activation:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: code
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [suppliers]
+      operationId: setSupplierActive
+      summary: setSupplierActive
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                active: {}
+                reason: {}
+                changedAt: {}
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/orders/{orderId}/lines/{lineId}/sourcing-allocations:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: orderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: lineId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [procurement]
+      operationId: allocateSourcing
+      summary: allocateSourcing
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                supplierCode: {}
+                quantity: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/orders/{orderId}/lines/{lineId}/duplicate-risk-approvals:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: orderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: lineId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [procurement]
+      operationId: approveDuplicateRisk
+      summary: approveDuplicateRisk
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                purchaseOrderId: {}
+                poLineId: {}
+                surplusPlan: {}
+                planNote: {}
+                approvedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/sourcing-allocations/{allocationId}/releases:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: allocationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [procurement]
+      operationId: releaseSourcing
+      summary: releaseSourcing
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason: {}
+                releasedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/purchase-orders:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+    post:
+      tags: [procurement]
+      operationId: createPurchaseOrder
+      summary: createPurchaseOrder
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                supplierCode: {}
+                allocationIds: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/purchase-orders/{purchaseOrderId}/ready:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: purchaseOrderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [procurement]
+      operationId: markPurchaseOrderReady
+      summary: markPurchaseOrderReady
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                expectedVersion: {}
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/purchase-orders/{purchaseOrderId}/delivery:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: purchaseOrderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [procurement]
+      operationId: recordPurchaseOrderDelivery
+      summary: recordPurchaseOrderDelivery
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                expectedVersion: {}
+                method: {}
+                deliveredAt: {}
+                referenceNumber: {}
+                fileVersion: {}
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/purchase-orders/{purchaseOrderId}/cancellation:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: purchaseOrderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [procurement]
+      operationId: cancelUndeliveredPurchaseOrder
+      summary: cancelUndeliveredPurchaseOrder
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                expectedVersion: {}
+                reason: {}
+                cancelledAt: {}
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/purchase-orders/{purchaseOrderId}/lines/{poLineId}/cancellation-requests:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: purchaseOrderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: poLineId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [procurement]
+      operationId: createCancellationRequest
+      summary: createCancellationRequest
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                quantity: {}
+                reason: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/purchase-orders/{purchaseOrderId}/cancellation-requests/{requestId}/responses:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: purchaseOrderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: requestId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [procurement]
+      operationId: respondToCancellationRequest
+      summary: respondToCancellationRequest
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                acceptedQuantity: {}
+                rejectedQuantity: {}
+                evidence: {}
+                repliedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/purchase-orders/{purchaseOrderId}/cancellation-confirmation:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: purchaseOrderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [procurement]
+      operationId: confirmPurchaseOrderCancellation
+      summary: confirmPurchaseOrderCancellation
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                expectedVersion: {}
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/purchase-orders/{purchaseOrderId}/supplier-replies:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: purchaseOrderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [procurement]
+      operationId: recordSupplierReply
+      summary: recordSupplierReply
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                poLineId: {}
+                kind: {}
+                quantity: {}
+                source: {}
+                eta: {}
+                evidence: {}
+                repliedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/purchase-orders/{purchaseOrderId}/receipts:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: purchaseOrderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [receiving]
+      operationId: receiveGoods
+      summary: receiveGoods
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                poLineId: {}
+                normalQuantity: {}
+                damagedQuantity: {}
+                misdeliveredQuantity: {}
+                receivedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/receipts/{receiptId}/defect-resolutions:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: receiptId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [receiving]
+      operationId: resolveReceiptDefect
+      summary: resolveReceiptDefect
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                kind: {}
+                quantity: {}
+                outcome: {}
+                evidence: {}
+                resolvedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/receipts/{receiptId}/excess-decisions:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: receiptId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [receiving]
+      operationId: decideExcessReceipt
+      summary: decideExcessReceipt
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                decision: {}
+                quantity: {}
+                reason: {}
+                decidedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/receipts/{receiptId}/corrections:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: receiptId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [receiving]
+      operationId: correctReceipt
+      summary: correctReceipt
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                quantity: {}
+                reason: {}
+                correctedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/receipts/{receiptId}/allocations:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: receiptId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [receiving]
+      operationId: allocateReceipt
+      summary: allocateReceipt
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                orderId: {}
+                orderLineId: {}
+                quantity: {}
+                allocatedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/allocations/{allocationId}/cancellations:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: allocationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [receiving]
+      operationId: cancelAllocation
+      summary: cancelAllocation
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                quantity: {}
+                reason: {}
+                cancelledAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/allocations/{allocationId}/reallocations:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: allocationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [receiving]
+      operationId: reallocateAllocation
+      summary: reallocateAllocation
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                toOrderId: {}
+                toOrderLineId: {}
+                quantity: {}
+                reason: {}
+                actedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/allocations/{allocationId}/releases:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: allocationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [receiving]
+      operationId: releaseAllocation
+      summary: releaseAllocation
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                quantity: {}
+                reason: {}
+                releasedAt: {}
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/refund-requests/{requestId}/decision:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: requestId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [payments]
+      operationId: decideRefundRequest
+      summary: decideRefundRequest
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                decision: {}
+                decidedAt: {}
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    DataResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {}
