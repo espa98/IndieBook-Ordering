@@ -8,6 +8,8 @@ import { createPgOrderApi } from "../db/pgOrderApi";
 import { createPgPaymentApi } from "../db/pgPaymentApi";
 import { createPgProcurementApi } from "../db/pgProcurementApi";
 import { createPgReceivingApi } from "../db/pgReceivingApi";
+import { createHash } from "node:crypto";
+import { runWithAudit } from "../db/auditContext";
 import { assertWithinLimits } from "./inputLimits";
 import { createPgAccountApi } from "../db/pgAccountApi";
 import { createPgCatalogApi } from "../db/pgCatalogApi";
@@ -582,7 +584,23 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
         }
         body = parseBody(request, hit.r.fields ?? []);
       }
-      const data = await hit.r.run({ params: hit.params, query, body, userId, email, idempotencyKey });
+      const run = () => hit.r.run({ params: hit.params, query, body, userId, email, idempotencyKey });
+      // 쓰기 요청은 성공 시 감사 행을 명령과 같은 트랜잭션에 남긴다(읽기는 남기지 않는다)
+      const { tenantId, ...targets } = hit.params;
+      const data =
+        hit.r.method === "POST"
+          ? await runWithAudit(
+              {
+                actorId: userId,
+                ...(hit.r.scope === "tenant" && tenantId ? { tenantId } : {}),
+                operation: `POST ${hit.r.scope === "tenant" ? "/v1/tenants/{tenantId}" : "/v1"}${hit.r.template}`,
+                commandKey: idempotencyKey,
+                requestHash: createHash("sha256").update(request.rawBody ?? "").digest("hex"),
+                targets,
+              },
+              run,
+            )
+          : await run();
       return { status: hit.r.success, body: { data } };
     } catch (error) {
       if (error instanceof HttpError) return { status: error.status, body: errorBody(error.code, error.message) };

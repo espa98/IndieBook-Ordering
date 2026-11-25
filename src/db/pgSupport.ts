@@ -1,4 +1,5 @@
 import type { Pool, PoolClient } from "pg";
+import { currentAudit } from "./auditContext";
 import { authorizeTenantAccess, type Membership } from "../auth/authorizeTenantAccess";
 import type { UserPrincipal } from "../auth/principal";
 import type { IdempotencyStore } from "../idempotency/executeIdempotent";
@@ -30,6 +31,18 @@ export async function inTransaction<T>(
         await client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: userId })]);
       }
       const result = await run(client);
+      // 감사 행은 명령과 같은 트랜잭션이다: 저장에 실패하면 명령도 롤백된다
+      const audit = currentAudit();
+      if (audit) {
+        await client.query("insert into public.ordering_audit_log (tenant_id, actor_id, operation, command_key, request_hash, targets) values ($1, $2, $3, $4, $5, $6::jsonb)", [
+          audit.tenantId ?? null,
+          audit.actorId,
+          audit.operation,
+          audit.commandKey ?? null,
+          audit.requestHash,
+          JSON.stringify(audit.targets),
+        ]);
+      }
       await client.query("commit");
       return result;
     } catch (error) {

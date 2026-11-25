@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -1015,5 +1016,43 @@ describe("HTTP 서버: 입력 상한 (E4)", () => {
     expect(tooLong.json.error.code).toBe("VALIDATION_ERROR");
     const atLimit = await call(`/v1/tenants/${T_A}/books`, { method: "POST", sub: STAFF_A, body: { source: "MANUAL", title: "가".repeat(200), listPriceKrw: "8000", reason: "나".repeat(1000), registeredAt: new Date().toISOString() } });
     expect(atLimit.status).toBe(201);
+  });
+});
+
+describe("HTTP 서버: 감사 로그 (E6)", () => {
+  it("성공한 쓰기 요청만 행위자·서점·작업·멱등 키·본문 해시·대상으로 기록하고, 읽기·거부된 요청은 남기지 않으며 본문 원문은 저장하지 않는다", async () => {
+    const audit = async () => {
+      const c = await db.connect();
+      try {
+        return (await c.query("select * from public.ordering_audit_log order by seq")).rows;
+      } finally {
+        await c.end();
+      }
+    };
+    const before = (await audit()).length;
+
+    const body = { lines: lines(2, 1) };
+    const created = await call(orders(), { method: "POST", sub: STAFF_A, key: "audit-key-1", body });
+    expect(created.status).toBe(201);
+    await call(orders(), { sub: STAFF_A }); // 읽기
+    await call(orders(), { method: "POST", sub: STRANGER, key: "audit-denied", body }); // 거부
+    await call(orders(), { method: "POST", sub: STAFF_A, key: "audit-bad", body: { lines: [{ ...lines(2, 1)[0]!, quantity: 0 }] } }); // 검증 실패
+    const confirm = await call(`${orders()}/${created.json.data.id}/confirm`, { method: "POST", sub: STAFF_A, key: "audit-key-2", body: { expectedVersion: 1 } });
+    expect(confirm.status).toBe(200);
+
+    const added = (await audit()).slice(before);
+    expect(added.map((r) => [r.operation, r.command_key])).toEqual([
+      ["POST /v1/tenants/{tenantId}/orders", "audit-key-1"],
+      ["POST /v1/tenants/{tenantId}/orders/{orderId}/confirm", "audit-key-2"],
+    ]);
+    expect(added[0]).toMatchObject({ tenant_id: T_A, actor_id: STAFF_A, request_hash: createHash("sha256").update(JSON.stringify(body)).digest("hex"), targets: {} });
+    expect(added[1]).toMatchObject({ tenant_id: T_A, actor_id: STAFF_A, targets: { orderId: created.json.data.id } });
+    expect(JSON.stringify(added)).not.toContain(BOOK(2)); // 본문 원문은 저장하지 않는다
+
+    // 서점 개설: 서점이 아직 없어 tenant_id가 없다
+    const OWNER_X = "44444444-0000-4000-8000-0000000000c1";
+    const open = await call("/v1/stores", { method: "POST", headers: { authorization: `Bearer ${token(OWNER_X, { email: "x@owner.test" })}` }, key: "audit-open", body: { storeName: "감사 서점" } });
+    expect(open.status).toBe(201);
+    expect((await audit()).slice(before + 2)).toMatchObject([{ tenant_id: null, actor_id: OWNER_X, operation: "POST /v1/stores", command_key: "audit-open" }]);
   });
 });
