@@ -1501,3 +1501,27 @@ vitest는 타입을 검사하지 않아 §73에서 제가 만든 테스트의 �
 **한계**
 - 이 규칙은 `duplicate-risk-approvals`와 재고(`initial-stock`·`stock-adjustments`)에만 적용했다. 다른 경로가 같은 종류의 순서 문제를 갖는지는 §74의 **공통 404 검증**(스키마로 만든 최소 유효 본문, 모든 경로)이 통과해서 확인된 범위까지만 안다. 더 복잡한 본문(예: 여러 품목, 조건부 필드)에서의 순서는 확인하지 못했다.
 
+## 81. 역할별 403 (1/3): Owner 전용 명령 13개 (`tests/openapi/roleContractDb.test.ts`)
+
+테스트 3개 추가. 직원(STAFF)이 Owner 전용 명령을 HTTP로 호출하면 **403이고, 명세가 선언하며, 본문이 `ErrorBody`를 만족하는지** 격리 DB에서 확인한다. §74의 비멤버 403과 달리 **멤버이지만 권한이 부족한** 경우다.
+
+**기대값의 출처:** 이 파일의 짐작이 아니라 `src/auth/authorizedActions.ts`의 `allow: OWNER` 목록이다. 테스트가 그 파일 원문을 읽어 경로 표(13개)와 정확히 일치하는지 검사하므로, **새 Owner 전용 명령이 생기면 표를 갱신하기 전에는 테스트가 실패한다.** HTTP 경로가 없는 Owner 전용 명령(`confirmRefund`, 다른 명령 안에서만 실행)은 따로 명시했다.
+
+| 영역 | 명령(경로) |
+|---|---|
+| 정정 | `correctFulfillment`, `correctReceipt`, `correctPayment` |
+| 재고·배분 | `registerInitialStock`, `cancelAllocation`, `decideExcessReceipt` |
+| 반품·처분 | `requestReturn`, `transferCancelledToStock` |
+| 주문·조달 | `applyOrderCancellation`, `approveDuplicateRisk` |
+| 직원 관리 | `inviteStaff`, `revokeInvitation`, `setMembershipStatus` |
+
+- 요청은 §74처럼 명세에서 만든 최소 유효 본문과 존재하지 않는 대상 ID로 보낸다. **권한이 대상 조회보다 먼저**라서 대상이 없어도 직원은 403을 받는다(§75·§80의 우선순위를 경로 13개에서 한 번 더 확인).
+- **처음부터 통과한 특성화 테스트다**(코드가 이미 강제하고 있음). 변이 실험으로 잡아내는지 확인했다: 서버가 직원을 Owner로 취급하도록 `principalFor`를 바꾸면 **13개 경로가 모두** 403이 아니라 404·400을 내며 정확히 실패하고, 원복하면 통과한다.
+
+**리팩터:** 최소 본문 생성기·명세 로드·경로 키를 `tests/helpers/httpContract.ts`로 뽑아 `errorContractDb.test.ts`와 공유했다. 뽑은 뒤 기존 테스트가 그대로 통과했다.
+
+**한계(다음 단계에서 다룬다)**
+- **부분 허용 명령**은 아직 확인하지 않았다: 결정 종류에 따라 갈리는 명령(`decideOrderCancellation`·`decideRefundRequest`는 철회만 직원 가능, `resolveReceiptDefect`는 폐기만 Owner), 위임에 따라 갈리는 명령(재고 조정, 공급처 등록·수정·활성화, 문구 템플릿 게시), 대상에 따라 갈리는 명령(`reallocateAllocation`은 다른 고객으로 옮길 때만 Owner).
+- **반대 방향**, 즉 직원에게 허용된 경로가 직원에게 403을 내지 않는지(권한을 너무 좁게 막는 오류)도 아직 확인하지 않았다.
+- `GET /audit-log`(Owner 전용 조회)도 아직 확인하지 않았다.
+

@@ -1,12 +1,10 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import SwaggerParser from "@apidevtools/swagger-parser";
 import Ajv2020 from "ajv/dist/2020.js";
 import { createApp } from "../../src/http/app";
 import type { IsolatedPostgres } from "../helpers/isolatedPostgres";
 import { signHs256 } from "../helpers/jwtSign";
 import { startMigratedPostgres } from "../helpers/migratedPostgres";
+import { loadOperations, MISSING, sampleBody, specKey } from "../helpers/httpContract";
 
 /**
  * DB가 필요한 공통 오류(403 비멤버, 404 없는 대상)를 모든 서점 범위 경로에서 실제로 일으켜
@@ -16,10 +14,7 @@ const SECRET = "error-contract-db-secret-0123456789abcdef";
 const T_A = "aaaaaaaa-0000-4000-8000-000000000001";
 const OWNER = "11111111-0000-4000-8000-000000000001";
 const STRANGER = "33333333-0000-4000-8000-000000000001";
-const MISSING = "0a000000-0000-4000-8000-0000000000ff";
-const SPECS = ["../../openapi/ordering.yaml", "../../openapi/ordering-http.yaml"].map((p) => fileURLToPath(new URL(p, import.meta.url)));
 
-type Json = Record<string, any>;
 let db: IsolatedPostgres;
 let app: ReturnType<typeof createApp>;
 beforeAll(async () => {
@@ -37,7 +32,6 @@ afterAll(async () => {
 const nowSec = () => Math.floor(Date.now() / 1000);
 const token = (sub: string) => signHs256({ sub, aud: "authenticated", role: "authenticated", exp: nowSec() + 3600, iat: nowSec() }, SECRET, { kid: "k1" });
 const tenantRoutes = () => app.routes.filter((r) => r.scope === "tenant");
-const specKey = (r: { method: string; template: string }) => `${r.method} /v1/tenants/{tenantId}${r.template}`;
 const request = (r: { method: "GET" | "POST"; template: string }, sub: string, idFill: string, body = "{}") => ({
   method: r.method,
   path: `/v1/tenants/${T_A}${r.template}`.replace(/\{code\}/g, "missing-code").replace(/\{[^}]+\}/g, idFill),
@@ -46,40 +40,6 @@ const request = (r: { method: "GET" | "POST"; template: string }, sub: string, i
   rawBody: r.method === "POST" ? body : undefined,
 });
 
-/** 요청 스키마(참조를 푼 것)에서 형식상 유효한 최소 본문을 만든다: 필수 필드만, 정수는 최소값 이상, 시각은 과거 값, enum은 첫 값 */
-function sample(schema: Json, name = ""): unknown {
-  if (schema.enum) return schema.enum[0];
-  switch (schema.type) {
-    case "integer":
-      return Math.max(1, schema.minimum ?? 1);
-    case "boolean":
-      return true;
-    case "array":
-      return [sample(schema.items ?? {}, name)];
-    case "object": {
-      const props: Json = schema.properties ?? {};
-      const keys: string[] = schema.required ?? [];
-      const picked = keys.length > 0 ? keys : schema.minProperties ? [Object.keys(props)[0]!] : [];
-      return Object.fromEntries(picked.map((k) => [k, sample(props[k] ?? {}, k)]));
-    }
-    default:
-      if (schema.format === "date-time") return "2026-03-04T06:00:00.000Z";
-      if (schema.format === "date") return "2026-03-04";
-      if (schema.format === "uuid") return MISSING;
-      if (/Krw$/.test(name)) return "1000";
-      return "x";
-  }
-}
-const sampleBody = (op: Json | undefined) => JSON.stringify(sample(op?.requestBody?.content?.["application/json"]?.schema ?? { type: "object" }));
-
-async function loadOperations() {
-  const ops = new Map<string, Json>();
-  for (const file of SPECS) {
-    const spec = (await SwaggerParser.dereference(file)) as unknown as Json;
-    for (const [path, item] of Object.entries<Json>(spec.paths)) for (const m of ["get", "post"]) if (item[m]) ops.set(`${m.toUpperCase()} ${path}`, item[m]);
-  }
-  return ops;
-}
 async function check(routes: ReturnType<typeof tenantRoutes>, sub: string, idFill: string, expected: number) {
   const ops = await loadOperations();
   const ajv = new Ajv2020({ strict: false, allErrors: true });
