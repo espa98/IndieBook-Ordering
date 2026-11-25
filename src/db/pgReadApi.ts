@@ -7,6 +7,7 @@ import { notificationState, type NotificationStatus } from "../notification/noti
 import type { NotificationTarget } from "../notification/createNotificationTarget";
 import type { NotificationAttempt } from "../notification/recordNotificationAttempt";
 import type { NotificationResult } from "../notification/recordNotificationResult";
+import type { StockLevel } from "../inventory/stockLevel";
 import type { PurchaseOrder } from "../procurement/createPurchaseOrder";
 import type { Supplier } from "../procurement/allocateSourcing";
 import { toBook } from "./pgCatalogApi";
@@ -105,6 +106,27 @@ async function toPurchaseOrders(client: PoolClient, tenantId: string, pos: any[]
     ...(po.closed_at === null ? {} : { closedAt: po.closed_at.toISOString() }),
   }));
 }
+
+export type StockLevelView = { bookId: string } & StockLevel;
+
+/** 원장에서 도서별 보유·예약·가용을 파생하는 쿼리(BR-Q09). `$1`은 서점, `$2`는 도서 키(없으면 전체), `$3`은 커서 키 */
+const STOCK_LEVELS_SQL = `
+  with keys as (
+    select book_key from public.ordering_stock_movements where tenant_id = $1
+    union
+    select book_key from public.ordering_stock_reservations where tenant_id = $1
+  )
+  select k.book_key,
+    coalesce((select sum(case m.direction when 'IN' then m.quantity else -m.quantity end) from public.ordering_stock_movements m where m.tenant_id = $1 and m.book_key = k.book_key), 0)::int as on_hand,
+    (coalesce((select sum(r.quantity) from public.ordering_stock_reservations r where r.tenant_id = $1 and r.book_key = k.book_key), 0)
+     - coalesce((select sum(x.quantity) from public.ordering_stock_reservation_releases x join public.ordering_stock_reservations r on r.tenant_id = x.tenant_id and r.id = x.reservation_id where x.tenant_id = $1 and r.book_key = k.book_key), 0)
+     - coalesce((select sum(d.quantity) from public.ordering_stock_reservation_deliveries d join public.ordering_stock_reservations r on r.tenant_id = d.tenant_id and r.id = d.reservation_id where d.tenant_id = $1 and r.book_key = k.book_key), 0))::int as reserved
+  from keys k
+  where ($2::text is null or k.book_key = $2) and ($3::text is null or k.book_key > $3)
+  order by k.book_key
+  limit $4`;
+
+const toStockLevel = (row: any): StockLevelView => ({ bookId: row.book_key, onHand: row.on_hand, reserved: row.reserved, available: row.on_hand - row.reserved });
 
 export type ListBooksRequest = { tenantId: string; limit?: number; cursor?: string; isbn?: string };
 
@@ -248,6 +270,24 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
         const page = rows.slice(0, limit);
         const last = page[page.length - 1];
         return { items: await toPurchaseOrders(client, request.tenantId, page), ...(rows.length > limit && last ? { nextCursor: encodeCursor([last.created_at_text, last.id]) } : {}) };
+      }),
+
+    getStockLevel: (actor: Actor, request: { tenantId: string; bookId: string }): Promise<StockLevelView> =>
+      asMember(actor, request.tenantId, async (client) => {
+        const [row] = (await client.query(STOCK_LEVELS_SQL, [request.tenantId, request.bookId, null, 1])).rows;
+        if (!row) throw new AppError("NOT_FOUND");
+        return toStockLevel(row);
+      }),
+
+    /** 원장에 기록이 있는 도서의 재고 현황을 도서 키 순으로 읽는다 */
+    listStockLevels: (actor: Actor, request: { tenantId: string; limit?: number; cursor?: string }): Promise<{ items: StockLevelView[]; nextCursor?: string }> =>
+      asMember(actor, request.tenantId, async (client) => {
+        const limit = pageSize(request.limit);
+        const after = request.cursor === undefined ? undefined : decodeCursor(request.cursor, 1);
+        const rows = (await client.query(STOCK_LEVELS_SQL, [request.tenantId, null, after?.[0] ?? null, limit + 1])).rows;
+        const page = rows.slice(0, limit);
+        const last = page[page.length - 1];
+        return { items: page.map(toStockLevel), ...(rows.length > limit && last ? { nextCursor: encodeCursor([last.book_key]) } : {}) };
       }),
 
     listBooks: (actor: Actor, request: ListBooksRequest): Promise<{ items: Book[]; nextCursor?: string }> =>

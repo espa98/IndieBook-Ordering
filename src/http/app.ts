@@ -303,6 +303,15 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       success: 200,
       run: (c) => reads.getPurchaseOrder(actor(c), { tenantId: t(c), purchaseOrderId: c.params.purchaseOrderId! }),
     }),
+    route("GET", "/stock", {
+      success: 200,
+      queryFields: ["limit", "cursor"],
+      run: (c) => reads.listStockLevels(actor(c), { tenantId: t(c), ...int(c, "limit"), ...text(c, "cursor") }),
+    }),
+    route("GET", "/stock/(?<bookId>[^/]+)", {
+      success: 200,
+      run: (c) => reads.getStockLevel(actor(c), { tenantId: t(c), bookId: c.params.bookId! }),
+    }),
     route("GET", "/books", {
       success: 200,
       queryFields: ["limit", "cursor", "isbn"],

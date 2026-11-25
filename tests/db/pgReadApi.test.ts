@@ -257,3 +257,44 @@ describe("발주 조회 (읽기 API)", () => {
     expect(await codeOf(() => read().listPurchaseOrders({ userId: STRANGER }, { tenantId: T_A }))).toBe("FORBIDDEN");
   });
 });
+
+describe("재고 현황 조회 (읽기 API)", () => {
+  const B9 = "b0000000-0000-4000-8000-000000000009";
+  const B10 = "b0000000-0000-4000-8000-000000000010";
+  const sql = async (text: string, params: unknown[] = []) => {
+    const c = await db.connect();
+    try {
+      return (await c.query(text, params)).rows;
+    } finally {
+      await c.end();
+    }
+  };
+
+  it("도서별 보유·예약·가용을 원장에서 파생해 읽고(해제 반영), 키 순 페이지·없는 도서 404·다른 서점 비노출을 지킨다", async () => {
+    const orders = createPgOrderApi({ pool: db.pool() });
+    const draft = await orders.createOrder(owner, { tenantId: T_A, idempotencyKey: key(), lines: [{ bookId: B9, quantity: 3, unitPriceKrw: "10000" }] });
+    const order = await orders.confirmOrder(owner, { tenantId: T_A, orderId: draft.id, expectedVersion: 1, idempotencyKey: key() });
+    const move = (tenant: string, book: string, direction: string, qty: number, kind = "INITIAL") =>
+      sql(`insert into public.ordering_stock_movements (tenant_id, book_key, kind, direction, quantity, reason, acted_by, acted_at) values ($1, $2, $5, $3, $4, '시험', 'seed', now())`, [tenant, book, direction, qty, kind]);
+    await move(T_A, B9, "IN", 10);
+    await move(T_A, B10, "IN", 4);
+    await move(T_A, B10, "OUT", 1, "ADJUST");
+    await move(T_B, B10, "IN", 99);
+    const stock = createPgStockApi({ pool: db.pool() });
+    const reservation = await stock.reserveStock(owner, { tenantId: T_A, orderId: order.id, orderLineId: order.lines[0]!.lineId, quantity: 3, reservedAt: new Date().toISOString(), idempotencyKey: key() });
+    await stock.releaseStockReservation(owner, { tenantId: T_A, reservationId: reservation.id, quantity: 1, reason: "일부 해제", releasedAt: new Date().toISOString(), idempotencyKey: key() } as never);
+
+    const all = await read().listStockLevels(staff, { tenantId: T_A });
+    expect(all.items.find((s) => s.bookId === B9)).toEqual({ bookId: B9, onHand: 10, reserved: 2, available: 8 });
+    expect(all.items.find((s) => s.bookId === B10)).toEqual({ bookId: B10, onHand: 3, reserved: 0, available: 3 });
+    expect(all.items.map((s) => s.bookId)).toEqual([...all.items.map((s) => s.bookId)].sort());
+    const first = await read().listStockLevels(staff, { tenantId: T_A, limit: 1 });
+    expect(first.items).toHaveLength(1);
+    expect((await read().listStockLevels(staff, { tenantId: T_A, limit: 1, cursor: first.nextCursor })).items[0]!.bookId).not.toBe(first.items[0]!.bookId);
+
+    expect(await read().getStockLevel(staff, { tenantId: T_A, bookId: B9 })).toEqual({ bookId: B9, onHand: 10, reserved: 2, available: 8 });
+    expect(await codeOf(() => read().getStockLevel(staff, { tenantId: T_A, bookId: "b0000000-0000-4000-8000-0000000000ff" }))).toBe("NOT_FOUND");
+    expect(await codeOf(() => read().listStockLevels(staff, { tenantId: T_A, limit: 0 }))).toBe("VALIDATION_ERROR");
+    expect(await codeOf(() => read().listStockLevels({ userId: STRANGER }, { tenantId: T_A }))).toBe("FORBIDDEN");
+  });
+});

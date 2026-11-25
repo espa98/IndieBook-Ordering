@@ -920,3 +920,20 @@ describe("HTTP 서버: 발주 조회 경로", () => {
     expect((await call(`/v1/tenants/${T_B}/purchase-orders/0a000000-0000-4000-8000-00000000ffff`, { sub: OWNER_B })).status).toBe(404);
   });
 });
+
+describe("HTTP 서버: 재고 현황 조회 경로", () => {
+  it("직원도 재고 현황 목록·도서별 현황을 읽고, 잘못된 쿼리·없는 도서·비멤버는 거부된다", async () => {
+    await seedStock(5, 5);
+    const stock = `/v1/tenants/${T_A}/stock`;
+    expect((await call(stock, { sub: "33333333-0000-4000-8000-0000000000ff" })).status).toBe(403);
+    expect((await call(`${stock}?limit=0`, { sub: STAFF_A })).status).toBe(400);
+    expect((await call(`${stock}?unknown=1`, { sub: STAFF_A })).status).toBe(400);
+    const list = await call(`${stock}?limit=100`, { sub: STAFF_A });
+    expect(list.status).toBe(200);
+    expect(list.json.data.items.length).toBeGreaterThan(0);
+    const first = list.json.data.items[0];
+    expect(first).toEqual({ bookId: first.bookId, onHand: first.onHand, reserved: first.reserved, available: first.onHand - first.reserved });
+    expect((await call(`${stock}/${first.bookId}`, { sub: STAFF_A })).json.data).toEqual(first);
+    expect((await call(`${stock}/no-such-book`, { sub: STAFF_A })).status).toBe(404);
+  });
+});
