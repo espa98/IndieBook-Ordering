@@ -9,7 +9,7 @@ info:
     본문 허용 필드(`additionalProperties: false`), 쿼리 파라미터, `Idempotency-Key` 필수 여부가 어긋나면 테스트가 실패한다.
 
     **이 명세가 기술하지 않는 것(미구현·미검증):** 필수 여부(`required`)·열거값·타입은 도메인 요청 타입 기준이고
-    런타임 400으로는 전수 검증하지 않았다, 응답 `data`의 필드별 스키마(조회 14개 경로 전부와 쓰기 45개 경로(나머지 17개는 아직 자유 형식)를 선언했고 `tests/openapi/responseContract.test.ts`가 실제 응답으로 검증한다. 나머지는 자유 형식), 경로별 오류 응답의 실제 발생
+    런타임 400으로는 전수 검증하지 않았다, 응답 `data`의 필드별 스키마(조회 14개 경로 전부와 쓰기 50개 경로(나머지 12개는 아직 자유 형식)를 선언했고 `tests/openapi/responseContract.test.ts`가 실제 응답으로 검증한다. 나머지는 자유 형식), 경로별 오류 응답의 실제 발생
     조건(공통 오류 응답을 선언만 하고 401만 계약 테스트로 확인한다).
 
     **공통 규칙(`ordering.yaml`과 같다):** Bearer JWT, 모든 쓰기(POST)는 `Idempotency-Key` 필수, 경로 식별자는 UUID가 아니면 404
@@ -1308,7 +1308,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/RefundTask" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -1357,7 +1360,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/RefundRequest" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -1407,7 +1413,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/RefundAttempt" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -1455,7 +1464,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/RefundAttemptResolution" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -3613,7 +3625,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [decision]
+                    properties:
+                      decision: { $ref: "#/components/schemas/RefundRequestDecision" }
+                      refund: { $ref: "#/components/schemas/RefundConfirmation" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -3636,6 +3656,86 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    RefundConfirmation:
+      type: object
+      required: [id, tenantId, refundTaskId, orderId, paymentId, amountKrw, evidence, confirmedBy, confirmedAt, verificationSource, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        refundTaskId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        paymentId: { type: string, format: uuid }
+        amountKrw: { type: string }
+        evidence: { type: string }
+        confirmedBy: { type: string }
+        confirmedAt: { type: string, format: date-time }
+        verificationSource: { type: string, enum: [STAFF_MANUAL_EVIDENCE] }
+        recordedAt: { type: string, format: date-time }
+        refundRequestId: { type: string, format: uuid }
+    RefundRequestDecision:
+      type: object
+      required: [id, tenantId, requestId, kind, decidedBy, decidedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        requestId: { type: string, format: uuid }
+        kind: { type: string, enum: [APPROVED, REJECTED, WITHDRAWN] }
+        decidedBy: { type: string }
+        decidedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    RefundAttemptResolution:
+      type: object
+      required: [id, tenantId, attemptId, refundTaskId, outcome, evidence, resolvedBy, resolvedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        attemptId: { type: string, format: uuid }
+        refundTaskId: { type: string, format: uuid }
+        outcome: { type: string, enum: [CONFIRMED, FAILED] }
+        evidence: { type: string }
+        resolvedBy: { type: string }
+        resolvedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    RefundAttempt:
+      type: object
+      required: [id, tenantId, refundTaskId, orderId, paymentId, amountKrw, result, reason, reportedBy, reportedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        refundTaskId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        paymentId: { type: string, format: uuid }
+        amountKrw: { type: string }
+        result: { type: string, enum: [FAILED, UNKNOWN] }
+        reason: { type: string }
+        reportedBy: { type: string }
+        reportedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    RefundRequest:
+      type: object
+      required: [id, tenantId, refundTaskId, orderId, paymentId, amountKrw, evidence, requestedBy, requestedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        refundTaskId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        paymentId: { type: string, format: uuid }
+        amountKrw: { type: string }
+        evidence: { type: string }
+        requestedBy: { type: string }
+        requestedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    RefundTask:
+      type: object
+      required: [id, tenantId, orderId, requiredKrw, openedBy, openedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        requiredKrw: { type: string }
+        openedBy: { type: string }
+        openedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
     MembershipChange:
       type: object
       required: [id, tenantId, userId, from, to, changedBy, changedAt]

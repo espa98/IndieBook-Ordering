@@ -377,3 +377,31 @@ describe("응답 계약(쓰기): 직원 초대·계정", () => {
   });
 });
 
+describe("응답 계약(쓰기): 환급", () => {
+  it("환급 업무·요청·시도 보고·시도 해소·요청 결정 응답이 선언한 스키마를 만족한다", async () => {
+    const checked: Checked[] = [];
+    const write = async (template: string, path: string, body: unknown, status: number) => {
+      const res = await call("POST", path, body);
+      expect(res.status, `${template} 상태 ${JSON.stringify(res.body)}`).toBe(status);
+      checked.push({ template, body: res.body });
+      return res.body.data;
+    };
+    const book = await call("POST", "/books", { source: "MANUAL", title: "환급 책", listPriceKrw: "15000", reason: "수기 등록", registeredAt: "2026-03-04T06:00:00.000Z" });
+    const draft = await call("POST", "/orders", { lines: [{ bookId: book.body.data.id, quantity: 1, unitPriceKrw: "15000" }] });
+    const orderId = draft.body.data.id as string;
+    await call("POST", `/orders/${orderId}/confirm`, { expectedVersion: 1 });
+    const paid = await call("POST", `/orders/${orderId}/payments`, { method: "BANK_TRANSFER", amountKrw: "20000", externalReference: "REFUND-1", paidAt: "2026-03-04T06:00:00.000Z" });
+    const paymentId = paid.body.data.id as string;
+    await call("POST", `/payments/${paymentId}/confirmation`, { evidence: "입금 확인", confirmedAt: "2026-03-04T06:30:00.000Z" });
+
+    const task = await write("/orders/{orderId}/refund-tasks", `/orders/${orderId}/refund-tasks`, { openedAt: "2026-03-04T07:00:00.000Z" }, 201);
+    const request = await write("/refund-tasks/{taskId}/refund-requests", `/refund-tasks/${task.id}/refund-requests`, { paymentId, amountKrw: "3000", evidence: "고객 환급 요청", requestedAt: "2026-03-04T07:10:00.000Z" }, 201);
+    const attempt = await write("/refund-tasks/{taskId}/refund-attempts", `/refund-tasks/${task.id}/refund-attempts`, { paymentId, amountKrw: "2000", result: "UNKNOWN", reason: "이체 결과 불명", reportedAt: "2026-03-04T07:20:00.000Z" }, 201);
+    await write("/refund-attempts/{attemptId}/resolution", `/refund-attempts/${attempt.id}/resolution`, { outcome: "CONFIRMED", evidence: "이체 내역 확인", resolvedAt: "2026-03-04T07:30:00.000Z" }, 201);
+    await write("/refund-requests/{requestId}/decision", `/refund-requests/${request.id}/decision`, { decision: "APPROVED", decidedAt: "2026-03-04T07:40:00.000Z" }, 200);
+
+    for (const { template } of checked) expect(declared(template, "post"), `${template} data 스키마`).toBe(true);
+    for (const { template, body } of checked) expect(conforms(template, body, "post"), template).toMatchObject({ ok: true });
+  });
+});
+

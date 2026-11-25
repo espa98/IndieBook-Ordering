@@ -1302,3 +1302,22 @@
 - 정상 분기 한 번만 검증했다.
 - 오류 응답(4xx/5xx)의 발생 조건 검증은 여전히 401뿐이다.
 
+## 70. 응답 스키마: 환급 쓰기 5개 경로 (T8 일부)
+
+테스트 1개 추가(`tests/openapi/responseContract.test.ts`). 20,000원을 입금·확인한 15,000원 주문(과수납 5,000원)에서 환급 업무 열기 → 환급 요청(3,000원) → 환급 시도 보고(2,000원, 결과 불명) → 시도 해소(확인) → 요청 승인을 한 시나리오로 실제 실행했다(모든 호출이 처음부터 성공). **먼저 "`data` 스키마가 선언되어 있다"에서 실패함을 확인**한 뒤 채웠다.
+
+| 경로 | 스키마 |
+|---|---|
+| `POST /orders/{orderId}/refund-tasks` | `RefundTask`(`requiredKrw`는 과수납 5,000원) |
+| `POST /refund-tasks/{taskId}/refund-requests` | `RefundRequest` |
+| `POST /refund-tasks/{taskId}/refund-attempts` | `RefundAttempt`(`result`: `FAILED`/`UNKNOWN`) |
+| `POST /refund-attempts/{attemptId}/resolution` | `RefundAttemptResolution`(`outcome`: `CONFIRMED`/`FAILED`) |
+| `POST /refund-requests/{requestId}/decision`(200) | `{ decision: RefundRequestDecision, refund?: RefundConfirmation }` — `refund`는 **승인일 때만** 있다(도메인 타입 주석 기준) |
+
+응답 `data`를 선언한 경로는 **76개 중 64개**(조회 14 + 쓰기 50)다.
+
+**한계**
+- **남은 12개 쓰기 경로**(안내 쓰기 5개, 발주 취소·회신 5개, 배정 해제·중복 위험 승인 2개)의 응답은 자유 형식이다.
+- 승인 분기만 검증했다. 거절(`REJECTED`)·철회(`WITHDRAWN`) 응답에서 `refund`가 정말 없는지는 확인하지 못했다(도메인 타입 주석에만 근거).
+- 오류 응답(4xx/5xx)의 발생 조건 검증은 여전히 401뿐이다.
+
