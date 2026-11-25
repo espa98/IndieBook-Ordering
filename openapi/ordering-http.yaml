@@ -1656,6 +1656,45 @@ paths:
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/audit-log:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+    get:
+      tags: [reads]
+      operationId: listAuditLog
+      summary: listAuditLog
+      description: Owner 전용. 성공한 쓰기 요청의 감사 기록을 최신순으로 읽는다.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: actorId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/books:
     parameters:
       - $ref: "ordering.yaml#/components/parameters/TenantId"

@@ -325,3 +325,31 @@ describe("결제 현황 조회 (읽기 API)", () => {
     expect(await codeOf(() => read().getOrderPayments({ userId: STRANGER }, { tenantId: T_A, orderId: order.id }))).toBe("FORBIDDEN");
   });
 });
+
+describe("감사 로그 조회 (읽기 API, Owner 전용)", () => {
+  it("Owner만 자기 서점의 감사 기록을 최신순·페이지로 읽고(행위자 필터), 직원·비멤버·타 서점은 읽지 못한다", async () => {
+    const c = await db.connect();
+    for (let n = 1; n <= 5; n++) {
+      await c.query(`insert into public.ordering_audit_log (tenant_id, actor_id, operation, command_key, request_hash, targets) values ($1, $2, 'POST /v1/tenants/{tenantId}/orders', $3, $4, '{"orderId":"o"}')`, [T_A, n % 2 ? OWNER_A : STAFF_A, `audit-${n}`, "c".repeat(64)]);
+    }
+    await c.query(`insert into public.ordering_audit_log (tenant_id, actor_id, operation, command_key, request_hash) values ($1, $2, 'POST /v1/tenants/{tenantId}/orders', 'other-tenant', $3)`, [T_B, OWNER_B, "c".repeat(64)]);
+    await c.end();
+
+    const all = await read().listAuditLog(owner, { tenantId: T_A });
+    expect(all.items.map((r) => r.commandKey).slice(0, 5)).toEqual(["audit-5", "audit-4", "audit-3", "audit-2", "audit-1"]);
+    expect(all.items.some((r) => r.commandKey === "other-tenant")).toBe(false);
+    expect(all.items[0]).toMatchObject({ tenantId: T_A, actorId: OWNER_A, operation: "POST /v1/tenants/{tenantId}/orders", requestHash: "c".repeat(64), targets: { orderId: "o" } });
+
+    const first = await read().listAuditLog(owner, { tenantId: T_A, limit: 2 });
+    expect(first.items.map((r) => r.commandKey)).toEqual(["audit-5", "audit-4"]);
+    expect((await read().listAuditLog(owner, { tenantId: T_A, limit: 2, cursor: first.nextCursor })).items.map((r) => r.commandKey)).toEqual(["audit-3", "audit-2"]);
+    expect((await read().listAuditLog(owner, { tenantId: T_A, actorId: STAFF_A })).items.map((r) => r.commandKey)).toEqual(["audit-4", "audit-2"]);
+
+    expect(await codeOf(() => read().listAuditLog(staff, { tenantId: T_A }))).toBe("FORBIDDEN");
+    expect(await codeOf(() => read().listAuditLog({ userId: STRANGER }, { tenantId: T_A }))).toBe("FORBIDDEN");
+    expect(await codeOf(() => read().listAuditLog({ userId: OWNER_B }, { tenantId: T_A }))).toBe("FORBIDDEN");
+    expect(await codeOf(() => read().listAuditLog(owner, { tenantId: T_A, limit: 0 }))).toBe("VALIDATION_ERROR");
+    expect(await codeOf(() => read().listAuditLog(owner, { tenantId: T_A, actorId: "nope" }))).toBe("VALIDATION_ERROR");
+    expect(await codeOf(() => read().listAuditLog(owner, { tenantId: T_A, cursor: "zzz" }))).toBe("VALIDATION_ERROR");
+  });
+});

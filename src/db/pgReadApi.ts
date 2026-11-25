@@ -144,6 +144,19 @@ export type OrderPaymentsView = {
   refunds: PaymentLedger["refunds"];
 };
 
+export type AuditLogEntry = {
+  seq: string;
+  id: string;
+  tenantId: string;
+  actorId: string;
+  operation: string;
+  commandKey?: string;
+  requestHash: string;
+  targets: Record<string, string>;
+  recordedAt: string;
+};
+export type ListAuditLogRequest = { tenantId: string; limit?: number; cursor?: string; actorId?: string };
+
 export type ListBooksRequest = { tenantId: string; limit?: number; cursor?: string; isbn?: string };
 
 /**
@@ -324,6 +337,42 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
           refundRequests: l.requests,
           refunds: l.refunds,
         };
+      }),
+
+    /** Owner 전용. 최신순(기록 순번 내림차순)이며 `actorId`로 거를 수 있다 */
+    listAuditLog: (actor: Actor, request: ListAuditLogRequest): Promise<{ items: AuditLogEntry[]; nextCursor?: string }> =>
+      inTransaction(deps.pool, "service_role", actor.userId, async (client) => {
+        const principal = principalFor(await loadMembership(client, actor.userId, request.tenantId), actor.userId, request.tenantId);
+        if (principal.role !== "OWNER") throw new AppError("FORBIDDEN");
+        const limit = pageSize(request.limit);
+        if (request.actorId !== undefined && !isUuid(request.actorId)) throw validation("invalid actorId");
+        const after = request.cursor === undefined ? undefined : decodeCursor(request.cursor, 1);
+        if (after && !/^\d{1,18}$/.test(after[0]!)) throw validation("invalid cursor");
+        const rows = (
+          await client.query(
+            `select * from public.ordering_audit_log
+              where tenant_id = $1 and ($2::uuid is null or actor_id = $2) and ($3::bigint is null or seq < $3)
+              order by seq desc
+              limit $4`,
+            [request.tenantId, request.actorId ?? null, after?.[0] ?? null, limit + 1],
+          )
+        ).rows;
+        const page = rows.slice(0, limit);
+        const last = page[page.length - 1];
+        const items = page.map(
+          (r): AuditLogEntry => ({
+            seq: String(r.seq),
+            id: r.id,
+            tenantId: r.tenant_id,
+            actorId: r.actor_id,
+            operation: r.operation,
+            ...(r.command_key === null ? {} : { commandKey: r.command_key }),
+            requestHash: r.request_hash,
+            targets: r.targets,
+            recordedAt: r.recorded_at.toISOString(),
+          }),
+        );
+        return { items, ...(rows.length > limit && last ? { nextCursor: encodeCursor([String(last.seq)]) } : {}) };
       }),
 
     listBooks: (actor: Actor, request: ListBooksRequest): Promise<{ items: Book[]; nextCursor?: string }> =>

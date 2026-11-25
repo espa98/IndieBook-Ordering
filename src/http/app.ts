@@ -351,6 +351,11 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       success: 200,
       run: (c) => reads.getOrderPayments(actor(c), { tenantId: t(c), orderId: c.params.orderId! }),
     }),
+    route("GET", "/audit-log", {
+      success: 200,
+      queryFields: ["limit", "cursor", "actorId"],
+      run: (c) => reads.listAuditLog(actor(c), { tenantId: t(c), ...int(c, "limit"), ...text(c, "cursor"), ...text(c, "actorId") }),
+    }),
     route("GET", "/books", {
       success: 200,
       queryFields: ["limit", "cursor", "isbn"],

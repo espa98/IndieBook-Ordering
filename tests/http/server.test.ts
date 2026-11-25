@@ -1056,3 +1056,20 @@ describe("HTTP 서버: 감사 로그 (E6)", () => {
     expect((await audit()).slice(before + 2)).toMatchObject([{ tenant_id: null, actor_id: OWNER_X, operation: "POST /v1/stores", command_key: "audit-open" }]);
   });
 });
+
+describe("HTTP 서버: 감사 로그 조회 (Owner 전용)", () => {
+  it("Owner만 감사 기록을 읽고, 직원·비멤버는 403, 잘못된 쿼리는 400이다", async () => {
+    const path = `/v1/tenants/${T_A}/audit-log`;
+    await call(orders(), { method: "POST", sub: STAFF_A, body: { lines: lines(3, 1) } });
+    expect((await call(path, { sub: STAFF_A })).status).toBe(403);
+    expect((await call(path, { sub: "33333333-0000-4000-8000-0000000000ff" })).status).toBe(403);
+    expect((await call(`${path}?limit=0`, { sub: OWNER_A })).status).toBe(400);
+    expect((await call(`${path}?actorId=bad`, { sub: OWNER_A })).status).toBe(400);
+    expect((await call(`${path}?unknown=1`, { sub: OWNER_A })).status).toBe(400);
+    const list = await call(`${path}?actorId=${STAFF_A}&limit=5`, { sub: OWNER_A });
+    expect(list.status).toBe(200);
+    expect(list.json.data.items.length).toBeGreaterThan(0);
+    expect(list.json.data.items.every((r: any) => r.actorId === STAFF_A && r.tenantId === T_A)).toBe(true);
+    expect((await call(`/v1/tenants/${T_B}/audit-log`, { sub: OWNER_A })).status).toBe(403);
+  });
+});
