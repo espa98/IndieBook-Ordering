@@ -1321,3 +1321,23 @@
 - 승인 분기만 검증했다. 거절(`REJECTED`)·철회(`WITHDRAWN`) 응답에서 `refund`가 정말 없는지는 확인하지 못했다(도메인 타입 주석에만 근거).
 - 오류 응답(4xx/5xx)의 발생 조건 검증은 여전히 401뿐이다.
 
+## 71. 응답 스키마: 고객 안내 쓰기 5개 경로 (T8 일부)
+
+테스트 1개 추가(`tests/openapi/responseContract.test.ts`). 확보 물량이 있는 주문에서 안내 대상 생성 → 문구 복사 → 발송 시도 → 결과 기록(`FAILED`) → 재안내를 한 시나리오로 실제 실행했다(모든 호출이 처음부터 성공). **먼저 "`data` 스키마가 선언되어 있다"에서 실패함을 확인**한 뒤 채웠다.
+
+| 경로 | 스키마 |
+|---|---|
+| `POST /orders/{orderId}/notification-targets`, `POST .../renotices` | `NotificationTargetRecord`(재안내 응답은 `renoticeOfTargetId` 포함) |
+| `POST /notification-targets/{targetId}/copies` | `NotificationCopy` |
+| `POST /notification-targets/{targetId}/attempts` | `NotificationAttempt` |
+| `POST /notification-attempts/{attemptId}/result` | `NotificationResult` |
+
+**정리:** 쓰기 응답은 기록 그대로(상태·시도 횟수 없음)이고 조회 응답은 거기에 파생 상태가 붙는다. 그래서 조회용 `NotificationTarget`을 `NotificationTargetRecord` + 파생 필드(`status`·`attemptCount`·`lastAttempt`·`lastResult`)의 `allOf`로 다시 썼다(중복 제거). 기존 조회 계약 테스트(§64)가 그대로 통과한다.
+
+응답 `data`를 선언한 경로는 **76개 중 69개**(조회 14 + 쓰기 55)다.
+
+**한계**
+- **남은 7개 쓰기 경로**(발주 취소·공급처 회신 5개, 배정 해제·중복 위험 승인 2개)의 응답은 자유 형식이다.
+- 정상 분기 한 번만 검증했다(예: `PARTIAL` 모드, `MANUAL_RECORDED` 결과, 다른 채널).
+- 오류 응답(4xx/5xx)의 발생 조건 검증은 여전히 401뿐이다.
+

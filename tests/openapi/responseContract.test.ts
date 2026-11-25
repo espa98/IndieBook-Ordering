@@ -405,3 +405,32 @@ describe("응답 계약(쓰기): 환급", () => {
   });
 });
 
+describe("응답 계약(쓰기): 고객 안내", () => {
+  it("안내 대상·문구 복사·발송 시도·결과·재안내 응답이 선언한 스키마를 만족한다", async () => {
+    const checked: Checked[] = [];
+    const write = async (template: string, path: string, body: unknown, status: number) => {
+      const res = await call("POST", path, body);
+      expect(res.status, `${template} 상태 ${JSON.stringify(res.body)}`).toBe(status);
+      checked.push({ template, body: res.body });
+      return res.body.data;
+    };
+    const book = await call("POST", "/books", { source: "MANUAL", title: "안내쓰기 책", listPriceKrw: "6000", reason: "수기 등록", registeredAt: "2026-03-04T06:00:00.000Z" });
+    const bookId = book.body.data.id as string;
+    await call("POST", `/books/${bookId}/initial-stock`, { quantity: 2, actedAt: "2026-03-04T06:05:00.000Z" });
+    const draft = await call("POST", "/orders", { lines: [{ bookId, quantity: 2, unitPriceKrw: "6000" }] });
+    const orderId = draft.body.data.id as string;
+    const confirmed = await call("POST", `/orders/${orderId}/confirm`, { expectedVersion: 1 });
+    const lineId = confirmed.body.data.lines[0].lineId as string;
+    await call("POST", `/orders/${orderId}/lines/${lineId}/stock-reservations`, { quantity: 2, reservedAt: "2026-03-04T06:10:00.000Z" });
+
+    const target = await write("/orders/{orderId}/notification-targets", `/orders/${orderId}/notification-targets`, { mode: "FULL", createdAt: "2026-03-04T06:20:00.000Z" }, 201);
+    await write("/notification-targets/{targetId}/copies", `/notification-targets/${target.id}/copies`, { action: "COPY", actedAt: "2026-03-04T06:25:00.000Z" }, 201);
+    const attempt = await write("/notification-targets/{targetId}/attempts", `/notification-targets/${target.id}/attempts`, { channel: "SMS", messageSnapshot: "도서가 준비되었습니다", attemptedAt: "2026-03-04T06:30:00.000Z" }, 201);
+    await write("/notification-attempts/{attemptId}/result", `/notification-attempts/${attempt.id}/result`, { outcome: "FAILED", note: "수신 거부", resultAt: "2026-03-04T06:40:00.000Z" }, 201);
+    await write("/notification-targets/{targetId}/renotices", `/notification-targets/${target.id}/renotices`, { createdAt: "2026-03-04T06:50:00.000Z" }, 201);
+
+    for (const { template } of checked) expect(declared(template, "post"), `${template} data 스키마`).toBe(true);
+    for (const { template, body } of checked) expect(conforms(template, body, "post"), template).toMatchObject({ ok: true });
+  });
+});
+
