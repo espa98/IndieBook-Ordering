@@ -8,6 +8,7 @@ import { createPgOrderApi } from "../db/pgOrderApi";
 import { createPgPaymentApi } from "../db/pgPaymentApi";
 import { createPgProcurementApi } from "../db/pgProcurementApi";
 import { createPgReceivingApi } from "../db/pgReceivingApi";
+import { createPgAccountApi } from "../db/pgAccountApi";
 import { createPgCatalogApi } from "../db/pgCatalogApi";
 import { createPgStaffApi } from "../db/pgStaffApi";
 import { createPgStockApi } from "../db/pgStockApi";
@@ -91,6 +92,7 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
   const procurement = createPgProcurementApi({ pool: deps.pool });
   const suppliers = createPgSupplierApi({ pool: deps.pool });
   const staffAdmin = createPgStaffApi({ pool: deps.pool });
+  const accounts = createPgAccountApi({ pool: deps.pool });
   const catalog = createPgCatalogApi({ pool: deps.pool });
   const notifications = createPgNotificationApi({ pool: deps.pool });
   const reads = createPgReadApi({ pool: deps.pool });
@@ -297,6 +299,15 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       success: 201,
       fields: ["outcome", "note", "resultAt"],
       run: (c) => notifications.recordNotificationResult(actor(c), merge(c, { tenantId: t(c), attemptId: c.params.attemptId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    accountRoute("POST", "/stores", {
+      success: 201,
+      fields: ["storeName"],
+      // 개설 권한: 이메일 claim이 있는 로그인 계정 누구나(ST-A02). 소유자는 항상 인증된 사용자이고 본문으로 정할 수 없다
+      run: (c) => {
+        if (typeof c.email !== "string" || c.email === "") throw new AppError("FORBIDDEN");
+        return accounts.openStore({ userId: c.userId, email: c.email }, { storeName: c.body.storeName as never, idempotencyKey: c.idempotencyKey });
+      },
     }),
     accountRoute("POST", "/invitations/accept", {
       success: 201,

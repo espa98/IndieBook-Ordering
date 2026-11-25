@@ -979,3 +979,28 @@ describe("HTTP 서버: 초대 수락 (서점에 속하기 전의 계정)", () =>
     expect((await call(accept, { method: "POST", headers: withEmail("44444444-0000-4000-8000-0000000000a2", "joiner@http.test"), body: { token: secret } })).status).toBe(403); // 재사용
   });
 });
+
+describe("HTTP 서버: 서점 개설 (서점에 속하기 전의 계정)", () => {
+  it("이메일 claim이 있는 로그인 계정이 서점을 열면 곧바로 Owner로 서점 API를 쓰고, 이메일 claim이 없거나 본문으로 소유자를 주장하면 거부된다", async () => {
+    const NEW_OWNER = "44444444-0000-4000-8000-0000000000b1";
+    const as = (email?: string) => ({ authorization: `Bearer ${token(NEW_OWNER, email === undefined ? {} : { email })}` });
+    const open = "/v1/stores";
+
+    expect((await call(open, { method: "POST", sub: null, body: { storeName: "새 책방" } })).status).toBe(401);
+    expect((await call(open, { method: "POST", headers: as("new@owner.test"), key: null, body: { storeName: "새 책방" } })).status).toBe(400);
+    expect((await call(open, { method: "POST", headers: as("new@owner.test"), body: { storeName: "새 책방", ownerUserId: OWNER_A } })).status).toBe(400); // 소유자 위조
+    expect((await call(open, { method: "POST", headers: as(), body: { storeName: "새 책방" } })).status).toBe(403); // 이메일 claim 없음
+    expect((await call(open, { method: "POST", headers: as("new@owner.test"), body: { storeName: " " } })).status).toBe(400);
+    expect((await call(orders(), { sub: NEW_OWNER })).status).toBe(403);
+
+    const created = await call(open, { method: "POST", headers: as("new@owner.test"), key: "open-http-1", body: { storeName: "새 책방" } });
+    expect(created.status).toBe(201);
+    expect(created.json.data.tenant).toMatchObject({ name: "새 책방", ownerUserId: NEW_OWNER });
+    expect(created.json.data.membership).toMatchObject({ userId: NEW_OWNER, role: "OWNER", status: "ACTIVE" });
+    const tenantId = created.json.data.tenant.id as string;
+    expect((await call(`/v1/tenants/${tenantId}/orders`, { sub: NEW_OWNER })).status).toBe(200);
+    expect((await call(orders(), { sub: NEW_OWNER })).status).toBe(403); // 다른 서점은 여전히 막힌다
+    expect((await call(open, { method: "POST", headers: as("new@owner.test"), key: "open-http-1", body: { storeName: "새 책방" } })).json.data.tenant.id).toBe(tenantId); // 재시도
+    expect((await call(open, { method: "POST", headers: as("new@owner.test"), body: { storeName: "새 책방" } })).status).toBe(422); // 같은 이름
+  });
+});

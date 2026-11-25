@@ -1993,6 +1993,42 @@ paths:
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/stores:
+    post:
+      tags: [staff]
+      operationId: openStore
+      summary: openStore
+      description: 이메일 claim이 있는 로그인 계정이 서점을 연다. 소유자는 인증된 사용자이며 본문으로 정할 수 없다.
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                storeName: {}
+      responses:
+        "201":
+          description: 성공(`data`는 `tenant`와 `membership`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/invitations/accept:
     post:
       tags: [staff]
