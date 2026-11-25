@@ -114,7 +114,7 @@
 
 | 점검 | 상태 | 보고된 사실(출처: 사용자, 2026-11-25) |
 |---|---|---|
-| #1 함수 목록 | **부분** | 총 **11행**. 문서의 11개 함수가 모두 있고 문서에 없는 다른 `ordering%` 함수는 **없다**. `ordering_v23_request_close`는 **이제 DB에 있다**(문서 11-22에는 없음 → 그 이후 배포). **`authenticated` 실행 가능은 정확히 4개**: `ordering_v2_command`, `ordering_request_approval`, `ordering_decide_approval`, `ordering_v2_refund_confirm` — **문서와 같다.** `ordering_v23_request_close`를 포함한 나머지 7개는 `authenticated` 실행 **불가**. `security_definer`·소유자·`function_settings`(`search_path` 고정 여부)·`anon`·`service_role` 실행 권한은 **미보고** |
+| #1 함수 목록 | **부분** | 총 **11행**. 문서의 11개 함수가 모두 있고 문서에 없는 다른 `ordering%` 함수는 **없다**. `ordering_v23_request_close`는 **이제 DB에 있다**(문서 11-22에는 없음 → 그 이후 배포). **`authenticated` 실행 가능은 정확히 4개**: `ordering_v2_command`, `ordering_request_approval`, `ordering_decide_approval`, `ordering_v2_refund_confirm` — **문서와 같다.** `ordering_v23_request_close`를 포함한 나머지 7개는 `authenticated` 실행 **불가**. **`anon`이 실행할 수 있는 함수는 없다.** **11개 모두 `security_definer = true`**(트리거 함수 3개와 내부 함수 포함). 소유자·`function_settings`(`search_path` 고정 여부)·`service_role` 실행 권한은 **미보고** |
 | #2 함수 정의 | 미실행 | — |
 | #3 열 | 미실행 | — |
 | #4 제약 | 미실행 | — |
@@ -126,7 +126,7 @@
 | #10 테이블별 행 수 | **부분** | 이름이 겹치는 5개 테이블이 **모두 0행**: `ordering_tenants` 0, `ordering_members` 0, `ordering_orders` 0, `ordering_order_lines` 0, `ordering_commands` 0. 나머지 `ordering%` 테이블의 행 수는 **미보고** |
 | #11~#12 확장·서버 버전 | 미실행 | — |
 
-**#1에서 얻은 판단:** (1) 레거시 RPC 목록과 `authenticated` 노출 범위(4개)는 문서 그대로이므로 §3 인벤토리·§3.1 대응표·R8(노출된 `SECURITY DEFINER` 함수 4개)은 그대로 유효하다. (2) 배포된 `ordering_v23_request_close`는 `authenticated`에 노출되지 않으므로 **클라이언트가 직접 호출할 수 없고**, 종결 RPC 노출에 따른 위험(R4·R8의 종결 부분)은 커지지 않았다. 다만 이 함수가 어떤 경로(서버 전용? 다른 RPC 내부?)로 호출되는지, 정의가 종결 불변식을 얼마나 검사하는지는 #2가 있어야 안다. (3) 문서가 11-22 이후 갱신되지 않았으므로 나머지 레거시 사실(§4의 열 구성 등)은 문서가 아니라 점검 결과로 확정해야 한다. (4) `anon` 실행 권한이 보고되지 않았으므로 "비로그인이 호출할 수 있는 함수가 없다"는 결론은 아직 내릴 수 없다.
+**#1에서 얻은 판단:** (1) 레거시 RPC 목록과 `authenticated` 노출 범위(4개)는 문서 그대로이므로 §3 인벤토리·§3.1 대응표·R8(노출된 `SECURITY DEFINER` 함수 4개)은 유효하다. (2) **`anon`이 실행할 수 있는 함수가 없으므로 비로그인 호출 경로는 막혀 있다**(함수 EXECUTE 기준. 실제 HTTP 접근은 별도). (3) 배포된 `ordering_v23_request_close`는 `authenticated`에 노출되지 않으므로 클라이언트가 직접 호출할 수 없고, 종결 RPC 노출 위험(R4·R8의 종결 부분)은 커지지 않았다. 호출 경로와 종결 불변식 검사 범위는 #2가 있어야 안다. (4) **11개 전부 `SECURITY DEFINER`라는 점은 `search_path` 고정 여부가 핵심 확인 사항이 된다.** 정의자 함수는 호출자가 아니라 소유자(보통 높은 권한) 권한으로 실행되므로 `search_path`가 고정되지 않으면 호출자가 만든 같은 이름의 객체로 가로채일 수 있다. 이 저장소의 신규 함수는 모두 `set search_path = ''`로 고정한다(마이그레이션 확인). 레거시 함수의 `function_settings`는 **미보고**이므로 판단할 수 없다. 노출된 4개에 고정이 없다면 R8의 심각도를 높이고, 전환 단계 5에서의 `authenticated` EXECUTE 철회를 앞당길 이유가 된다. (5) 문서가 11-22 이후 갱신되지 않았으므로 나머지 레거시 사실(§4의 열 구성 등)은 문서가 아니라 점검 결과로 확정해야 한다.
 
 ## 8. 결정 요청
 
