@@ -258,3 +258,37 @@ describe("응답 계약(쓰기): 입고·배분", () => {
   });
 });
 
+describe("응답 계약(쓰기): 재고·수령·결제 정정", () => {
+  it("초기 재고·조정·예약·예약 해제·수령·수령 정정·결제 무효·결제 정정 응답이 선언한 스키마를 만족한다", async () => {
+    const checked: Checked[] = [];
+    const write = async (template: string, path: string, body: unknown, status: number) => {
+      const res = await call("POST", path, body);
+      expect(res.status, `${template} 상태 ${JSON.stringify(res.body)}`).toBe(status);
+      checked.push({ template, body: res.body });
+      return res.body.data;
+    };
+    const book = await call("POST", "/books", { source: "MANUAL", title: "정정 책", listPriceKrw: "10000", reason: "수기 등록", registeredAt: "2026-03-04T06:00:00.000Z" });
+    const bookId = book.body.data.id as string;
+    await write("/books/{bookId}/initial-stock", `/books/${bookId}/initial-stock`, { quantity: 5, actedAt: "2026-03-04T06:05:00.000Z" }, 201);
+    await write("/books/{bookId}/stock-adjustments", `/books/${bookId}/stock-adjustments`, { direction: "IN", quantity: 2, reason: "실사 반영", actedAt: "2026-03-04T06:06:00.000Z" }, 201);
+    const draft = await call("POST", "/orders", { lines: [{ bookId, quantity: 3, unitPriceKrw: "10000" }] });
+    const orderId = draft.body.data.id as string;
+    const confirmed = await call("POST", `/orders/${orderId}/confirm`, { expectedVersion: 1 });
+    const lineId = confirmed.body.data.lines[0].lineId as string;
+    const reservation = await write("/orders/{orderId}/lines/{lineId}/stock-reservations", `/orders/${orderId}/lines/${lineId}/stock-reservations`, { quantity: 3, reservedAt: "2026-03-04T06:10:00.000Z" }, 201);
+    await write("/stock-reservations/{reservationId}/releases", `/stock-reservations/${reservation.id}/releases`, { quantity: 1, reason: "수량 조정", releasedAt: "2026-03-04T06:15:00.000Z" }, 201);
+
+    const paid = await call("POST", `/orders/${orderId}/payments`, { method: "BANK_TRANSFER", amountKrw: "20000", externalReference: "CORR-1", paidAt: "2026-03-04T06:00:00.000Z" });
+    await call("POST", `/payments/${paid.body.data.id}/confirmation`, { evidence: "입금 확인", confirmedAt: "2026-03-04T06:30:00.000Z" });
+    const unconfirmed = await call("POST", `/orders/${orderId}/payments`, { method: "CARD", amountKrw: "5000", externalReference: "CORR-2", paidAt: "2026-03-04T06:01:00.000Z" });
+    await write("/payments/{paymentId}/void", `/payments/${unconfirmed.body.data.id}/void`, { reason: "중복 입력", voidedAt: "2026-03-04T06:40:00.000Z" }, 201);
+    await write("/payments/{paymentId}/corrections", `/payments/${paid.body.data.id}/corrections`, { reducedKrw: "1000", reason: "금액 오기록", evidence: "입금 내역 재확인", correctedAt: "2026-03-04T06:50:00.000Z" }, 201);
+
+    const fulfillment = await write("/orders/{orderId}/fulfillments", `/orders/${orderId}/fulfillments`, { orderLineId: lineId, sources: [{ kind: "STOCK_RESERVATION", sourceId: reservation.id, quantity: 2 }], receivedAt: "2026-03-04T07:00:00.000Z" }, 201);
+    await write("/orders/{orderId}/fulfillments/{fulfillmentId}/corrections", `/orders/${orderId}/fulfillments/${fulfillment.id}/corrections`, { quantity: 1, restorations: [{ kind: "STOCK_RESERVATION", sourceId: reservation.id, quantity: 1 }], reason: "반품 입고", evidence: "반입 확인서", physicalReturnConfirmed: true, correctedAt: "2026-03-04T07:30:00.000Z" }, 201);
+
+    for (const { template } of checked) expect(declared(template, "post"), `${template} data 스키마`).toBe(true);
+    for (const { template, body } of checked) expect(conforms(template, body, "post"), template).toMatchObject({ ok: true });
+  });
+});
+

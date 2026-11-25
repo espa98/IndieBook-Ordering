@@ -1235,3 +1235,26 @@
 - 정상 분기 한 번만 검증했다. 불량이 없는 입고, 초과 거절(`REJECTED`) 같은 분기는 확인하지 못했다.
 - 오류 응답(4xx/5xx)의 발생 조건 검증은 여전히 401뿐이다.
 
+## 67. 응답 스키마: 재고·수령·결제 정정 쓰기 8개 경로 (T8 일부)
+
+테스트 1개 추가(`tests/openapi/responseContract.test.ts`). 초기 재고 → 조정 → 예약 → 예약 해제 → 결제 입력·확인 → 결제 무효·정정 → 수령 → 수령 정정을 한 시나리오로 실제 실행하고, **먼저 "`data` 스키마가 선언되어 있다"에서 실패함을 확인**한 뒤 채웠다(모든 쓰기 호출은 처음부터 성공했다).
+
+| 경로 | 스키마 |
+|---|---|
+| `POST /books/{bookId}/initial-stock`, `.../stock-adjustments` | `StockMovement`(선택 `reservationId`·`cancellationId`) |
+| `POST /orders/{orderId}/lines/{lineId}/stock-reservations` | `StockReservation` |
+| `POST /stock-reservations/{reservationId}/releases` | `StockReservationRelease` |
+| `POST /payments/{paymentId}/void` | `PaymentVoid` |
+| `POST /payments/{paymentId}/corrections` | `PaymentCorrection` |
+| `POST /orders/{orderId}/fulfillments` | `Fulfillment`(선택 `correctsFulfillmentId`) |
+| `POST /orders/{orderId}/fulfillments/{fulfillmentId}/corrections` | `FulfillmentCorrection` |
+
+**도메인 타입과 실제 응답의 차이:** `StockReservation`의 도메인 타입에는 `id`·`bookId`·`orderId`·`orderLineId`·`quantity`만 있으나 실제 응답에는 `reservedBy`·`reservedAt`·`recordedAt`도 있어 응답 기준으로 선언했다(도메인 타입이 응답을 다 설명하지 못한다). `StockReservationRelease`에도 `bookId`가 있다.
+
+응답 `data`를 선언한 경로는 **76개 중 42개**(조회 14 + 쓰기 28)다.
+
+**한계**
+- **남은 34개 쓰기 경로**(주문 취소·종결·처분, 반품, 환급, 안내 쓰기, 직원·계정, 발주 취소·회신, 배정 해제·중복 위험 승인)의 응답은 자유 형식이다.
+- 정상 분기 한 번만 검증했다. 수령 정정 응답에는 정정 행(`reversalFulfillmentId`)만 있고 역거래 수령 자체는 응답에 없다.
+- 오류 응답(4xx/5xx)의 발생 조건 검증은 여전히 401뿐이다.
+

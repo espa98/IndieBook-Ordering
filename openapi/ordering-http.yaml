@@ -9,7 +9,7 @@ info:
     본문 허용 필드(`additionalProperties: false`), 쿼리 파라미터, `Idempotency-Key` 필수 여부가 어긋나면 테스트가 실패한다.
 
     **이 명세가 기술하지 않는 것(미구현·미검증):** 필수 여부(`required`)·열거값·타입은 도메인 요청 타입 기준이고
-    런타임 400으로는 전수 검증하지 않았다, 응답 `data`의 필드별 스키마(조회 14개 경로 전부와 쓰기 20개 경로(나머지 42개는 아직 자유 형식)를 선언했고 `tests/openapi/responseContract.test.ts`가 실제 응답으로 검증한다. 나머지는 자유 형식), 경로별 오류 응답의 실제 발생
+    런타임 400으로는 전수 검증하지 않았다, 응답 `data`의 필드별 스키마(조회 14개 경로 전부와 쓰기 28개 경로(나머지 34개는 아직 자유 형식)를 선언했고 `tests/openapi/responseContract.test.ts`가 실제 응답으로 검증한다. 나머지는 자유 형식), 경로별 오류 응답의 실제 발생
     조건(공통 오류 응답을 선언만 하고 401만 계약 테스트로 확인한다).
 
     **공통 규칙(`ordering.yaml`과 같다):** Bearer JWT, 모든 쓰기(POST)는 `Idempotency-Key` 필수, 경로 식별자는 UUID가 아니면 404
@@ -58,7 +58,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/StockReservation" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -105,7 +108,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/StockMovement" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -154,7 +160,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/StockMovement" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -275,7 +284,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/StockReservationRelease" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -322,7 +334,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/PaymentVoid" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -380,7 +395,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Fulfillment" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -447,7 +465,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/FulfillmentCorrection" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -496,7 +517,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/PaymentCorrection" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -3546,6 +3570,112 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    FulfillmentCorrection:
+      type: object
+      required: [id, tenantId, orderId, fulfillmentId, reversalFulfillmentId, quantity, restorations, reason, evidence, correctedBy, correctedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        fulfillmentId: { type: string, format: uuid }
+        reversalFulfillmentId: { type: string, format: uuid }
+        quantity: { type: integer }
+        restorations: { type: array, items: { $ref: "#/components/schemas/FulfillmentSource" } }
+        reason: { type: string }
+        evidence: { type: string }
+        correctedBy: { type: string }
+        correctedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    Fulfillment:
+      type: object
+      required: [id, tenantId, orderId, orderLineId, quantity, unitPriceKrw, amountKrw, sources, receivedBy, receivedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        orderLineId: { type: string, format: uuid }
+        quantity: { type: integer }
+        unitPriceKrw: { type: string }
+        amountKrw: { type: string }
+        sources: { type: array, items: { $ref: "#/components/schemas/FulfillmentSource" } }
+        receivedBy: { type: string }
+        receivedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+        correctsFulfillmentId: { type: string, format: uuid }
+    PaymentCorrection:
+      type: object
+      required: [id, tenantId, orderId, paymentId, reducedKrw, reason, evidence, correctedBy, correctedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        paymentId: { type: string, format: uuid }
+        reducedKrw: { type: string }
+        reason: { type: string }
+        evidence: { type: string }
+        correctedBy: { type: string }
+        correctedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    PaymentVoid:
+      type: object
+      required: [id, tenantId, paymentId, reason, voidedBy, voidedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        paymentId: { type: string, format: uuid }
+        reason: { type: string }
+        voidedBy: { type: string }
+        voidedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    StockReservationRelease:
+      type: object
+      required: [id, tenantId, bookId, reservationId, quantity, reason, releasedBy, releasedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        bookId: { type: string }
+        reservationId: { type: string, format: uuid }
+        quantity: { type: integer }
+        reason: { type: string }
+        releasedBy: { type: string }
+        releasedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    StockReservation:
+      type: object
+      required: [id, tenantId, bookId, orderId, orderLineId, quantity, reservedBy, reservedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        bookId: { type: string }
+        orderId: { type: string, format: uuid }
+        orderLineId: { type: string, format: uuid }
+        quantity: { type: integer }
+        reservedBy: { type: string }
+        reservedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    StockMovement:
+      type: object
+      required: [id, tenantId, bookId, kind, direction, quantity, reason, actedBy, actedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        bookId: { type: string }
+        kind: { type: string, enum: [INITIAL, ADJUST, DELIVERY, DELIVERY_REVERSAL, CANCEL_TO_STOCK] }
+        direction: { type: string, enum: [IN, OUT] }
+        quantity: { type: integer }
+        reason: { type: string }
+        actedBy: { type: string }
+        actedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+        reservationId: { type: string, format: uuid }
+        cancellationId: { type: string, format: uuid }
+    FulfillmentSource:
+      type: object
+      required: [kind, sourceId, quantity]
+      properties:
+        kind: { type: string, enum: [STOCK_RESERVATION, RECEIPT_ALLOCATION] }
+        sourceId: { type: string }
+        quantity: { type: integer }
     ReceiptCorrection:
       type: object
       required: [id, tenantId, receiptId, quantity, reason, correctedBy, correctedAt, recordedAt]
