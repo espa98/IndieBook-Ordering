@@ -113,6 +113,44 @@ describe("openapi/ordering-http.yaml: 서버 경로표와 명세의 드리프트
     expect(problems).toEqual([]);
   });
 
+  it("열거 필드는 도메인 요청 타입이 허용하는 값만 enum으로 선언한다", () => {
+    // 출처: 각 도메인 요청 타입의 리터럴 유니온(tsc로 후보 값마다 허용 여부를 판정, 2026-11-25).
+    // 도서 등록 source의 YES24는 도메인 검증(registerBook.ts)에 따른다.
+    const EXPECTED: Record<string, string[]> = {
+      "POST /books/{bookId}/stock-adjustments direction": ["IN", "OUT"],
+      "POST /order-cancellation-requests/{requestId}/decision decision": ["APPROVED", "REJECTED", "WITHDRAWN"],
+      "POST /return-requests/{requestId}/exceptions kind": ["LOST", "REFUSED", "RETURNED_BACK"],
+      "POST /return-exceptions/{exceptionId}/resolutions outcome": ["RECOVERED", "RETURNED"],
+      "POST /orders/{orderId}/payments method": ["BANK_TRANSFER", "CARD", "EASY_PAY"],
+      "POST /refund-tasks/{taskId}/refund-attempts result": ["FAILED", "UNKNOWN"],
+      "POST /refund-attempts/{attemptId}/resolution outcome": ["CONFIRMED", "FAILED"],
+      "POST /orders/{orderId}/notification-targets mode": ["FULL", "PARTIAL"],
+      "POST /notification-targets/{targetId}/copies action": ["COPY", "PREVIEW", "SHARE"],
+      "POST /notification-targets/{targetId}/attempts channel": ["MESSENGER", "OTHER", "PHONE", "SMS", "VISIT"],
+      "POST /notification-attempts/{attemptId}/result outcome": ["FAILED", "MANUAL_RECORDED"],
+      "POST /books source": ["MANUAL", "YES24"],
+      "POST /members/{targetUserId}/status status": ["ACTIVE", "INACTIVE"],
+      "POST /suppliers orderChannel": ["API", "EMAIL", "FILE", "MESSENGER", "PHONE", "WEB"],
+      "POST /orders/{orderId}/lines/{lineId}/duplicate-risk-approvals surplusPlan": ["STOCK_INTAKE", "SUPPLIER_RETURN"],
+      "POST /purchase-orders/{purchaseOrderId}/delivery method": ["API", "EMAIL", "FILE", "MESSENGER", "PHONE", "WEB"],
+      "POST /purchase-orders/{purchaseOrderId}/supplier-replies kind": ["CONFIRM", "DELAY", "OUT_OF_STOCK"],
+      "POST /purchase-orders/{purchaseOrderId}/supplier-replies source": ["DELAYED", "UNANSWERED"],
+      "POST /receipts/{receiptId}/defect-resolutions kind": ["DAMAGED", "MISDELIVERED"],
+      "POST /receipts/{receiptId}/defect-resolutions outcome": ["DISCARDED", "RETURNED_TO_SUPPLIER", "SUPPLIER_CREDIT"],
+      "POST /receipts/{receiptId}/excess-decisions decision": ["APPROVED", "REJECTED"],
+      "POST /refund-requests/{requestId}/decision decision": ["APPROVED", "REJECTED", "WITHDRAWN"],
+    };
+    const actual: Record<string, string[]> = {};
+    for (const { path, method, op } of operations(load(HTTP_SPEC))) {
+      const props: Json = op.requestBody?.content?.["application/json"]?.schema?.properties ?? {};
+      for (const [name, schema] of Object.entries<Json>(props)) {
+        if (schema.enum) actual[`${method.toUpperCase()} ${path.replace("/v1/tenants/{tenantId}", "")} ${name}`] = [...schema.enum].sort();
+      }
+    }
+    const sorted = (o: Record<string, string[]>) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)));
+    expect(sorted(actual)).toEqual(sorted(EXPECTED));
+  });
+
   it("모든 경로는 인증이 없으면 같은 401이고, 그 본문은 명세의 ErrorBody를 만족한다", async () => {
     const spec = (await SwaggerParser.dereference(HTTP_SPEC)) as unknown as Json;
     const ajv = new Ajv2020({ strict: false, allErrors: true });

@@ -8,7 +8,7 @@ info:
     이 파일은 `tests/openapi/ordering.http.test.ts`가 서버 경로표와 대조한다: (메서드, 경로) 집합, 성공 상태,
     본문 허용 필드(`additionalProperties: false`), 쿼리 파라미터, `Idempotency-Key` 필수 여부가 어긋나면 테스트가 실패한다.
 
-    **이 명세가 기술하지 않는 것(미구현·미검증):** 요청 필드의 열거값(`kind`·`outcome` 등은 `type: string`만 선언한다)과 객체 배열의 내부 구조. 필수 여부(`required`)는
+    **이 명세가 기술하지 않는 것(미구현·미검증):** 객체 배열(`sources`·`restorations`·`changes`)의 내부 구조. 필수 여부(`required`)는
     도메인 요청 타입에서 `?`가 아닌 필드로 정했고 런타임 400으로는 전수 검증하지 않았다, 응답 `data`의 필드별 스키마(`data`는 도메인 객체이며 자유 형식으로 둔다), 경로별 오류 응답의 실제 발생
     조건(공통 오류 응답을 선언만 하고 401만 계약 테스트로 확인한다).
 
@@ -554,7 +554,7 @@ paths:
               additionalProperties: false
               required: [decision, decidedAt]
               properties:
-                decision: { type: string }
+                decision: { type: string, enum: [APPROVED, REJECTED, WITHDRAWN] }
                 decidedAt: { type: string, format: date-time }
       responses:
         "200":
@@ -934,7 +934,7 @@ paths:
               required: [quantity, kind, evidence, reportedAt]
               properties:
                 quantity: { type: integer }
-                kind: { type: string }
+                kind: { type: string, enum: [LOST, REFUSED, RETURNED_BACK] }
                 evidence: { type: string }
                 reportedAt: { type: string, format: date-time }
       responses:
@@ -1030,7 +1030,7 @@ paths:
               additionalProperties: false
               required: [outcome, quantity, evidence, resolvedAt]
               properties:
-                outcome: { type: string }
+                outcome: { type: string, enum: [RECOVERED, RETURNED] }
                 quantity: { type: integer }
                 evidence: { type: string }
                 resolvedAt: { type: string, format: date-time }
@@ -1100,7 +1100,7 @@ paths:
               additionalProperties: false
               required: [method, amountKrw, externalReference, paidAt]
               properties:
-                method: { type: string }
+                method: { type: string, enum: [BANK_TRANSFER, CARD, EASY_PAY] }
                 amountKrw: { type: string }
                 externalReference: { type: string }
                 paidAt: { type: string, format: date-time }
@@ -1293,7 +1293,7 @@ paths:
               properties:
                 paymentId: { type: string, format: uuid }
                 amountKrw: { type: string }
-                result: { type: string }
+                result: { type: string, enum: [FAILED, UNKNOWN] }
                 reason: { type: string }
                 reportedAt: { type: string, format: date-time }
       responses:
@@ -1341,7 +1341,7 @@ paths:
               additionalProperties: false
               required: [outcome, evidence, resolvedAt]
               properties:
-                outcome: { type: string }
+                outcome: { type: string, enum: [CONFIRMED, FAILED] }
                 evidence: { type: string }
                 resolvedAt: { type: string, format: date-time }
       responses:
@@ -1455,7 +1455,7 @@ paths:
               additionalProperties: false
               required: [createdAt]
               properties:
-                mode: { type: string }
+                mode: { type: string, enum: [FULL, PARTIAL] }
                 createdAt: { type: string, format: date-time }
       responses:
         "201":
@@ -1523,7 +1523,7 @@ paths:
               additionalProperties: false
               required: [action, actedAt]
               properties:
-                action: { type: string }
+                action: { type: string, enum: [COPY, PREVIEW, SHARE] }
                 actedAt: { type: string, format: date-time }
       responses:
         "201":
@@ -1570,7 +1570,7 @@ paths:
               additionalProperties: false
               required: [channel, messageSnapshot, attemptedAt]
               properties:
-                channel: { type: string }
+                channel: { type: string, enum: [MESSENGER, OTHER, PHONE, SMS, VISIT] }
                 messageSnapshot: { type: string }
                 attemptedAt: { type: string, format: date-time }
       responses:
@@ -1664,7 +1664,7 @@ paths:
               additionalProperties: false
               required: [outcome, note, resultAt]
               properties:
-                outcome: { type: string }
+                outcome: { type: string, enum: [FAILED, MANUAL_RECORDED] }
                 note: { type: string }
                 resultAt: { type: string, format: date-time }
       responses:
@@ -1780,7 +1780,7 @@ paths:
               additionalProperties: false
               required: [source, title, listPriceKrw, registeredAt]
               properties:
-                source: { type: string }
+                source: { type: string, enum: [MANUAL, YES24] }
                 title: { type: string }
                 authors: { type: array, items: { type: string } }
                 isbn: { type: string }
@@ -2046,7 +2046,7 @@ paths:
               additionalProperties: false
               required: [status]
               properties:
-                status: { type: string }
+                status: { type: string, enum: [ACTIVE, INACTIVE] }
       responses:
         "200":
           description: 성공(`data`는 도메인 객체)
@@ -2181,7 +2181,7 @@ paths:
               properties:
                 code: { type: string }
                 name: { type: string }
-                orderChannel: { type: string }
+                orderChannel: { type: string, enum: [API, EMAIL, FILE, MESSENGER, PHONE, WEB] }
                 registeredAt: { type: string, format: date-time }
       responses:
         "201":
@@ -2411,7 +2411,7 @@ paths:
               properties:
                 purchaseOrderId: { type: string, format: uuid }
                 poLineId: { type: string, format: uuid }
-                surplusPlan: { type: string }
+                surplusPlan: { type: string, enum: [STOCK_INTAKE, SUPPLIER_RETURN] }
                 planNote: { type: string }
                 approvedAt: { type: string, format: date-time }
       responses:
@@ -2661,7 +2661,7 @@ paths:
               required: [expectedVersion, method, deliveredAt]
               properties:
                 expectedVersion: { type: integer }
-                method: { type: string }
+                method: { type: string, enum: [API, EMAIL, FILE, MESSENGER, PHONE, WEB] }
                 deliveredAt: { type: string, format: date-time }
                 referenceNumber: { type: string }
                 fileVersion: { type: integer }
@@ -2913,9 +2913,9 @@ paths:
               required: [poLineId, kind, quantity, evidence, repliedAt]
               properties:
                 poLineId: { type: string, format: uuid }
-                kind: { type: string }
+                kind: { type: string, enum: [CONFIRM, DELAY, OUT_OF_STOCK] }
                 quantity: { type: integer }
-                source: { type: string }
+                source: { type: string, enum: [DELAYED, UNANSWERED] }
                 eta: { type: string, format: date }
                 evidence: { type: string }
                 repliedAt: { type: string, format: date-time }
@@ -3014,9 +3014,9 @@ paths:
               additionalProperties: false
               required: [kind, quantity, outcome, evidence, resolvedAt]
               properties:
-                kind: { type: string }
+                kind: { type: string, enum: [DAMAGED, MISDELIVERED] }
                 quantity: { type: integer }
-                outcome: { type: string }
+                outcome: { type: string, enum: [DISCARDED, RETURNED_TO_SUPPLIER, SUPPLIER_CREDIT] }
                 evidence: { type: string }
                 resolvedAt: { type: string, format: date-time }
       responses:
@@ -3064,7 +3064,7 @@ paths:
               additionalProperties: false
               required: [decision, quantity, reason, decidedAt]
               properties:
-                decision: { type: string }
+                decision: { type: string, enum: [APPROVED, REJECTED] }
                 quantity: { type: integer }
                 reason: { type: string }
                 decidedAt: { type: string, format: date-time }
@@ -3356,7 +3356,7 @@ paths:
               additionalProperties: false
               required: [decision, decidedAt]
               properties:
-                decision: { type: string }
+                decision: { type: string, enum: [APPROVED, REJECTED, WITHDRAWN] }
                 decidedAt: { type: string, format: date-time }
       responses:
         "200":
