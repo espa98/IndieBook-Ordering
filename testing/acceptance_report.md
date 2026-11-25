@@ -1341,3 +1341,28 @@
 - 정상 분기 한 번만 검증했다(예: `PARTIAL` 모드, `MANUAL_RECORDED` 결과, 다른 채널).
 - 오류 응답(4xx/5xx)의 발생 조건 검증은 여전히 401뿐이다.
 
+## 72. 응답 스키마: 발주 회신·취소, 배정 해제, 중복 위험 승인 7개 경로 — 응답 스키마 완료 (T8)
+
+테스트 2개 추가(`responseContract.test.ts` 1, `ordering.http.test.ts` 1). 공급처 회신 → 발주 취소 요청 → 응답 → 취소 확정, 미전달 발주 취소, 배정 해제, 중복 위험 승인을 한 시나리오로 실제 실행했다. **먼저 "`data` 스키마가 선언되어 있다"에서 실패함을 확인**한 뒤 채웠다.
+
+| 경로 | 스키마 |
+|---|---|
+| `POST .../supplier-replies` | `PoReply`(선택 `source`·`eta`) |
+| `POST .../lines/{poLineId}/cancellation-requests` | `PoCancellationRequest` |
+| `POST .../cancellation-requests/{requestId}/responses` | `PoCancellationResponse` |
+| `POST .../cancellation-confirmation`, `POST .../cancellation` | `PurchaseOrder`(취소 상태, `cancelledAt` 등) |
+| `POST /sourcing-allocations/{allocationId}/releases` | `SourcingRelease`(`retainedObligations`) |
+| `POST /orders/{orderId}/lines/{lineId}/duplicate-risk-approvals` | `DuplicateRiskApproval` |
+
+테스트 시나리오 수정 1건(구현 문제 아님): 중복 위험 승인은 "전달된 발주에 묶인 배정을 해제했을 때 남는 공급처 의무"가 있어야 하는데, 처음에는 해제 없이 승인해 서버가 422로 거부했다(올바른 동작). 해제 단계를 앞에 넣었고, 이 해제 응답은 `retainedObligations`가 채워진 분기까지 검증한다.
+
+**가드:** "모든 경로의 성공 응답은 `data` 스키마를 선언한다" 테스트를 추가했다. 모든 경로가 이미 선언되어 있어 이 테스트는 **처음부터 통과했다(실패 단계 없음)**. 자유 형식 `DataResponse` 정의는 더 쓰이지 않아 명세에서 제거했다.
+
+**결과:** 응답 `data` 스키마를 **76개 경로 전부** 선언했다(조회 14 + 쓰기 62). 주문 4개 경로는 `ordering.yaml`이 따로 기술한다.
+
+**한계**
+- 모든 경로를 **정상 분기 한 번**만 실제 응답으로 검증했다. 선택 필드가 비는 경우, 거절·철회·부분 분기, 다른 열거값의 응답은 도메인 타입에 근거했을 뿐 실제로 확인하지 못했다.
+- 몇몇 객체(`voids`·`corrections`·`refundTasks` 등)는 `type: object`로만 선언했다(§63).
+- **경로별 오류 응답(4xx/5xx)의 발생 조건 검증은 여전히 401뿐**이다. T8의 남은 항목이다.
+- 이 명세는 아직 어떤 클라이언트·문서 도구와도 연결하지 않았다.
+

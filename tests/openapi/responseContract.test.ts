@@ -434,3 +434,62 @@ describe("응답 계약(쓰기): 고객 안내", () => {
   });
 });
 
+describe("응답 계약(쓰기): 발주 회신·취소, 배정 해제, 중복 위험 승인", () => {
+  it("공급처 회신·발주 취소 요청·응답·확정·미전달 발주 취소·배정 해제·중복 위험 승인 응답이 선언한 스키마를 만족한다", async () => {
+    const checked: Checked[] = [];
+    const write = async (template: string, path: string, body: unknown, status: number) => {
+      const res = await call("POST", path, body);
+      expect(res.status, `${template} 상태 ${JSON.stringify(res.body)}`).toBe(status);
+      checked.push({ template, body: res.body });
+      return res.body.data;
+    };
+    const book = await call("POST", "/books", { source: "MANUAL", title: "발주취소 책", listPriceKrw: "5000", reason: "수기 등록", registeredAt: "2026-03-04T06:00:00.000Z" });
+    const bookId = book.body.data.id as string;
+    const lineOf = async (quantity: number) => {
+      const draft = await call("POST", "/orders", { lines: [{ bookId, quantity, unitPriceKrw: "5000" }] });
+      const confirmed = await call("POST", `/orders/${draft.body.data.id}/confirm`, { expectedVersion: 1 });
+      return { orderId: draft.body.data.id as string, lineId: confirmed.body.data.lines[0].lineId as string };
+    };
+    const purchaseOrderOf = async (line: { orderId: string; lineId: string }, quantity: number, send: boolean) => {
+      const sourcing = await call("POST", `/orders/${line.orderId}/lines/${line.lineId}/sourcing-allocations`, { supplierCode: "alpha", quantity });
+      const po = await call("POST", "/purchase-orders", { supplierCode: "alpha", allocationIds: [sourcing.body.data.id] });
+      const poId = po.body.data.id as string;
+      if (send) {
+        await call("POST", `/purchase-orders/${poId}/ready`, { expectedVersion: 1 });
+        await call("POST", `/purchase-orders/${poId}/delivery`, { expectedVersion: 2, method: "EMAIL", deliveredAt: "2026-03-04T07:00:00.000Z" });
+      }
+      const got = (await call("GET", `/purchase-orders/${poId}`)).body.data;
+      return { poId, poLineId: got.lines[0].poLineId as string, version: got.version as number, allocationId: sourcing.body.data.id as string };
+    };
+
+    // 전달한 발주: 공급처 회신 → 취소 요청 → 응답 → 취소 확정
+    const sentLine = await lineOf(2);
+    const sent = await purchaseOrderOf(sentLine, 2, true);
+    await write("/purchase-orders/{purchaseOrderId}/supplier-replies", `/purchase-orders/${sent.poId}/supplier-replies`, { poLineId: sent.poLineId, kind: "CONFIRM", quantity: 2, source: "UNANSWERED", evidence: "공급처 확인 메일", repliedAt: "2026-03-04T08:00:00.000Z" }, 201);
+    const cancelRequest = await write("/purchase-orders/{purchaseOrderId}/lines/{poLineId}/cancellation-requests", `/purchase-orders/${sent.poId}/lines/${sent.poLineId}/cancellation-requests`, { quantity: 2, reason: "주문 취소" }, 201);
+    await write("/purchase-orders/{purchaseOrderId}/cancellation-requests/{requestId}/responses", `/purchase-orders/${sent.poId}/cancellation-requests/${cancelRequest.id}/responses`, { acceptedQuantity: 2, rejectedQuantity: 0, evidence: "공급처 취소 수락", repliedAt: "2026-03-04T09:00:00.000Z" }, 201);
+    const sentVersion = (await call("GET", `/purchase-orders/${sent.poId}`)).body.data.version as number;
+    await write("/purchase-orders/{purchaseOrderId}/cancellation-confirmation", `/purchase-orders/${sent.poId}/cancellation-confirmation`, { expectedVersion: sentVersion }, 200);
+
+    // 전달하지 않은 발주 취소
+    const draftLine = await lineOf(1);
+    const unsent = await purchaseOrderOf(draftLine, 1, false);
+    await write("/purchase-orders/{purchaseOrderId}/cancellation", `/purchase-orders/${unsent.poId}/cancellation`, { expectedVersion: unsent.version, reason: "발주 철회", cancelledAt: "2026-03-04T09:30:00.000Z" }, 200);
+
+    // 발주에 묶이지 않은 배정 해제
+    const freeLine = await lineOf(1);
+    const free = await call("POST", `/orders/${freeLine.orderId}/lines/${freeLine.lineId}/sourcing-allocations`, { supplierCode: "alpha", quantity: 1 });
+    await write("/sourcing-allocations/{allocationId}/releases", `/sourcing-allocations/${free.body.data.id}/releases`, { reason: "배정 취소", releasedAt: "2026-03-04T10:00:00.000Z" }, 201);
+
+    // 열려 있는 공급처 의무가 있는 품목의 중복 위험 승인
+    const riskLine = await lineOf(2);
+    const risk = await purchaseOrderOf(riskLine, 2, true);
+    const released = await write("/sourcing-allocations/{allocationId}/releases", `/sourcing-allocations/${risk.allocationId}/releases`, { reason: "고객이 주문 변경", releasedAt: "2026-03-04T10:30:00.000Z" }, 201);
+    expect(released.retainedObligations?.length ?? 0, "전달된 발주의 배정을 풀면 공급처 의무가 남는다").toBeGreaterThan(0);
+    await write("/orders/{orderId}/lines/{lineId}/duplicate-risk-approvals", `/orders/${riskLine.orderId}/lines/${riskLine.lineId}/duplicate-risk-approvals`, { purchaseOrderId: risk.poId, poLineId: risk.poLineId, surplusPlan: "STOCK_INTAKE", planNote: "남는 수량은 재고로 편입", approvedAt: "2026-03-04T11:00:00.000Z" }, 201);
+
+    for (const { template } of checked) expect(declared(template, "post"), `${template} data 스키마`).toBe(true);
+    for (const { template, body } of checked) expect(conforms(template, body, "post"), template).toMatchObject({ ok: true });
+  });
+});
+

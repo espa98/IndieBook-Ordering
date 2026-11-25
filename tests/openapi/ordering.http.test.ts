@@ -181,6 +181,17 @@ describe("openapi/ordering-http.yaml: 서버 경로표와 명세의 드리프트
     });
   });
 
+  it("모든 경로의 성공 응답은 data 스키마를 선언한다 (자유 형식 DataResponse 금지)", () => {
+    const free: string[] = [];
+    for (const { key, op } of operations(load(HTTP_SPEC))) {
+      const code = Object.keys(op.responses).find((c) => c.startsWith("2"))!;
+      const schema: Json = op.responses[code].content["application/json"].schema;
+      if ("$ref" in schema && String(schema.$ref).endsWith("/DataResponse")) free.push(key);
+      else if (!schema.properties?.data || Object.keys(schema.properties.data).length === 0) free.push(key);
+    }
+    expect(free).toEqual([]);
+  });
+
   it("모든 경로는 인증이 없으면 같은 401이고, 그 본문은 명세의 ErrorBody를 만족한다", async () => {
     const spec = (await SwaggerParser.dereference(HTTP_SPEC)) as unknown as Json;
     const ajv = new Ajv2020({ strict: false, allErrors: true });
