@@ -312,6 +312,10 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       success: 200,
       run: (c) => reads.getStockLevel(actor(c), { tenantId: t(c), bookId: c.params.bookId! }),
     }),
+    route("GET", "/orders/(?<orderId>[^/]+)/payments", {
+      success: 200,
+      run: (c) => reads.getOrderPayments(actor(c), { tenantId: t(c), orderId: c.params.orderId! }),
+    }),
     route("GET", "/books", {
       success: 200,
       queryFields: ["limit", "cursor", "isbn"],

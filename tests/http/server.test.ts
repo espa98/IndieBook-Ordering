@@ -937,3 +937,21 @@ describe("HTTP 서버: 재고 현황 조회 경로", () => {
     expect((await call(`${stock}/no-such-book`, { sub: STAFF_A })).status).toBe(404);
   });
 });
+
+describe("HTTP 서버: 결제 현황 조회 경로", () => {
+  it("직원이 주문의 결제 현황(요약·거래 상태)을 읽고, 없는 주문·타 서점·비멤버는 거부된다", async () => {
+    await seedStock(5, 5);
+    const o = await confirmedOrder(5, 1);
+    const path = `${orders()}/${o.orderId}/payments`;
+    await call(path, { method: "POST", sub: STAFF_A, body: { method: "CARD", amountKrw: o.total, externalReference: `HTTP-READ-${++seq}`, paidAt: "2026-03-04T06:00:00.000Z" } });
+
+    const view = await call(path, { sub: STAFF_A });
+    expect(view.status).toBe(200);
+    expect(view.json.data.summary).toMatchObject({ totalKrw: o.total, pendingKrw: o.total, confirmedKrw: "0" });
+    expect(view.json.data.payments).toHaveLength(1);
+    expect(view.json.data.payments[0].status).toBe("PENDING");
+    expect((await call(`${orders()}/0a000000-0000-4000-8000-00000000ffff/payments`, { sub: STAFF_A })).status).toBe(404);
+    expect((await call(`${orders(T_B)}/${o.orderId}/payments`, { sub: OWNER_B })).status).toBe(404);
+    expect((await call(path, { sub: "33333333-0000-4000-8000-0000000000ff" })).status).toBe(403);
+  });
+});

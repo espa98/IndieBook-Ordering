@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createPgCatalogApi } from "../../src/db/pgCatalogApi";
 import { createPgNotificationApi } from "../../src/db/pgNotificationApi";
 import { createPgOrderApi } from "../../src/db/pgOrderApi";
+import { createPgPaymentApi } from "../../src/db/pgPaymentApi";
 import { createPgStockApi } from "../../src/db/pgStockApi";
 import { createPgReadApi } from "../../src/db/pgReadApi";
 import { AppError } from "../../src/errors/AppError";
@@ -296,5 +297,31 @@ describe("재고 현황 조회 (읽기 API)", () => {
     expect(await codeOf(() => read().getStockLevel(staff, { tenantId: T_A, bookId: "b0000000-0000-4000-8000-0000000000ff" }))).toBe("NOT_FOUND");
     expect(await codeOf(() => read().listStockLevels(staff, { tenantId: T_A, limit: 0 }))).toBe("VALIDATION_ERROR");
     expect(await codeOf(() => read().listStockLevels({ userId: STRANGER }, { tenantId: T_A }))).toBe("FORBIDDEN");
+  });
+});
+
+describe("결제 현황 조회 (읽기 API)", () => {
+  it("주문의 결제 거래와 요약(확인·대기·무효 반영)을 원장에서 파생해 읽고, 다른 서점·없는 주문은 404, 비멤버는 403이다", async () => {
+    const orders = createPgOrderApi({ pool: db.pool() });
+    const draft = await orders.createOrder(owner, { tenantId: T_A, idempotencyKey: key(), lines: [{ bookId: "b0000000-0000-4000-8000-000000000008", quantity: 1, unitPriceKrw: "10000" }] });
+    const order = await orders.confirmOrder(owner, { tenantId: T_A, orderId: draft.id, expectedVersion: 1, idempotencyKey: key() });
+    const pay = createPgPaymentApi({ pool: db.pool() });
+    const paidAt = "2026-03-04T06:00:00.000Z";
+    const record = (amountKrw: string, externalReference: string) => pay.recordPayment(staff, { tenantId: T_A, orderId: order.id, method: "BANK_TRANSFER", amountKrw, externalReference, paidAt, idempotencyKey: key() });
+    const p1 = await record("6000", "R-1");
+    await pay.confirmPayment(staff, { tenantId: T_A, paymentId: p1.id, evidence: "입금 확인", confirmedAt: paidAt, idempotencyKey: key() });
+    await record("3000", "R-2"); // 확인 전
+    const p3 = await record("1000", "R-3");
+    await pay.voidPayment(staff, { tenantId: T_A, paymentId: p3.id, reason: "오입력", voidedAt: paidAt, idempotencyKey: key() } as never);
+
+    const view = await read().getOrderPayments(staff, { tenantId: T_A, orderId: order.id });
+    expect(view.summary).toMatchObject({ totalKrw: "10000", confirmedKrw: "6000", pendingKrw: "3000", balanceKrw: "4000", refundRequiredKrw: "0" });
+    expect(view.payments.map((p) => [p.externalReference, p.status])).toEqual([["R-1", "CONFIRMED"], ["R-2", "PENDING"], ["R-3", "VOIDED"]]);
+    expect(view.confirmations).toHaveLength(1);
+    expect(view.voids).toHaveLength(1);
+
+    expect(await codeOf(() => read().getOrderPayments(staff, { tenantId: T_A, orderId: "0a000000-0000-4000-8000-00000000ffff" }))).toBe("NOT_FOUND");
+    expect(await codeOf(() => read().getOrderPayments({ userId: OWNER_B }, { tenantId: T_A, orderId: order.id }))).toBe("FORBIDDEN");
+    expect(await codeOf(() => read().getOrderPayments({ userId: STRANGER }, { tenantId: T_A, orderId: order.id }))).toBe("FORBIDDEN");
   });
 });

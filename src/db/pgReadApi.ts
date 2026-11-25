@@ -11,6 +11,9 @@ import type { StockLevel } from "../inventory/stockLevel";
 import type { PurchaseOrder } from "../procurement/createPurchaseOrder";
 import type { Supplier } from "../procurement/allocateSourcing";
 import { toBook } from "./pgCatalogApi";
+import { paymentSummary, type PaymentSummary } from "../payment/paymentSummary";
+import type { Payment } from "../payment/recordPayment";
+import { loadLedger, type PaymentLedger } from "./pgPaymentApi";
 import { toSupplier } from "./pgSupplierApi";
 import { loadSecuredDeps, toAttempt, toResult, toTarget } from "./pgNotificationApi";
 import { inTransaction, isUuid, loadMembership, loadOrders, principalFor, type PoolLike } from "./pgSupport";
@@ -127,6 +130,19 @@ const STOCK_LEVELS_SQL = `
   limit $4`;
 
 const toStockLevel = (row: any): StockLevelView => ({ bookId: row.book_key, onHand: row.on_hand, reserved: row.reserved, available: row.on_hand - row.reserved });
+
+/** 결제 거래의 상태: 무효 > 확인 > 대기 순으로 기록에서 파생한다 */
+export type PaymentView = Payment & { status: "CONFIRMED" | "PENDING" | "VOIDED" };
+export type OrderPaymentsView = {
+  summary: PaymentSummary;
+  payments: PaymentView[];
+  confirmations: PaymentLedger["confirmations"];
+  voids: PaymentLedger["voids"];
+  corrections: PaymentLedger["corrections"];
+  refundTasks: PaymentLedger["tasks"];
+  refundRequests: PaymentLedger["requests"];
+  refunds: PaymentLedger["refunds"];
+};
 
 export type ListBooksRequest = { tenantId: string; limit?: number; cursor?: string; isbn?: string };
 
@@ -288,6 +304,26 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
         const page = rows.slice(0, limit);
         const last = page[page.length - 1];
         return { items: page.map(toStockLevel), ...(rows.length > limit && last ? { nextCursor: encodeCursor([last.book_key]) } : {}) };
+      }),
+
+    /** 주문의 결제·환급 원장과 파생 요약. 결제 증빙은 민감 정보라 활성 멤버만 읽는다(RLS-03) */
+    getOrderPayments: (actor: Actor, request: { tenantId: string; orderId: string }): Promise<OrderPaymentsView> =>
+      asMember(actor, request.tenantId, async (client) => {
+        const [order] = await loadOrders(client, request.tenantId, { orderId: request.orderId });
+        if (!order) throw new AppError("NOT_FOUND");
+        const l = await loadLedger(client, order);
+        const voided = new Set(l.voids.map((v) => v.paymentId));
+        const confirmed = new Set(l.confirmations.map((c) => c.paymentId));
+        return {
+          summary: paymentSummary(order, l.payments, l.confirmations, l.voids, l.refunds, l.corrections),
+          payments: l.payments.map((p): PaymentView => ({ ...p, status: voided.has(p.id) ? "VOIDED" : confirmed.has(p.id) ? "CONFIRMED" : "PENDING" })),
+          confirmations: l.confirmations,
+          voids: l.voids,
+          corrections: l.corrections,
+          refundTasks: l.tasks,
+          refundRequests: l.requests,
+          refunds: l.refunds,
+        };
       }),
 
     listBooks: (actor: Actor, request: ListBooksRequest): Promise<{ items: Book[]; nextCursor?: string }> =>
