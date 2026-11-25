@@ -1211,3 +1211,27 @@
 - 한 번의 정상 시나리오 응답만 검증했다. 선택 필드가 채워지는 다른 분기(예: YES24 도서, 발주 취소 응답)는 확인하지 못했다.
 - 오류 응답(4xx/5xx)의 발생 조건 검증은 여전히 401뿐이다.
 
+## 66. 응답 스키마: 입고·배분 쓰기 8개 경로 (T8 일부)
+
+테스트 1개 추가(`tests/openapi/responseContract.test.ts`). 한 시나리오(발주 전달 → 입고 → 불량 처리 → 초과 결정 → 배분 → 배분 취소 → 재배정 → 해제 → 입고 정정)를 실제로 끝까지 실행하고, **먼저 "`data` 스키마가 선언되어 있다"에서 실패함을 확인**한 뒤 채웠다.
+
+| 경로 | 스키마 |
+|---|---|
+| `POST /purchase-orders/{purchaseOrderId}/receipts` | `GoodsReceipt`(`normalQuantity`·`excessQuantity`·`damagedQuantity`·`misdeliveredQuantity`) |
+| `POST /receipts/{receiptId}/defect-resolutions` | `ReceiptDefectResolution` |
+| `POST /receipts/{receiptId}/excess-decisions` | `ExcessDecision` |
+| `POST /receipts/{receiptId}/allocations` | `ReceiptAllocation` |
+| `POST /allocations/{allocationId}/cancellations` | `AllocationCancellation` |
+| `POST /allocations/{allocationId}/reallocations` | `{ release: AllocationRelease, allocation: ReceiptAllocation }` |
+| `POST /allocations/{allocationId}/releases` | `AllocationRelease` |
+| `POST /receipts/{receiptId}/corrections` | `ReceiptCorrection` |
+
+테스트 입력 오류 1건: 재배정 대상 주문 품목이 같은 발주에 연결되어 있지 않아 서버가 422로 거부했다(올바른 동작). 두 번째 주문도 같은 발주에 배정하는 시나리오로 고쳤다. 서버가 입고 수량을 정상 5·초과 1로 나눠 기록하는 것도 응답으로 확인했다(요청은 정상 6).
+
+응답 `data`를 선언한 경로는 **76개 중 34개**(조회 14 + 쓰기 20)다.
+
+**한계**
+- **남은 42개 쓰기 경로**(주문 취소·종결, 반품, 환급, 안내 쓰기, 재고 쓰기, 수령·정정, 직원, 발주 취소·회신, 계정)의 응답은 자유 형식이다.
+- 정상 분기 한 번만 검증했다. 불량이 없는 입고, 초과 거절(`REJECTED`) 같은 분기는 확인하지 못했다.
+- 오류 응답(4xx/5xx)의 발생 조건 검증은 여전히 401뿐이다.
+

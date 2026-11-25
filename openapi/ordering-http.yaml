@@ -9,7 +9,7 @@ info:
     본문 허용 필드(`additionalProperties: false`), 쿼리 파라미터, `Idempotency-Key` 필수 여부가 어긋나면 테스트가 실패한다.
 
     **이 명세가 기술하지 않는 것(미구현·미검증):** 필수 여부(`required`)·열거값·타입은 도메인 요청 타입 기준이고
-    런타임 400으로는 전수 검증하지 않았다, 응답 `data`의 필드별 스키마(조회 14개 경로 전부와 쓰기 12개 경로(나머지 50개는 아직 자유 형식)를 선언했고 `tests/openapi/responseContract.test.ts`가 실제 응답으로 검증한다. 나머지는 자유 형식), 경로별 오류 응답의 실제 발생
+    런타임 400으로는 전수 검증하지 않았다, 응답 `data`의 필드별 스키마(조회 14개 경로 전부와 쓰기 20개 경로(나머지 42개는 아직 자유 형식)를 선언했고 `tests/openapi/responseContract.test.ts`가 실제 응답으로 검증한다. 나머지는 자유 형식), 경로별 오류 응답의 실제 발생
     조건(공통 오류 응답을 선언만 하고 401만 계약 테스트로 확인한다).
 
     **공통 규칙(`ordering.yaml`과 같다):** Bearer JWT, 모든 쓰기(POST)는 `Idempotency-Key` 필수, 경로 식별자는 UUID가 아니면 404
@@ -3105,7 +3105,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/GoodsReceipt" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -3155,7 +3158,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/ReceiptDefectResolution" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -3204,7 +3210,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/ExcessDecision" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -3252,7 +3261,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/ReceiptCorrection" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -3301,7 +3313,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/ReceiptAllocation" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -3349,7 +3364,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/AllocationCancellation" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -3399,7 +3417,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [release, allocation]
+                    properties:
+                      release: { $ref: "#/components/schemas/AllocationRelease" }
+                      allocation: { $ref: "#/components/schemas/ReceiptAllocation" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -3447,7 +3473,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/AllocationRelease" }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
@@ -3517,6 +3546,102 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    ReceiptCorrection:
+      type: object
+      required: [id, tenantId, receiptId, quantity, reason, correctedBy, correctedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        receiptId: { type: string, format: uuid }
+        quantity: { type: integer }
+        reason: { type: string }
+        correctedBy: { type: string }
+        correctedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    AllocationRelease:
+      type: object
+      required: [id, tenantId, allocationId, quantity, reason, releasedBy, releasedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        allocationId: { type: string, format: uuid }
+        quantity: { type: integer }
+        reason: { type: string }
+        releasedBy: { type: string }
+        releasedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    AllocationCancellation:
+      type: object
+      required: [id, tenantId, bookId, receiptId, allocationId, orderId, orderLineId, quantity, reason, cancelledBy, cancelledAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        bookId: { type: string }
+        receiptId: { type: string, format: uuid }
+        allocationId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        orderLineId: { type: string, format: uuid }
+        quantity: { type: integer }
+        reason: { type: string }
+        cancelledBy: { type: string }
+        cancelledAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    ReceiptAllocation:
+      type: object
+      required: [id, tenantId, receiptId, orderId, orderLineId, quantity, allocatedBy, allocatedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        receiptId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        orderLineId: { type: string, format: uuid }
+        quantity: { type: integer }
+        allocatedBy: { type: string }
+        allocatedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    ExcessDecision:
+      type: object
+      required: [id, tenantId, receiptId, decision, quantity, reason, decidedBy, decidedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        receiptId: { type: string, format: uuid }
+        decision: { type: string, enum: [APPROVED, REJECTED] }
+        quantity: { type: integer }
+        reason: { type: string }
+        decidedBy: { type: string }
+        decidedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    ReceiptDefectResolution:
+      type: object
+      required: [id, tenantId, receiptId, purchaseOrderId, kind, quantity, outcome, evidence, resolvedBy, resolvedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        receiptId: { type: string, format: uuid }
+        purchaseOrderId: { type: string, format: uuid }
+        kind: { type: string, enum: [DAMAGED, MISDELIVERED] }
+        quantity: { type: integer }
+        outcome: { type: string, enum: [DISCARDED, RETURNED_TO_SUPPLIER, SUPPLIER_CREDIT] }
+        evidence: { type: string }
+        resolvedBy: { type: string }
+        resolvedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+    GoodsReceipt:
+      type: object
+      required: [id, tenantId, purchaseOrderId, poLineId, normalQuantity, excessQuantity, damagedQuantity, misdeliveredQuantity, inspectedBy, receivedAt, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        purchaseOrderId: { type: string, format: uuid }
+        poLineId: { type: string, format: uuid }
+        normalQuantity: { type: integer }
+        excessQuantity: { type: integer }
+        damagedQuantity: { type: integer }
+        misdeliveredQuantity: { type: integer }
+        inspectedBy: { type: string }
+        receivedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
     SourcingAllocation:
       type: object
       required: [id, tenantId, orderId, lineId, supplierCode, quantity, status]

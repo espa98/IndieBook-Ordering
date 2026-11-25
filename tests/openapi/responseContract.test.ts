@@ -218,3 +218,43 @@ describe("응답 계약(쓰기): 도서·공급처·발주·결제", () => {
   });
 });
 
+describe("응답 계약(쓰기): 입고·배분", () => {
+  it("입고·불량 처리·초과 결정·정정·배분·배분 취소·재배정·해제 응답이 선언한 스키마를 만족한다", async () => {
+    const checked: Checked[] = [];
+    const write = async (template: string, path: string, body: unknown, status: number) => {
+      const res = await call("POST", path, body);
+      expect(res.status, `${template} 상태 ${JSON.stringify(res.body)}`).toBe(status);
+      checked.push({ template, body: res.body });
+      return res.body.data;
+    };
+    const book = await call("POST", "/books", { source: "MANUAL", title: "입고 책", listPriceKrw: "9000", reason: "수기 등록", registeredAt: "2026-03-04T06:00:00.000Z" });
+    const bookId = book.body.data.id as string;
+    const lineOf = async (quantity: number) => {
+      const draft = await call("POST", "/orders", { lines: [{ bookId, quantity, unitPriceKrw: "9000" }] });
+      const confirmed = await call("POST", `/orders/${draft.body.data.id}/confirm`, { expectedVersion: 1 });
+      return { orderId: draft.body.data.id as string, lineId: confirmed.body.data.lines[0].lineId as string };
+    };
+    const first = await lineOf(3);
+    const second = await lineOf(2);
+    const sourcing = await call("POST", `/orders/${first.orderId}/lines/${first.lineId}/sourcing-allocations`, { supplierCode: "alpha", quantity: 3 });
+    const sourcingSecond = await call("POST", `/orders/${second.orderId}/lines/${second.lineId}/sourcing-allocations`, { supplierCode: "alpha", quantity: 2 });
+    const po = await call("POST", "/purchase-orders", { supplierCode: "alpha", allocationIds: [sourcing.body.data.id, sourcingSecond.body.data.id] });
+    const poId = po.body.data.id as string;
+    await call("POST", `/purchase-orders/${poId}/ready`, { expectedVersion: 1 });
+    await call("POST", `/purchase-orders/${poId}/delivery`, { expectedVersion: 2, method: "EMAIL", deliveredAt: "2026-03-04T07:00:00.000Z" });
+    const poLineId = (await call("GET", `/purchase-orders/${poId}`)).body.data.lines[0].poLineId as string;
+
+    const receipt = await write("/purchase-orders/{purchaseOrderId}/receipts", `/purchase-orders/${poId}/receipts`, { poLineId, normalQuantity: 6, damagedQuantity: 1, misdeliveredQuantity: 0, receivedAt: "2026-03-05T06:00:00.000Z" }, 201);
+    await write("/receipts/{receiptId}/defect-resolutions", `/receipts/${receipt.id}/defect-resolutions`, { kind: "DAMAGED", quantity: 1, outcome: "RETURNED_TO_SUPPLIER", evidence: "반품 접수증", resolvedAt: "2026-03-05T07:00:00.000Z" }, 201);
+    await write("/receipts/{receiptId}/excess-decisions", `/receipts/${receipt.id}/excess-decisions`, { decision: "APPROVED", quantity: 1, reason: "재고 편입 승인", decidedAt: "2026-03-05T07:10:00.000Z" }, 201);
+    const allocation = await write("/receipts/{receiptId}/allocations", `/receipts/${receipt.id}/allocations`, { orderId: first.orderId, orderLineId: first.lineId, quantity: 3, allocatedAt: "2026-03-05T07:20:00.000Z" }, 201);
+    await write("/allocations/{allocationId}/cancellations", `/allocations/${allocation.id}/cancellations`, { quantity: 1, reason: "고객 변심", cancelledAt: "2026-03-05T07:30:00.000Z" }, 201);
+    await write("/allocations/{allocationId}/reallocations", `/allocations/${allocation.id}/reallocations`, { toOrderId: second.orderId, toOrderLineId: second.lineId, quantity: 1, reason: "다른 주문에 배정", actedAt: "2026-03-05T07:40:00.000Z" }, 201);
+    await write("/allocations/{allocationId}/releases", `/allocations/${allocation.id}/releases`, { quantity: 1, reason: "배분 해제", releasedAt: "2026-03-05T07:50:00.000Z" }, 201);
+    await write("/receipts/{receiptId}/corrections", `/receipts/${receipt.id}/corrections`, { quantity: 1, reason: "수량 오기록", correctedAt: "2026-03-05T08:00:00.000Z" }, 201);
+
+    for (const { template } of checked) expect(declared(template, "post"), `${template} data 스키마`).toBe(true);
+    for (const { template, body } of checked) expect(conforms(template, body, "post"), template).toMatchObject({ ok: true });
+  });
+});
+
