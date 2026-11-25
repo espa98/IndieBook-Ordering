@@ -73,7 +73,7 @@
 | R5 | 레거시 정상 경로의 협소함 | 단일 품목 정상 경로만(문서 §미완료 3): 부분 입고·다중 로트·취소·환급·정정·동시성 미구현 | 낮음 | 신규가 이를 모두 포함. 레거시로 되돌릴 이유가 없다 |
 | R6 | 데이터 모델 재설계 | 레거시 `receipt_lots`/`receipt_dispositions`(8버킷 잔액 프로젝션) ↔ 신규 `goods_receipts`/`receipt_allocations`/해제·인도·취소·편입·반품 원장(잔량은 파생). 1:1 변환이 아니다 | 중간 | 이관이 필요한 데이터가 있을 때만 변환 스크립트를 쓴다. 개발 테스트 데이터면 폐기 |
 | R7 | 데이터 이관 범위 | 문서에는 개발용 가상 UUID·단일 주문 검증 데이터가 있다고 기록되었으나, **2026-11-25 점검에서 충돌하는 5개 테이블이 모두 0행**(사용자 보고). 나머지 레거시 테이블(`ordering_receipt_lots`, `ordering_payment_ledger`, `ordering_audit_ledger` 등)의 행 수는 미보고 | **낮음(5개 테이블은 확인됨)** | 5개 테이블은 이관할 데이터가 없다. 나머지 테이블의 행 수는 #10 전체 결과로 확인한다. 모두 0이면 이관 단계(백필)를 두지 않는다 |
-| R8 | `SECURITY DEFINER` 노출 | Security Advisor 경고 1건, 유출 비밀번호 보호 비활성 경고 | 중간 | 신규 경로로 전환한 뒤 레거시 RPC의 `authenticated` EXECUTE를 철회한다. **`REVOKE`는 파괴적이므로 별도 승인** |
+| R8 | `SECURITY DEFINER` 노출 | Security Advisor 경고 1건, 유출 비밀번호 보호 비활성 경고. **11-25 점검: 11개 모두 `SECURITY DEFINER`, `function_settings` 비어 있음(`search_path` 미고정, 보고 범위 확인 필요), `authenticated`에 노출된 것은 4개** | **높음(조건부)**: 노출된 4개가 미고정으로 확인되고 본문 방어도 없다면. 영향은 5개 테이블 0행·개발용 프로젝트라 제한적 | 신규 경로로 전환한 뒤 레거시 RPC의 `authenticated` EXECUTE를 철회한다. 그 전까지 위험을 줄이려면 함수 속성 고정이 최소 보강이다. **둘 다 레거시 변경이라 별도 승인** |
 | R9 | 감사 이력 | 레거시 `ordering_audit_ledger` ↔ 신규 `ordering_audit_log`는 별개 모델 | 낮음 | 이관하지 않고 레거시를 보존 기간 동안 읽기 전용으로 둔다(D29 미결정) |
 
 ## 6. 전환 옵션과 권고
@@ -114,7 +114,7 @@
 
 | 점검 | 상태 | 보고된 사실(출처: 사용자, 2026-11-25) |
 |---|---|---|
-| #1 함수 목록 | **부분** | 총 **11행**. 문서의 11개 함수가 모두 있고 문서에 없는 다른 `ordering%` 함수는 **없다**. `ordering_v23_request_close`는 **이제 DB에 있다**(문서 11-22에는 없음 → 그 이후 배포). **`authenticated` 실행 가능은 정확히 4개**: `ordering_v2_command`, `ordering_request_approval`, `ordering_decide_approval`, `ordering_v2_refund_confirm` — **문서와 같다.** `ordering_v23_request_close`를 포함한 나머지 7개는 `authenticated` 실행 **불가**. **`anon`이 실행할 수 있는 함수는 없다.** **11개 모두 `security_definer = true`**(트리거 함수 3개와 내부 함수 포함). 소유자·`function_settings`(`search_path` 고정 여부)·`service_role` 실행 권한은 **미보고** |
+| #1 함수 목록 | **부분** | 총 **11행**. 문서의 11개 함수가 모두 있고 문서에 없는 다른 `ordering%` 함수는 **없다**. `ordering_v23_request_close`는 **이제 DB에 있다**(문서 11-22에는 없음 → 그 이후 배포). **`authenticated` 실행 가능은 정확히 4개**: `ordering_v2_command`, `ordering_request_approval`, `ordering_decide_approval`, `ordering_v2_refund_confirm` — **문서와 같다.** `ordering_v23_request_close`를 포함한 나머지 7개는 `authenticated` 실행 **불가**. **`anon`이 실행할 수 있는 함수는 없다.** **11개 모두 `security_definer = true`**(트리거 함수 3개와 내부 함수 포함). **`function_settings`는 비어 있다**(사용자 보고, 11-25). 즉 `search_path`가 함수 속성으로 고정되어 있지 않다. 보고에는 11개 전체인지 노출된 4개만인지 구분이 없다(전체로 가정하지 않는다). 소유자·`service_role` 실행 권한은 **미보고** |
 | #2 함수 정의 | 미실행 | — |
 | #3 열 | 미실행 | — |
 | #4 제약 | 미실행 | — |
@@ -126,7 +126,7 @@
 | #10 테이블별 행 수 | **부분** | 이름이 겹치는 5개 테이블이 **모두 0행**: `ordering_tenants` 0, `ordering_members` 0, `ordering_orders` 0, `ordering_order_lines` 0, `ordering_commands` 0. 나머지 `ordering%` 테이블의 행 수는 **미보고** |
 | #11~#12 확장·서버 버전 | 미실행 | — |
 
-**#1에서 얻은 판단:** (1) 레거시 RPC 목록과 `authenticated` 노출 범위(4개)는 문서 그대로이므로 §3 인벤토리·§3.1 대응표·R8(노출된 `SECURITY DEFINER` 함수 4개)은 유효하다. (2) **`anon`이 실행할 수 있는 함수가 없으므로 비로그인 호출 경로는 막혀 있다**(함수 EXECUTE 기준. 실제 HTTP 접근은 별도). (3) 배포된 `ordering_v23_request_close`는 `authenticated`에 노출되지 않으므로 클라이언트가 직접 호출할 수 없고, 종결 RPC 노출 위험(R4·R8의 종결 부분)은 커지지 않았다. 호출 경로와 종결 불변식 검사 범위는 #2가 있어야 안다. (4) **11개 전부 `SECURITY DEFINER`라는 점은 `search_path` 고정 여부가 핵심 확인 사항이 된다.** 정의자 함수는 호출자가 아니라 소유자(보통 높은 권한) 권한으로 실행되므로 `search_path`가 고정되지 않으면 호출자가 만든 같은 이름의 객체로 가로채일 수 있다. 이 저장소의 신규 함수는 모두 `set search_path = ''`로 고정한다(마이그레이션 확인). 레거시 함수의 `function_settings`는 **미보고**이므로 판단할 수 없다. 노출된 4개에 고정이 없다면 R8의 심각도를 높이고, 전환 단계 5에서의 `authenticated` EXECUTE 철회를 앞당길 이유가 된다. (5) 문서가 11-22 이후 갱신되지 않았으므로 나머지 레거시 사실(§4의 열 구성 등)은 문서가 아니라 점검 결과로 확정해야 한다.
+**#1에서 얻은 판단:** (1) 레거시 RPC 목록과 `authenticated` 노출 범위(4개)는 문서 그대로이므로 §3 인벤토리·§3.1 대응표·R8(노출된 `SECURITY DEFINER` 함수 4개)은 유효하다. (2) **`anon`이 실행할 수 있는 함수가 없으므로 비로그인 호출 경로는 막혀 있다**(함수 EXECUTE 기준. 실제 HTTP 접근은 별도). (3) 배포된 `ordering_v23_request_close`는 `authenticated`에 노출되지 않으므로 클라이언트가 직접 호출할 수 없고, 종결 RPC 노출 위험(R4·R8의 종결 부분)은 커지지 않았다. 호출 경로와 종결 불변식 검사 범위는 #2가 있어야 안다. (4) **11개 전부 `SECURITY DEFINER`이고 `function_settings`가 비어 있다.** 정의자 함수는 호출자가 아니라 소유자(보통 높은 권한) 권한으로 실행되므로 `search_path`가 고정되지 않으면 호출자가 만든 같은 이름의 객체가 먼저 잡혀 가로채일 수 있다. 이 저장소의 신규 함수는 모두 `set search_path = ''`로 고정한다(마이그레이션 확인). 따라서 **노출된 4개 함수에 `search_path` 고정이 없다는 것이 확인되면(보고의 범위 확인 필요) R8은 "높음"이다.** 단, 함수 본문이 안에서 `set_config('search_path', …)`나 스키마 한정 이름만 쓰는 방어를 할 수 있으므로(#2로 확인) 속성이 비었다는 사실만으로 악용 가능하다고 단정하지는 않는다. 영향 범위는 제한적이다: 충돌하는 5개 테이블이 모두 0행이고 `ordering-dev`는 개발용 프로젝트이며 운영에 배포되지 않았다. (5) 옵션 A로 `ordering-dev`를 폐기할 계획이므로 이 취약점은 **레거시를 남겨 두는 기간에만** 문제가 된다. 그 기간을 줄이거나(E5-4), 폐기 전에 함수 속성만 고정하는 최소 보강(`alter function … set search_path`, 레거시 변경이므로 별도 승인 필요)을 선택지로 둔다. (6) 문서가 11-22 이후 갱신되지 않았으므로 나머지 레거시 사실(§4의 열 구성 등)은 문서가 아니라 점검 결과로 확정해야 한다.
 
 ## 8. 결정 요청
 
@@ -136,3 +136,4 @@
 | E5-2 | 전환 방식 | **A. 새 Supabase 프로젝트** | [ ] A [ ] B [ ] C [ ] 다른 방안: ______ |
 | E5-3 | 새 프로젝트 생성(비용·관리 주체) | E5-2가 A일 때 필요 | [ ] 승인 [ ] 보류 |
 | E5-4 | 레거시 RPC의 `authenticated` EXECUTE 철회와 `ordering-dev` 폐기 시점(파괴적, 백업 뒤) | 신규 경로 검증·전환 이후 | [ ] 시점: ______ |
+| E5-5 | 레거시 노출 함수 4개의 `search_path` 고정(`alter function … set search_path = ''`)을 폐기 전 임시 보강으로 할지 | `ordering-dev`가 개발용·0행이고 폐기 예정이라 **선택 사항**. 노출 기간이 길어질 때만 | [ ] 승인 [ ] 불필요 |
