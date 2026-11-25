@@ -904,3 +904,19 @@ describe("HTTP 서버: 공급처 조회 경로", () => {
     expect((await call(sup, { sub: "33333333-0000-4000-8000-0000000000ff" })).status).toBe(403);
   });
 });
+
+describe("HTTP 서버: 발주 조회 경로", () => {
+  it("직원도 발주 목록·상세를 읽고, 잘못된 쿼리·없는 발주·타 서점·비멤버는 거부된다", async () => {
+    const pos = `/v1/tenants/${T_A}/purchase-orders`;
+    expect((await call(pos, { sub: "33333333-0000-4000-8000-0000000000ff" })).status).toBe(403);
+    expect((await call(`${pos}?limit=0`, { sub: STAFF_A })).status).toBe(400);
+    expect((await call(`${pos}?status=BOGUS`, { sub: STAFF_A })).status).toBe(400);
+    expect((await call(`${pos}?unknown=1`, { sub: STAFF_A })).status).toBe(400);
+    expect((await call(`${pos}?cursor=zzz`, { sub: STAFF_A })).status).toBe(400);
+    const list = await call(`${pos}?status=DRAFT&limit=5`, { sub: STAFF_A });
+    expect(list.status).toBe(200);
+    expect(Array.isArray(list.json.data.items)).toBe(true);
+    expect((await call(`${pos}/0a000000-0000-4000-8000-00000000ffff`, { sub: STAFF_A })).status).toBe(404);
+    expect((await call(`/v1/tenants/${T_B}/purchase-orders/0a000000-0000-4000-8000-00000000ffff`, { sub: OWNER_B })).status).toBe(404);
+  });
+});

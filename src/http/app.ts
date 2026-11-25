@@ -294,6 +294,15 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       success: 200,
       run: (c) => reads.getSupplier(actor(c), { tenantId: t(c), code: c.params.code! }),
     }),
+    route("GET", "/purchase-orders", {
+      success: 200,
+      queryFields: ["limit", "cursor", "status", "supplierCode"],
+      run: (c) => reads.listPurchaseOrders(actor(c), { tenantId: t(c), ...int(c, "limit"), ...text(c, "cursor"), ...text(c, "status"), ...text(c, "supplierCode") }),
+    }),
+    route("GET", "/purchase-orders/(?<purchaseOrderId>[^/]+)", {
+      success: 200,
+      run: (c) => reads.getPurchaseOrder(actor(c), { tenantId: t(c), purchaseOrderId: c.params.purchaseOrderId! }),
+    }),
     route("GET", "/books", {
       success: 200,
       queryFields: ["limit", "cursor", "isbn"],

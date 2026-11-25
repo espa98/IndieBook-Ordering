@@ -2247,6 +2247,46 @@ paths:
   /v1/tenants/{tenantId}/purchase-orders:
     parameters:
       - $ref: "ordering.yaml#/components/parameters/TenantId"
+    get:
+      tags: [reads]
+      operationId: listPurchaseOrders
+      summary: listPurchaseOrders
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: supplierCode
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
     post:
       tags: [procurement]
       operationId: createPurchaseOrder
@@ -2280,6 +2320,35 @@ paths:
           $ref: "ordering.yaml#/components/responses/Conflict"
         "422":
           $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/purchase-orders/{purchaseOrderId}:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: purchaseOrderId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [reads]
+      operationId: getPurchaseOrder
+      summary: getPurchaseOrder
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/purchase-orders/{purchaseOrderId}/ready:

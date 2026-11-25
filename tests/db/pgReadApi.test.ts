@@ -214,3 +214,46 @@ describe("공급처 상세 (읽기 API)", () => {
     expect(await codeOf(() => read().getSupplier({ userId: STRANGER }, { tenantId: T_A, code: "zeta" }))).toBe("FORBIDDEN");
   });
 });
+
+describe("발주 조회 (읽기 API)", () => {
+  const PO = (n: number) => `c0000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  const sql = async (text: string, params: unknown[] = []) => {
+    const c = await db.connect();
+    try {
+      return (await c.query(text, params)).rows;
+    } finally {
+      await c.end();
+    }
+  };
+
+  it("발주 목록은 최신순·상태/공급처 필터·페이지로 읽고, 상세는 품목과 주문 연결을 담으며, 다른 서점·없는 발주는 404이다", async () => {
+    const orders = createPgOrderApi({ pool: db.pool() });
+    const draft = await orders.createOrder(owner, { tenantId: T_A, idempotencyKey: key(), lines: [{ bookId: "b0000000-0000-4000-8000-000000000001", quantity: 2, unitPriceKrw: "10000" }] });
+    const order = await orders.confirmOrder(owner, { tenantId: T_A, orderId: draft.id, expectedVersion: 1, idempotencyKey: key() });
+    const lineId = order.lines[0]!.lineId;
+    for (let n = 1; n <= 3; n++) {
+      await sql(`insert into public.ordering_purchase_orders (id, tenant_id, supplier_code, status, created_at) values ($1, $2, $3, $4, now() - make_interval(mins => $5))`, [PO(n), T_A, n === 3 ? "zeta" : "alpha", n === 2 ? "SENT" : "DRAFT", 10 - n]);
+    }
+    await sql(`insert into public.ordering_purchase_orders (id, tenant_id, supplier_code, status) values ($1, $2, 'beta', 'DRAFT')`, [PO(9), T_B]);
+    const poLine = (await sql(`insert into public.ordering_po_lines (tenant_id, purchase_order_id, book_key, quantity) values ($1, $2, 'b0000000-0000-4000-8000-000000000001', 2) returning id`, [T_A, PO(1)]))[0].id as string;
+    const alloc = (await sql(`insert into public.ordering_sourcing_allocations (tenant_id, order_id, order_line_id, supplier_code, quantity) values ($1, $2, $3, 'alpha', 2) returning id`, [T_A, order.id, lineId]))[0].id as string;
+    await sql(`insert into public.ordering_po_links (tenant_id, po_line_id, allocation_id, order_id, order_line_id, quantity) values ($1, $2, $3, $4, $5, 2)`, [T_A, poLine, alloc, order.id, lineId]);
+
+    const all = await read().listPurchaseOrders(staff, { tenantId: T_A });
+    expect(all.items.map((p) => p.id)).toEqual([PO(3), PO(2), PO(1)]);
+    expect((await read().listPurchaseOrders(staff, { tenantId: T_A, status: "SENT" })).items.map((p) => p.id)).toEqual([PO(2)]);
+    expect((await read().listPurchaseOrders(staff, { tenantId: T_A, supplierCode: "alpha" })).items.map((p) => p.id)).toEqual([PO(2), PO(1)]);
+    const first = await read().listPurchaseOrders(staff, { tenantId: T_A, limit: 2 });
+    expect(first.items.map((p) => p.id)).toEqual([PO(3), PO(2)]);
+    expect((await read().listPurchaseOrders(staff, { tenantId: T_A, limit: 2, cursor: first.nextCursor })).items.map((p) => p.id)).toEqual([PO(1)]);
+
+    const detail = await read().getPurchaseOrder(staff, { tenantId: T_A, purchaseOrderId: PO(1) });
+    expect(detail).toMatchObject({ id: PO(1), supplierCode: "alpha", status: "DRAFT", version: 1 });
+    expect(detail.lines[0]).toMatchObject({ poLineId: poLine, quantity: 2, links: [{ allocationId: alloc, orderId: order.id, orderLineId: lineId, quantity: 2 }] });
+
+    expect(await codeOf(() => read().getPurchaseOrder(staff, { tenantId: T_A, purchaseOrderId: PO(9) }))).toBe("NOT_FOUND");
+    expect(await codeOf(() => read().getPurchaseOrder(staff, { tenantId: T_A, purchaseOrderId: "not-a-uuid" }))).toBe("NOT_FOUND");
+    expect(await codeOf(() => read().listPurchaseOrders(staff, { tenantId: T_A, status: "BOGUS" }))).toBe("VALIDATION_ERROR");
+    expect(await codeOf(() => read().listPurchaseOrders({ userId: STRANGER }, { tenantId: T_A }))).toBe("FORBIDDEN");
+  });
+});

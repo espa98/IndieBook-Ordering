@@ -7,6 +7,7 @@ import { notificationState, type NotificationStatus } from "../notification/noti
 import type { NotificationTarget } from "../notification/createNotificationTarget";
 import type { NotificationAttempt } from "../notification/recordNotificationAttempt";
 import type { NotificationResult } from "../notification/recordNotificationResult";
+import type { PurchaseOrder } from "../procurement/createPurchaseOrder";
 import type { Supplier } from "../procurement/allocateSourcing";
 import { toBook } from "./pgCatalogApi";
 import { toSupplier } from "./pgSupplierApi";
@@ -73,6 +74,37 @@ const toRevision = (r: any): BookRevision => ({
   changedBy: r.changed_by,
   changedAt: r.changed_at.toISOString(),
 });
+
+const PO_STATUSES = ["DRAFT", "READY", "SENT", "ACKNOWLEDGED", "CANCELLED", "CLOSED"];
+
+export type ListPurchaseOrdersRequest = { tenantId: string; limit?: number; cursor?: string; status?: string; supplierCode?: string };
+
+/** 발주 행들에 품목·주문 연결을 붙여 도메인 객체로 만든다 */
+async function toPurchaseOrders(client: PoolClient, tenantId: string, pos: any[]): Promise<PurchaseOrder[]> {
+  const ids = pos.map((p) => p.id);
+  const lines = (await client.query("select * from public.ordering_po_lines where tenant_id = $1 and purchase_order_id = any($2::uuid[]) order by id", [tenantId, ids])).rows;
+  const links = (await client.query("select * from public.ordering_po_links where tenant_id = $1 and po_line_id = any($2::uuid[]) order by id", [tenantId, lines.map((l) => l.id)])).rows;
+  return pos.map((po) => ({
+    id: po.id,
+    tenantId: po.tenant_id,
+    supplierCode: po.supplier_code,
+    status: po.status,
+    version: Number(po.version),
+    lines: lines
+      .filter((l) => l.purchase_order_id === po.id)
+      .map((l) => ({
+        poLineId: l.id,
+        bookId: l.book_key,
+        quantity: l.quantity,
+        links: links.filter((k) => k.po_line_id === l.id).map((k) => ({ allocationId: k.allocation_id, orderId: k.order_id, orderLineId: k.order_line_id, quantity: k.quantity })),
+      })),
+    ...(po.delivery === null ? {} : { delivery: po.delivery }),
+    ...(po.cancelled_at === null ? {} : { cancelledAt: po.cancelled_at.toISOString() }),
+    ...(po.cancelled_by === null ? {} : { cancelledBy: po.cancelled_by }),
+    ...(po.cancel_reason === null ? {} : { cancelReason: po.cancel_reason }),
+    ...(po.closed_at === null ? {} : { closedAt: po.closed_at.toISOString() }),
+  }));
+}
 
 export type ListBooksRequest = { tenantId: string; limit?: number; cursor?: string; isbn?: string };
 
@@ -184,6 +216,38 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
         const supplier = toSupplier((await client.query("select * from public.ordering_suppliers where tenant_id = $1 and code = $2", [request.tenantId, request.code])).rows[0]);
         if (!supplier) throw new AppError("NOT_FOUND");
         return supplier;
+      }),
+
+    getPurchaseOrder: (actor: Actor, request: { tenantId: string; purchaseOrderId: string }): Promise<PurchaseOrder> =>
+      asMember(actor, request.tenantId, async (client) => {
+        const row = isUuid(request.purchaseOrderId) ? (await client.query("select * from public.ordering_purchase_orders where tenant_id = $1 and id = $2", [request.tenantId, request.purchaseOrderId])).rows[0] : undefined;
+        if (!row) throw new AppError("NOT_FOUND");
+        return (await toPurchaseOrders(client, request.tenantId, [row]))[0]!;
+      }),
+
+    /** 최신순(생성 시각 내림차순). 상태·공급처로 거를 수 있다 */
+    listPurchaseOrders: (actor: Actor, request: ListPurchaseOrdersRequest): Promise<{ items: PurchaseOrder[]; nextCursor?: string }> =>
+      asMember(actor, request.tenantId, async (client) => {
+        const limit = pageSize(request.limit);
+        if (request.status !== undefined && !PO_STATUSES.includes(request.status)) throw validation("invalid status");
+        const after = request.cursor === undefined ? undefined : decodeCursor(request.cursor, 2);
+        if (after && Number.isNaN(Date.parse(after[0]!))) throw validation("invalid cursor");
+        if (after && !isUuid(after[1]!)) throw validation("invalid cursor");
+        const rows = (
+          await client.query(
+            `select *, created_at::text as created_at_text from public.ordering_purchase_orders
+              where tenant_id = $1
+                and ($2::text is null or status = $2)
+                and ($3::text is null or supplier_code = $3)
+                and ($4::text is null or (created_at, id) < ($4::timestamptz, $5::uuid))
+              order by created_at desc, id desc
+              limit $6`,
+            [request.tenantId, request.status ?? null, request.supplierCode ?? null, after?.[0] ?? null, after?.[1] ?? null, limit + 1],
+          )
+        ).rows;
+        const page = rows.slice(0, limit);
+        const last = page[page.length - 1];
+        return { items: await toPurchaseOrders(client, request.tenantId, page), ...(rows.length > limit && last ? { nextCursor: encodeCursor([last.created_at_text, last.id]) } : {}) };
       }),
 
     listBooks: (actor: Actor, request: ListBooksRequest): Promise<{ items: Book[]; nextCursor?: string }> =>
