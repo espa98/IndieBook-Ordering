@@ -428,6 +428,16 @@ describe("응답 계약(쓰기): 주문 취소·종결·취소 물량 처분·�
     await write("/return-requests/{requestId}/renegotiations", `/return-requests/${returnRequest.id}/renegotiations`, { quantity: 1, retryReason: "재협의", requestedAt: "2026-03-05T08:30:00.000Z" }, 201);
     await write("/return-requests/{requestId}/completions", `/return-requests/${returnRequest.id}/completions`, { quantity: 2, evidence: "반품 완료 확인", confirmedAt: "2026-03-05T08:40:00.000Z" }, 201);
 
+    // 취소 물량 처분 현황(R-01·R-03): 편입·반품·예외·재협의·완료를 거친 물량이 선언한 스키마를 만족하고 다섯 수량의 합이 취소 수량과 같다
+    const dispositionList = await call("GET", "/allocation-cancellations");
+    expect(dispositionList.status).toBe(200);
+    expect(dispositionList.body.data.items.length).toBeGreaterThan(0);
+    for (const item of dispositionList.body.data.items as Record<string, number>[]) {
+      expect(item.pendingDispositionQuantity! + item.stockTransferredQuantity! + item.returnHeldQuantity! + item.returnDispatchedQuantity! + item.returnedFinalQuantity!, JSON.stringify(item)).toBe(item.quantity);
+    }
+    expect(declared("/allocation-cancellations", "get"), "처분 현황 data 스키마").toBe(true);
+    expect(conforms("/allocation-cancellations", dispositionList.body)).toMatchObject({ ok: true });
+
     for (const { template } of checked) expect(declared(template, "post"), `${template} data 스키마`).toBe(true);
     for (const { template, body } of checked) expect(conforms(template, body, "post"), template).toMatchObject({ ok: true });
   });
@@ -498,6 +508,16 @@ describe("응답 계약(쓰기): 환급", () => {
     const attempt = await write("/refund-tasks/{taskId}/refund-attempts", `/refund-tasks/${task.id}/refund-attempts`, { paymentId, amountKrw: "2000", result: "UNKNOWN", reason: "이체 결과 불명", reportedAt: "2026-03-04T07:20:00.000Z" }, 201);
     await write("/refund-attempts/{attemptId}/resolution", `/refund-attempts/${attempt.id}/resolution`, { outcome: "CONFIRMED", evidence: "이체 내역 확인", resolvedAt: "2026-03-04T07:30:00.000Z" }, 201);
     await write("/refund-requests/{requestId}/decision", `/refund-requests/${request.id}/decision`, { decision: "APPROVED", decidedAt: "2026-03-04T07:40:00.000Z" }, 200);
+
+    // 환급 필요 업무 목록(O-09-04): 요청·시도가 있는 업무가 선언한 스키마를 만족한다
+    const tasks = await call("GET", "/refund-tasks");
+    expect(tasks.status).toBe(200);
+    const mine = tasks.body.data.items.find((i: { id: string }) => i.id === task.id);
+    expect(mine).toMatchObject({ orderId, status: "PARTIAL", pendingRequests: 0, unresolvedAttempts: 0 }); // 승인된 요청이 일부를 환급했고 시도는 해소됐다
+    expect(BigInt(mine.refundedKrw) + BigInt(mine.remainingKrw)).toBe(BigInt(mine.requiredKrw));
+    expect(declared("/refund-tasks", "get"), "환급 업무 data 스키마").toBe(true);
+    expect(conforms("/refund-tasks", tasks.body)).toMatchObject({ ok: true });
+    expect(JSON.stringify(tasks.body)).not.toMatch(/evidence|증빙/);
 
     for (const { template } of checked) expect(declared(template, "post"), `${template} data 스키마`).toBe(true);
     for (const { template, body } of checked) expect(conforms(template, body, "post"), template).toMatchObject({ ok: true });

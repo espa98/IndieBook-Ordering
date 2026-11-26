@@ -242,6 +242,42 @@ export type OrderSettlement = {
 };
 export type ListOrderSettlementsRequest = { tenantId: string; limit?: number; cursor?: string; unpaid?: boolean; undelivered?: boolean; includeClosed?: boolean };
 
+/** 환급 필요 업무 목록(O-09-04)의 한 줄. 증빙·사유 원문은 싣지 않는다 */
+export type RefundTaskItem = {
+  id: string;
+  orderId: string;
+  orderDisplayNumber?: number;
+  requiredKrw: string;
+  refundedKrw: string;
+  remainingKrw: string;
+  status: "REFUND_REQUIRED" | "PARTIAL" | "REFUNDED";
+  openedAt: string;
+  /** 승인·거절·철회가 아직 없는 환급 요청 수 */
+  pendingRequests: number;
+  /** 불명확(UNKNOWN) 결과를 보고했지만 아직 해소하지 않은 시도 수. 한도를 예약한다 */
+  unresolvedAttempts: number;
+};
+export type ListRefundTasksRequest = { tenantId: string; limit?: number; cursor?: string; status?: RefundTaskItem["status"]; open?: boolean };
+const REFUND_TASK_STATUSES: readonly RefundTaskItem["status"][] = ["REFUND_REQUIRED", "PARTIAL", "REFUNDED"];
+
+/** 취소 물량 처분 현황(R-01·R-03)의 한 줄. 다섯 수량의 합은 취소 수량과 같다 */
+export type AllocationCancellationItem = {
+  id: string;
+  receiptId: string;
+  orderId: string;
+  orderLineId: string;
+  bookKey: string;
+  quantity: number;
+  cancelledAt: string;
+  /** 처분을 기다리는 수량(재고 편입·반품 요청 전, 반품 거절·회수로 돌아온 것 포함) */
+  pendingDispositionQuantity: number;
+  stockTransferredQuantity: number;
+  returnHeldQuantity: number;
+  returnDispatchedQuantity: number;
+  returnedFinalQuantity: number;
+};
+export type ListAllocationCancellationsRequest = { tenantId: string; limit?: number; cursor?: string; open?: boolean };
+
 /** 대시보드(O-01) 서버 집계 */
 export type Dashboard = {
   orders: { draft: number; held: number; discarded: number; confirmed: number };
@@ -420,6 +456,121 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
         const page = rows.slice(0, limit);
         const last = page[page.length - 1];
         return { items: page.map(toStockLevel), ...(rows.length > limit && last ? { nextCursor: encodeCursor([last.book_key]) } : {}) };
+      }),
+
+    /**
+     * 취소 물량 처분 현황(R-01·R-03): 취소로 풀린 배분 물량을 최근 취소 순으로. 취소 물량마다 8버킷 중 처분 대기·재고 편입·반품 보관·반품 출고·반품 완료를
+     * 원장에서 파생한다(`receiptBuckets`의 이동 규칙): 대기 = 취소 − 편입 − 반품 요청 + 거절 + 회수, 보관 = 요청 − 거절 − 출고,
+     * 출고 = 출고 − 완료 − 예외 해소(회수·최종 반송), 완료 = 완료 + 최종 반송. `open=true`는 처분이 끝나지 않은(대기·보관·출고가 남은) 물량만.
+     */
+    listAllocationCancellations: (actor: Actor, request: ListAllocationCancellationsRequest): Promise<{ items: AllocationCancellationItem[]; nextCursor?: string }> =>
+      asMember(actor, request.tenantId, async (client) => {
+        const limit = pageSize(request.limit);
+        if (request.open !== undefined && typeof request.open !== "boolean") throw validation("open must be a boolean");
+        const after = request.cursor === undefined ? undefined : decodeCursor(request.cursor, 2);
+        if (after && (Number.isNaN(Date.parse(after[0]!)) || !isUuid(after[1]!))) throw validation("invalid cursor");
+        const rows = (
+          await client.query(
+            `select * from (
+               select c.id, c.receipt_id, c.order_id, c.order_line_id, l.book_key, c.quantity, c.cancelled_at, c.cancelled_at::text as cancelled_at_text,
+                      c.quantity - v.intake - v.requested + v.rejected + v.recovered as pending,
+                      v.intake as transferred,
+                      v.requested - v.rejected - v.dispatched as held,
+                      v.dispatched - v.completed - v.recovered - v.returned_final as dispatched,
+                      v.completed + v.returned_final as final
+                 from public.ordering_allocation_cancellations c
+                 join public.ordering_goods_receipts g on g.tenant_id = c.tenant_id and g.id = c.receipt_id
+                 join public.ordering_po_lines l on l.tenant_id = g.tenant_id and l.id = g.po_line_id
+                 cross join lateral (
+                   select coalesce((select sum(i.quantity) from public.ordering_stock_intakes i where i.tenant_id = c.tenant_id and i.cancellation_id = c.id), 0)::int as intake,
+                          coalesce((select sum(r.quantity) from public.ordering_return_requests r where r.tenant_id = c.tenant_id and r.cancellation_id = c.id), 0)::int as requested,
+                          coalesce((select sum(p.rejected_quantity) from public.ordering_return_replies p join public.ordering_return_requests r on r.tenant_id = p.tenant_id and r.id = p.return_request_id where r.tenant_id = c.tenant_id and r.cancellation_id = c.id), 0)::int as rejected,
+                          coalesce((select sum(d.quantity) from public.ordering_return_dispatches d join public.ordering_return_requests r on r.tenant_id = d.tenant_id and r.id = d.return_request_id where r.tenant_id = c.tenant_id and r.cancellation_id = c.id), 0)::int as dispatched,
+                          coalesce((select sum(m.quantity) from public.ordering_return_completions m join public.ordering_return_requests r on r.tenant_id = m.tenant_id and r.id = m.return_request_id where r.tenant_id = c.tenant_id and r.cancellation_id = c.id), 0)::int as completed,
+                          coalesce((select sum(s.quantity) from public.ordering_return_exception_resolutions s join public.ordering_return_exceptions e on e.tenant_id = s.tenant_id and e.id = s.return_exception_id join public.ordering_return_requests r on r.tenant_id = e.tenant_id and r.id = e.return_request_id where r.tenant_id = c.tenant_id and r.cancellation_id = c.id and s.outcome = 'RECOVERED'), 0)::int as recovered,
+                          coalesce((select sum(s.quantity) from public.ordering_return_exception_resolutions s join public.ordering_return_exceptions e on e.tenant_id = s.tenant_id and e.id = s.return_exception_id join public.ordering_return_requests r on r.tenant_id = e.tenant_id and r.id = e.return_request_id where r.tenant_id = c.tenant_id and r.cancellation_id = c.id and s.outcome = 'RETURNED'), 0)::int as returned_final
+                 ) v
+                where c.tenant_id = $1) s
+              where ($2::boolean is not true or s.pending + s.held + s.dispatched > 0)
+                and ($3::text is null or (s.cancelled_at, s.id) < ($3::timestamptz, $4::uuid))
+              order by s.cancelled_at desc, s.id desc
+              limit $5`,
+            [request.tenantId, request.open === true ? true : null, after?.[0] ?? null, after?.[1] ?? null, limit + 1],
+          )
+        ).rows;
+        const page = rows.slice(0, limit);
+        const last = page[page.length - 1];
+        const items = page.map((r): AllocationCancellationItem => ({
+          id: r.id,
+          receiptId: r.receipt_id,
+          orderId: r.order_id,
+          orderLineId: r.order_line_id,
+          bookKey: r.book_key,
+          quantity: r.quantity,
+          cancelledAt: (r.cancelled_at as Date).toISOString(),
+          pendingDispositionQuantity: r.pending,
+          stockTransferredQuantity: r.transferred,
+          returnHeldQuantity: r.held,
+          returnDispatchedQuantity: r.dispatched,
+          returnedFinalQuantity: r.final,
+        }));
+        return { items, ...(rows.length > limit && last ? { nextCursor: encodeCursor([last.cancelled_at_text, last.id]) } : {}) };
+      }),
+
+    /**
+     * 환급 필요 업무 목록(O-09-04): 서점의 환급 업무를 최신 개시 순으로. 상태·잔량은 환급 확인 합계에서 파생한다(`refundTaskState`와 같은 규칙:
+     * 0이면 REFUND_REQUIRED, 남으면 PARTIAL, 다 하면 REFUNDED). `open=true`는 완료되지 않은 업무만, `status`로도 거를 수 있다.
+     * 미결 요청 수(결정이 없는 요청)와 미해소 시도 수(해소가 없는 UNKNOWN 시도)를 함께 돌려준다. 증빙·사유 원문은 싣지 않는다.
+     */
+    listRefundTasks: (actor: Actor, request: ListRefundTasksRequest): Promise<{ items: RefundTaskItem[]; nextCursor?: string }> =>
+      asMember(actor, request.tenantId, async (client) => {
+        const limit = pageSize(request.limit);
+        if (request.status !== undefined && !REFUND_TASK_STATUSES.includes(request.status)) throw validation("invalid status");
+        if (request.open !== undefined && typeof request.open !== "boolean") throw validation("open must be a boolean");
+        const after = request.cursor === undefined ? undefined : decodeCursor(request.cursor, 2);
+        if (after && (Number.isNaN(Date.parse(after[0]!)) || !isUuid(after[1]!))) throw validation("invalid cursor");
+        const rows = (
+          await client.query(
+            `select * from (
+               select k.id, k.order_id, o.display_number, k.required_krw, k.opened_at, k.opened_at::text as opened_at_text, x.refunded,
+                      case when x.refunded = 0 then 'REFUND_REQUIRED' when x.refunded >= k.required_krw then 'REFUNDED' else 'PARTIAL' end as status,
+                      (select count(*)::int from public.ordering_refund_requests q
+                        where q.tenant_id = k.tenant_id and q.refund_task_id = k.id
+                          and not exists (select 1 from public.ordering_refund_request_decisions d where d.tenant_id = q.tenant_id and d.request_id = q.id)) as pending_requests,
+                      (select count(*)::int from public.ordering_refund_attempts a
+                        where a.tenant_id = k.tenant_id and a.refund_task_id = k.id and a.result = 'UNKNOWN'
+                          and not exists (select 1 from public.ordering_refund_attempt_resolutions r where r.tenant_id = a.tenant_id and r.attempt_id = a.id)) as unresolved_attempts
+                 from public.ordering_refund_tasks k
+                 join public.ordering_orders o on o.tenant_id = k.tenant_id and o.id = k.order_id
+                 cross join lateral (select coalesce(sum(c.amount_krw), 0) as refunded from public.ordering_refund_confirmations c where c.tenant_id = k.tenant_id and c.refund_task_id = k.id) x
+                where k.tenant_id = $1) s
+              where ($2::text is null or s.status = $2)
+                and ($3::boolean is not true or s.status <> 'REFUNDED')
+                and ($4::text is null or (s.opened_at, s.id) < ($4::timestamptz, $5::uuid))
+              order by s.opened_at desc, s.id desc
+              limit $6`,
+            [request.tenantId, request.status ?? null, request.open === true ? true : null, after?.[0] ?? null, after?.[1] ?? null, limit + 1],
+          )
+        ).rows;
+        const page = rows.slice(0, limit);
+        const last = page[page.length - 1];
+        const items = page.map((r): RefundTaskItem => {
+          const required = BigInt(String(r.required_krw));
+          const refunded = BigInt(String(r.refunded));
+          return {
+            id: r.id,
+            orderId: r.order_id,
+            ...(r.display_number === null ? {} : { orderDisplayNumber: Number(r.display_number) }),
+            requiredKrw: required.toString(),
+            refundedKrw: refunded.toString(),
+            remainingKrw: (required > refunded ? required - refunded : 0n).toString(),
+            status: r.status,
+            openedAt: (r.opened_at as Date).toISOString(),
+            pendingRequests: r.pending_requests,
+            unresolvedAttempts: r.unresolved_attempts,
+          };
+        });
+        return { items, ...(rows.length > limit && last ? { nextCursor: encodeCursor([last.opened_at_text, last.id]) } : {}) };
       }),
 
     /**

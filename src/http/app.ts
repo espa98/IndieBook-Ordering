@@ -404,6 +404,31 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       success: 200,
       run: (c) => reads.listNotificationTargets(actor(c), { tenantId: t(c), orderId: c.params.orderId! }),
     }),
+    route("GET", "/allocation-cancellations", {
+      success: 200,
+      queryFields: ["limit", "cursor", "open"],
+      run: (c) =>
+        reads.listAllocationCancellations(actor(c), {
+          tenantId: t(c),
+          ...int(c, "limit"),
+          ...text(c, "cursor"),
+          // "true"/"false"만 불리언으로 바꾼다. 그 밖의 값은 문자열 그대로 두어 어댑터가 400으로 거부한다
+          ...(c.query.has("open") ? { open: ({ true: true, false: false } as Record<string, boolean>)[c.query.get("open") as string] ?? (c.query.get("open") as never) } : {}),
+        }),
+    }),
+    route("GET", "/refund-tasks", {
+      success: 200,
+      queryFields: ["limit", "cursor", "status", "open"],
+      run: (c) =>
+        reads.listRefundTasks(actor(c), {
+          tenantId: t(c),
+          ...int(c, "limit"),
+          ...text(c, "cursor"),
+          ...(c.query.has("status") ? { status: c.query.get("status") as never } : {}),
+          // "true"/"false"만 불리언으로 바꾼다. 그 밖의 값은 문자열 그대로 두어 어댑터가 400으로 거부한다
+          ...(c.query.has("open") ? { open: ({ true: true, false: false } as Record<string, boolean>)[c.query.get("open") as string] ?? (c.query.get("open") as never) } : {}),
+        }),
+    }),
     route("GET", "/order-settlements", {
       success: 200,
       queryFields: ["limit", "cursor", "unpaid", "undelivered", "includeClosed"],
