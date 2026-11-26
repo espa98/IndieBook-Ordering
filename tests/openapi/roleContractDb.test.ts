@@ -36,9 +36,10 @@ const OWNER_ONLY_ROUTES: Record<string, string> = {
   inviteStaff: "POST /v1/tenants/{tenantId}/staff-invitations",
   revokeInvitation: "POST /v1/tenants/{tenantId}/staff-invitations/{invitationId}/revocation",
   setMembershipStatus: "POST /v1/tenants/{tenantId}/members/{targetUserId}/status",
+  setDelegation: "POST /v1/tenants/{tenantId}/members/{targetUserId}/delegations",
 };
 /** Owner만 읽는 조회 경로(권한 규칙이 명령 모음이 아니라 어댑터에 있다) */
-const OWNER_ONLY_READS = ["GET /v1/tenants/{tenantId}/audit-log", "GET /v1/tenants/{tenantId}/members", "GET /v1/tenants/{tenantId}/staff-invitations"];
+const OWNER_ONLY_READS = ["GET /v1/tenants/{tenantId}/audit-log", "GET /v1/tenants/{tenantId}/members", "GET /v1/tenants/{tenantId}/staff-invitations", "GET /v1/tenants/{tenantId}/delegations"];
 /** Owner 전용이지만 HTTP 경로가 없는 명령(다른 명령 안에서만 실행된다) */
 const OWNER_ONLY_WITHOUT_ROUTE = ["confirmRefund"];
 

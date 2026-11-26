@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
 import { acceptInvitation } from "../auth/acceptInvitation";
+import type { DelegationChange, DelegationKind, SetDelegationRequest } from "../auth/setDelegation";
 import { authorizedActions } from "../auth/authorizedActions";
 import type { Membership } from "../auth/authorizeTenantAccess";
 import { hashInvitationToken, type InvitationEvent, type InviteStaffRequest, type StaffInvitation } from "../auth/inviteStaff";
@@ -24,6 +25,10 @@ const iso = (value: Date) => value.toISOString();
 export type InviteStaffBody = Omit<InviteStaffRequest, "actorRole" | "invitedBy">;
 /** 클라이언트에 나가는 초대: 서버 내부 값인 토큰 해시는 뺀다(토큰 원문은 처음 응답에만 있다) */
 export type InviteStaffResult = { invitation: Omit<StaffInvitation, "tokenHash">; token: string };
+/** 위임 부여·회수 요청 본문. 행위자(역할·이름)는 인증된 사용자에서 주입된다 */
+export type SetDelegationBody = Omit<SetDelegationRequest, "actorRole" | "changedBy">;
+/** 현재 위임의 한 줄(S-03) */
+export type DelegationView = { userId: string; kind: DelegationKind; delegatedBy: string; delegatedAt: string };
 /** 직원 목록의 한 줄(S-02). 이름·이메일은 인증 제공자에만 있어 사용자 ID로 식별한다 */
 export type MemberView = { userId: string; role: "OWNER" | "STAFF"; status: "ACTIVE" | "INACTIVE"; joinedAt: string };
 /** 초대 목록의 한 줄. 토큰 원문·해시는 없다 */
@@ -181,6 +186,52 @@ export function createPgStaffApi(deps: { pool: PoolLike; now?: () => Date }) {
       return result;
     });
 
+  const DELEGATION_TABLE: Record<DelegationKind, string> = {
+    MANAGEMENT: "public.ordering_management_delegations",
+    STOCK_ADJUSTMENT: "public.ordering_stock_delegations",
+  };
+
+  /** Owner가 직원에게 위임을 주고 거둔다. 서점의 멤버 행을 잠가 같은 서점의 동시 변경을 직렬화한다(같은 위임의 동시 부여는 하나만 성공) */
+  const delegationOnce = (actor: Actor, request: SetDelegationBody) =>
+    inTransaction(deps.pool, "service_role", actor.userId, async (client) => {
+      const principal = principalFor(await loadMembership(client, actor.userId, request.tenantId), actor.userId, request.tenantId);
+      const members: Membership[] = isUuid(request.tenantId)
+        ? (await client.query("select user_id, tenant_id, role, active from public.ordering_members where tenant_id = $1 order by user_id for update", [request.tenantId])).rows.map(
+            (m): Membership => ({ userId: m.user_id, tenantId: m.tenant_id, role: m.role, status: m.active ? "ACTIVE" : "INACTIVE" }),
+          )
+        : [];
+      const granted = new Set<string>();
+      if (isUuid(request.tenantId)) {
+        for (const kind of Object.keys(DELEGATION_TABLE) as DelegationKind[]) {
+          for (const r of (await client.query(`select user_id from ${DELEGATION_TABLE[kind]} where tenant_id = $1`, [request.tenantId])).rows) granted.add(`${r.user_id}/${kind}`);
+        }
+      }
+      const idempotency = await loadCommands(client, request.tenantId, request.idempotencyKey);
+      const known = new Set(idempotency.keys());
+      const saved: DelegationChange[] = [];
+      const { tenantId: _t, ...rest } = request;
+      void _t;
+      const result = authorizedActions.setDelegation(
+        {
+          memberships: { find: (userId, tenantId) => members.find((m) => m.userId === userId && m.tenantId === tenantId) },
+          delegations: { isDelegated: (_tenant, userId, kind) => granted.has(`${userId}/${kind}`), save: (c) => void saved.push(c) },
+          idempotency,
+        },
+        principal,
+        rest,
+      );
+      for (const c of saved) {
+        if (c.delegated) {
+          await client.query(`insert into ${DELEGATION_TABLE[c.kind]} (tenant_id, user_id, delegated_by, delegated_at) values ($1, $2, $3, $4)`, [c.tenantId, c.userId, c.changedBy, c.changedAt]);
+        } else {
+          await client.query(`delete from ${DELEGATION_TABLE[c.kind]} where tenant_id = $1 and user_id = $2`, [c.tenantId, c.userId]);
+        }
+        await client.query("insert into public.ordering_delegation_changes (id, tenant_id, user_id, kind, delegated, changed_by, changed_at) values ($1, $2, $3, $4, $5, $6, $7)", [c.id, c.tenantId, c.userId, c.kind, c.delegated, c.changedBy, c.changedAt]);
+      }
+      await saveNewCommands(client, idempotency, known);
+      return result;
+    });
+
   /** 계정(사용자 ID와 인증 제공자가 확인한 이메일)이 초대를 수락한다. 수락 시점에는 서점을 모르므로 토큰 해시로 초대를 찾는다.
    * 멱등 기록 대신 사건 기록으로 재시도를 알아본다: 같은 사용자가 이미 수락한 초대는 같은 멤버십을 돌려준다. */
   const acceptOnce = (actor: Actor & { email: string }, request: { token: string; idempotencyKey: string }) =>
@@ -226,6 +277,21 @@ export function createPgStaffApi(deps: { pool: PoolLike; now?: () => Date }) {
         ).rows;
         return rows.map((r): MemberView => ({ userId: r.user_id, role: r.role, status: r.active ? "ACTIVE" : "INACTIVE", joinedAt: iso(r.created_at) }));
       }),
+
+    /** 현재 위임(직원별·종류별)을 직원·종류 순으로. Owner만 본다 */
+    listDelegations: (actor: Actor, request: { tenantId: string }): Promise<DelegationView[]> =>
+      asOwner(actor, request.tenantId, async (client) => {
+        const out: DelegationView[] = [];
+        for (const kind of Object.keys(DELEGATION_TABLE) as DelegationKind[]) {
+          for (const r of (await client.query(`select user_id, delegated_by, delegated_at from ${DELEGATION_TABLE[kind]} where tenant_id = $1`, [request.tenantId])).rows) {
+            out.push({ userId: r.user_id, kind, delegatedBy: r.delegated_by, delegatedAt: iso(r.delegated_at) });
+          }
+        }
+        return out.sort((a, b) => (a.userId === b.userId ? (a.kind < b.kind ? -1 : 1) : a.userId < b.userId ? -1 : 1));
+      }),
+
+    /** 직원에게 위임을 주거나 거둔다(Owner만). 요청의 담당자 필드는 무시되고 인증된 사용자로 기록된다 */
+    setDelegation: (actor: Actor, request: SetDelegationBody) => withRetry(() => delegationOnce(actor, request)),
 
     /** 서점의 초대(최신 초대 순)와 상태. 토큰 원문·해시는 포함하지 않는다 */
     listInvitations: (actor: Actor, request: { tenantId: string }): Promise<InvitationView[]> =>

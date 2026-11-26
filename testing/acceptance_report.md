@@ -2050,3 +2050,22 @@ vitest는 타입을 검사하지 않아 §73에서 제가 만든 테스트의 �
 - 처분 현황은 도서 제목·공급처 이름이 없다(`bookKey`만).
 - `renegotiations`(재협의)로 생긴 요청의 취소 물량 귀속은 요청이 가리키는 취소 물량을 따른다(응답 계약 시험의 합계 불변식으로만 확인).
 - 환급 목록의 정렬은 개시 순뿐이다(남은 금액순 없음).
+
+## 105. 위임 부여·회수 `POST /members/{id}/delegations`, `GET /delegations` (S-03 권한, UI 범위 결정서 보강 7번, `029_delegation_changes.sql`)
+
+테스트 약 14개 추가(`tests/auth/setDelegation` 4, `tests/db/pgDelegations` 5, `delegationsHttp` 2, `roleContractDb`·`ordering.http`·`atomicRollback`·`responseContract` 보강, 명세 `DelegationChange`·`DelegationView`). 재고 조정과 공급처·문구 템플릿 관리는 "Owner 또는 **위임된 직원**" 규칙인데 **위임을 주거나 거두는 명령이 없어** 위임 행을 SQL로만 넣을 수 있었다(기존 한계: "위임을 부여하는 명령은 아직 없다").
+
+**동작(Owner만):**
+- `POST /members/{targetUserId}/delegations` `{ kind, delegated }`: `kind`는 `MANAGEMENT`(공급처·문구 템플릿 관리)·`STOCK_ADJUSTMENT`(재고 조정), 종류별로 독립. `delegated`로 원하는 상태를 보낸다(true 부여, false 회수). 이미 그 상태면 422. 대상은 서점의 멤버(아니면 404, 다른 서점 직원 포함)이며 **Owner나 비활성 직원에게는 줄 수 없다(422)**. 남은 위임은 비활성 직원에게서도 거둘 수 있다. 담당자는 인증된 사용자로 기록되고 본문의 `actorRole`·`changedBy`는 400.
+- `GET /delegations`: 현재 위임(직원·종류·준 사람·시각). 활성 Owner만(직원·위임 직원·비활성 Owner 403).
+- 모든 변경은 추가 전용 이력 `ordering_delegation_changes`(수정·삭제 P0001)와 감사 로그에 남는다. 서점 멤버 행을 잠가 같은 서점의 동시 변경을 직렬화한다(같은 위임의 동시 부여는 하나만 성공).
+
+**TDD:** 도메인(`setDelegation`: 부여·권한·대상 규칙·상태 확인·검증·멱등)을 먼저 RED→GREEN(처음 도메인 시험 3개를 한꺼번에 추가한 점은 규칙의 "한 번에 하나" 위반이다), 이어서 어댑터·HTTP RED(함수 없음 → 라우트 404) → GREEN. **효과까지 끝까지 확인:** 위임 전 직원은 공급처 등록·재고 조정이 403, 부여하면 가능, 회수하면 다시 403(HTTP로 공급처 등록 201 → 403 확인), 관리 위임은 재고 조정을 열지 않는다.
+
+**새 경로를 분류하라고 요구하는 안전장치가 작동했다:** `roleContractDb`(Owner 전용 명령 표가 `authorizedActions`와 정확히 일치해야 함, 직원에게 허용된 나머지 경로 역방향 검사)와 `ordering.http`(enum 선언 대조), `atomicRollback`(모든 서점 범위 POST를 k번째 쓰기 실패 주입으로 확인)가 새 경로가 분류·시나리오에 없다고 실패시켰고, 각각 표에 넣어 고쳤다.
+
+**한계**
+- 위임 **이력 조회 API는 없다**(이력 테이블과 감사 로그에만 있다). S-03의 "권한 변경 감사 이력 링크"는 `GET /audit-log`(작업 이름·대상 ID만)로 이어지며, 위임 변경의 상세(부여·회수 구분)는 테이블에서만 읽을 수 있다.
+- **직원 역할 변경(직원→Owner)은 여전히 서버 명령이 없다.** 자기 권한 상승 금지(S-03 검증)는 위임이 Owner 전용이고 Owner에게는 줄 수 없다는 규칙으로만 확인했다.
+- 위임은 서점의 모든 공급처·템플릿에 대한 일괄 권한이다(공급처별·품목별 범위 위임은 없다). 위임에 만료·기간은 없다.
+- 비활성이 된 직원의 위임 행은 남는다(접근은 비활성이라 어차피 막힌다). 복구하면 위임이 되살아난다.

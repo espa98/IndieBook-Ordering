@@ -12,7 +12,7 @@
 
 ## 2. UI 1차 범위: 실제 API에 연결할 수 있는 화면
 
-서버 근거는 `tests/db`·`tests/openapi`(격리 Postgres, 실제 서명 JWT, 전 경로 계약·권한·롤백 검증, 전체 184개 파일 1533개 테스트 통과)다. 계약은 `openapi/ordering.yaml`(주문 4)과 `openapi/ordering-http.yaml`(나머지, 총 83개 연산)이며 **미검증 엔드포인트는 호출하지 않는다**.
+서버 근거는 `tests/db`·`tests/openapi`(격리 Postgres, 실제 서명 JWT, 전 경로 계약·권한·롤백 검증, 전체 187개 파일 1545개 테스트 통과)다. 계약은 `openapi/ordering.yaml`(주문 4)과 `openapi/ordering-http.yaml`(나머지, 총 83개 연산)이며 **미검증 엔드포인트는 호출하지 않는다**.
 
 | Bolt 단계 | 화면 | 실제 API 연결 | 비고 |
 |---|---|---|---|
@@ -23,7 +23,7 @@
 | 07 입고·재고 | O-07 입고 현황, O-07-01 입고, O-07-02 배분, I-01 재고 | `POST /purchase-orders/{id}/receipts`, `/receipts/{id}/allocations`·`/defect-resolutions`·`/excess-decisions`·`/corrections`, `/allocations/{id}/cancellations`·`/reallocations`·`/releases`, `GET /receipts`, `GET /receipts/{id}`, `GET /stock`, `GET /stock/{bookId}`, 초기 재고·조정 | 입고 현황·상세 조회 있음 |
 | 08 안내·수령·결제 | O-08-01 안내, O-09-01 수령, O-09-02 결제 | `/orders/{id}/notification-targets`(GET/POST), `/notification-targets/{id}/copies`·`/attempts`·`/renotices`, `/notification-attempts/{id}/result`, `GET /message-templates`, `/orders/{id}/fulfillments`(+정정), `/orders/{id}/payments`(GET/POST), `/payments/{id}/confirmation`·`/void`·`/corrections` | 복사·공유는 발송 완료가 아니다(서버도 결과 기록을 분리) |
 | 09 취소·반품·환급·정정 | O-04-01 취소, R-01 처분, R-03 반품, R-04 재고 편입, O-09-04 환급, R-05 정정 | `/orders/{id}/cancellation-requests`, `/order-cancellation-requests/{id}/decision`·`/application`, `/allocation-cancellations/{id}/return-requests`·`/stock-intakes`, `/return-requests/{id}/*`, `/return-exceptions/{id}/resolutions`, `/orders/{id}/refund-tasks`, `/refund-tasks/{id}/*`, `/refund-requests/{id}/decision`, `/refund-attempts/{id}/resolution`, `/orders/{id}/closure-requests` | 종결 실행·재개는 서버 내부(스위퍼), UI 경로 없음 |
-| 10 설정 | S-02 직원 목록·초대·비활성, 안내 템플릿 버전, 감사 이력 | `GET /members`, `GET/POST /staff-invitations`, `POST /staff-invitations/{id}/revocation`, `POST /members/{id}/status`, `GET/POST /message-templates`, `GET /audit-log` | 위임 부여는 서버 없음(§4). 직원은 이름·이메일 없이 사용자 ID로 식별된다 |
+| 10 설정 | S-02 직원 목록·초대·비활성, 안내 템플릿 버전, 감사 이력 | `GET /members`, `POST /members/{id}/delegations`, `GET /delegations`, `GET/POST /staff-invitations`, `POST /staff-invitations/{id}/revocation`, `POST /members/{id}/status`, `GET/POST /message-templates`, `GET /audit-log` | 위임 부여는 서버 없음(§4). 직원은 이름·이메일 없이 사용자 ID로 식별된다 |
 | 03 대시보드 | O-01 숫자 카드, O-01-02 장기 미수령 경고 | `GET /dashboard`, `GET /long-unreceived-warnings` | 부분입고 잔량·취소 후속 카드와 예외 큐 목록(O-01-01)은 서버 없음 → 데모 값(§4) |
 
 **공통 규칙(UI가 지킬 서버 계약):** Bearer JWT; 모든 POST에 `Idempotency-Key`; 낡은 `expectedVersion`은 409 `VERSION_CONFLICT`; 같은 키·다른 본문은 409 `IDEMPOTENCY_CONFLICT`; 업무 규칙 위반 422 `BUSINESS_INVARIANT`; 본문 413(기본 1 MiB); 쿼리 시간 초과·내부 오류는 500(재시도 구분 없음); 금액은 정수 문자열; 시각은 RFC3339 UTC(미래 불가); 행위자·역할은 토큰에서만(본문으로 보낼 수 없음); 다른 서점·없는 대상은 같은 404.
@@ -34,7 +34,7 @@
 - **YES24 도서 검색(B-01)**: 외부 연동 없음.
 - **ST-O04 확정 후 가격/품목 변경, 고객 동의(DEC-08)**: 정책 미승인.
 - **공개 고객 주문(P1), 택배(D23), PG/VAN(P2), 모바일 M1~M3**: 범위 밖.
-- 직원 관리의 *위임 부여*(Owner가 직원에게 공급처 관리·재고 조정 위임)와 S-01 서점 기본정보 수정·S-08 YES24 상태·S-09 내보내기: 서버 없음.
+- S-01 서점 기본정보 수정·S-08 YES24 상태·S-09 내보내기: 서버 없음.
 
 ## 4. 백엔드 보강 목록 (UI 막힘 순)
 
@@ -48,7 +48,7 @@ UI 단계 순서에 맞춰 서버가 먼저 만들 조회 API다. 모두 같은 
 | 4 | O-07 입고 현황, O-07-02 배분 | ✅ **완료(2026-11-26)** `GET /receipts`(최신순·커서·`unallocated`·`purchaseOrderId` 필터, 배분·미배분 수량), `GET /receipts/{id}`(배분·해제·정정·불량·초과 이력). 보고서 §102. 반품·처분 대기는 6번 | 중 |
 | 5 | O-08 안내 대기, O-09 수령·결제 현황 | ✅ **완료(2026-11-26)** `GET /notification-targets`(서점 전체 큐, 파생 상태·필터), `GET /order-settlements`(결제 요약·수령 수량, `unpaid`/`undelivered` 필터). 보고서 §103 | 중 |
 | 6 | O-09-04 환급, R-01·R-03·R-04 | ✅ **완료(2026-11-26)** `GET /refund-tasks`(파생 상태·남은 금액·미결 요청·미해소 시도), `GET /allocation-cancellations`(취소 물량의 처분 대기·편입·반품 보관·출고·완료 수량). 보고서 §104 | 중 |
-| 7 | S-03 권한 | 위임 부여·회수 명령과 조회(재고 조정·공급처 관리 위임) | 중 |
+| 7 | S-03 권한 | ✅ **완료(2026-11-26)** `POST /members/{id}/delegations`(MANAGEMENT·STOCK_ADJUSTMENT 부여·회수, Owner만), `GET /delegations`. 변경 이력 테이블(추가 전용). 역할 변경(직원→Owner)은 서버 없음. 보고서 §105 | 중 |
 | 8 | O-02 검색 | 주문 목록의 표시번호·도서명 검색 필터(지금은 상태만) | 소 |
 
 고객 모듈(C-01~04)과 YES24 연동은 PRD 결정이 필요해 이 목록에 넣지 않았다.

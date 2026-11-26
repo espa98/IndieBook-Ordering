@@ -502,6 +502,15 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       fields: ["status"],
       run: (c) => staffAdmin.setMembershipStatus(actor(c), merge(c, { tenantId: t(c), targetUserId: c.params.targetUserId!, idempotencyKey: c.idempotencyKey })),
     }),
+    route("POST", "/members/(?<targetUserId>[^/]+)/delegations", {
+      success: 200,
+      fields: ["kind", "delegated"],
+      run: (c) => staffAdmin.setDelegation(actor(c), merge(c, { tenantId: t(c), targetUserId: c.params.targetUserId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("GET", "/delegations", {
+      success: 200,
+      run: (c) => staffAdmin.listDelegations(actor(c), { tenantId: t(c) }),
+    }),
     route("POST", "/suppliers", {
       success: 201,
       fields: ["code", "name", "orderChannel", "registeredAt"],

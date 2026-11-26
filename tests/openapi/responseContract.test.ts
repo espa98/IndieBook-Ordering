@@ -464,13 +464,27 @@ describe("응답 계약(쓰기): 직원 초대·계정", () => {
     for (const { template } of checked) expect(declared(template, "post"), `${template} data 스키마`).toBe(true);
     for (const { template, body } of checked) expect(conforms(template, body, "post"), template).toMatchObject({ ok: true });
 
+    // 위임 부여·회수와 현재 위임 목록(S-03): 활성 직원 하나를 새로 만들어 위임을 주고 거둔다
+    const delegateId = "55555555-0000-4000-8000-000000000003";
+    const delegateInvite = await callAs(ownerId, "owner@shop.test", "POST", `${base}/staff-invitations`, { email: "delegate@shop.test", expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+    await callAs(delegateId, "delegate@shop.test", "POST", "/v1/invitations/accept", { token: delegateInvite.body.data.token });
+    const grant = await callAs(ownerId, "owner@shop.test", "POST", `${base}/members/${delegateId}/delegations`, { kind: "STOCK_ADJUSTMENT", delegated: true });
+    expect(grant.status).toBe(200);
+    const delegationList = await callAs(ownerId, undefined, "GET", `${base}/delegations`);
+    expect(delegationList.body.data).toEqual([{ userId: delegateId, kind: "STOCK_ADJUSTMENT", delegatedBy: ownerId, delegatedAt: expect.any(String) }]);
+    expect(declared("/members/{targetUserId}/delegations", "post"), "위임 data 스키마").toBe(true);
+    expect(declared("/delegations", "get"), "위임 목록 data 스키마").toBe(true);
+    expect(conforms("/members/{targetUserId}/delegations", grant.body, "post"), "위임 부여").toMatchObject({ ok: true });
+    expect(conforms("/delegations", delegationList.body, "get"), "위임 목록").toMatchObject({ ok: true });
+    expect((await callAs(ownerId, "owner@shop.test", "POST", `${base}/members/${delegateId}/delegations`, { kind: "STOCK_ADJUSTMENT", delegated: false })).status).toBe(200);
+
     // 직원·초대 목록(S-02): Owner만. 수락·철회·대기 초대가 모두 있다
     const members = await callAs(ownerId, undefined, "GET", `${base}/members`);
     expect(members.status).toBe(200);
-    expect(members.body.data.map((m: { userId: string; status: string }) => [m.userId, m.status])).toEqual([[ownerId, "ACTIVE"], [staffId, "INACTIVE"]]);
+    expect(members.body.data.map((m: { userId: string; status: string }) => [m.userId, m.status])).toEqual([[ownerId, "ACTIVE"], [staffId, "INACTIVE"], [delegateId, "ACTIVE"]]); // Owner 먼저, 합류 순
     const invitationList = await callAs(ownerId, undefined, "GET", `${base}/staff-invitations`);
     expect(invitationList.status).toBe(200);
-    expect(invitationList.body.data.map((i: { status: string }) => i.status).sort()).toEqual(["ACCEPTED", "REVOKED"]);
+    expect(invitationList.body.data.map((i: { status: string }) => i.status).sort()).toEqual(["ACCEPTED", "ACCEPTED", "REVOKED"]);
     expect(JSON.stringify(invitationList.body)).not.toMatch(/token/i);
     for (const [template, res] of [["/members", members], ["/staff-invitations", invitationList]] as const) {
       expect(declared(template, "get"), `${template} data 스키마`).toBe(true);
