@@ -17,6 +17,9 @@ const T_A = "aaaaaaaa-0000-4000-8000-000000000001";
 const OWNER = "11111111-0000-4000-8000-000000000001";
 const STAFF = "11111111-0000-4000-8000-000000000002";
 const DELEGATE = "11111111-0000-4000-8000-000000000004"; // 재고 조정·공급처·문구 템플릿 관리를 위임받은 직원
+const EX_STAFF = "11111111-0000-4000-8000-000000000005"; // 비활성화된 직원
+const EX_OWNER = "11111111-0000-4000-8000-000000000006"; // 비활성화된 점주(다른 활성 Owner가 있어 비활성화할 수 있다)
+const EX_DELEGATE = "11111111-0000-4000-8000-000000000007"; // 위임이 남아 있지만 비활성화된 직원
 
 /** Owner 전용 명령 → 그 명령을 실행하는 HTTP 경로. 계정 범위 경로(`/v1/...`)는 해당 없다 */
 const OWNER_ONLY_ROUTES: Record<string, string> = {
@@ -44,7 +47,9 @@ beforeAll(async () => {
   const c = await db.connect();
   await c.query(`insert into public.ordering_tenants (id, name, owner_user_id) values ($1, '서점 A', $2)`, [T_A, OWNER]);
   await c.query(`insert into public.ordering_members (tenant_id, user_id, role, active) values ($1, $2, 'OWNER', true), ($1, $3, 'STAFF', true), ($1, $4, 'STAFF', true)`, [T_A, OWNER, STAFF, DELEGATE]);
-  await c.query(`insert into public.ordering_stock_delegations (tenant_id, user_id, delegated_by, delegated_at) values ($1, $2, $3, now())`, [T_A, DELEGATE, OWNER]);
+  await c.query(`insert into public.ordering_members (tenant_id, user_id, role, active) values ($1, $2, 'STAFF', false), ($1, $3, 'OWNER', false), ($1, $4, 'STAFF', false)`, [T_A, EX_STAFF, EX_OWNER, EX_DELEGATE]);
+  await c.query(`insert into public.ordering_stock_delegations (tenant_id, user_id, delegated_by, delegated_at) values ($1, $2, $3, now()), ($1, $4, $3, now())`, [T_A, DELEGATE, OWNER, EX_DELEGATE]);
+  await c.query(`insert into public.ordering_management_delegations (tenant_id, user_id, delegated_by, delegated_at) values ($1, $2, $3, now())`, [T_A, EX_DELEGATE, OWNER]);
   await c.query(`insert into public.ordering_management_delegations (tenant_id, user_id, delegated_by, delegated_at) values ($1, $2, $3, now())`, [T_A, DELEGATE, OWNER]);
   await c.end();
   app = createApp({ pool: db.pool(), jwt: { keys: [{ kid: "k1", alg: "HS256", key: SECRET }], audience: "authenticated" } });
@@ -238,6 +243,31 @@ describe("역할별 403: 대상에 따라 갈리는 규칙", () => {
 
     // Owner는 다른 고객의 주문으로도 옮긴다
     expect((await move(OWNER, second, 1)).status).toBe(201);
+  });
+});
+
+describe("비활성 멤버: 역할·위임과 무관하게 모든 서점 범위 경로에서 403", () => {
+  it("비활성화된 직원·점주·위임이 남은 직원은 모든 경로에서 403이고, 명세가 선언하며, 본문이 ErrorBody를 만족한다", async () => {
+    const ops = await loadOperations();
+    const ajv = new Ajv2020({ strict: false, allErrors: true });
+    const routes = app.routes.filter((r) => r.scope === "tenant");
+    expect(routes.length).toBeGreaterThan(70);
+
+    const problems: string[] = [];
+    for (const [who, sub] of [["비활성 직원", EX_STAFF], ["비활성 점주", EX_OWNER], ["위임이 남은 비활성 직원", EX_DELEGATE]] as const) {
+      for (const r of routes) {
+        const key = specKey(r);
+        const response = await app(r.method === "POST" ? request(r, sub, sampleBody(ops.get(key))) : { ...request(r, sub, ""), rawBody: undefined });
+        if (response.status !== 403) {
+          problems.push(`${who} ${key}: 상태 ${response.status} ${JSON.stringify(response.body)}`);
+          continue;
+        }
+        const schema = ops.get(key)?.responses?.["403"]?.content?.["application/json"]?.schema;
+        if (!schema) problems.push(`${who} ${key}: 명세가 403을 선언하지 않음`);
+        else if (!ajv.validate(schema, JSON.parse(JSON.stringify(response.body)))) problems.push(`${who} ${key}: ${ajv.errorsText()}`);
+      }
+    }
+    expect(problems).toEqual([]);
   });
 });
 
