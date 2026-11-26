@@ -69,6 +69,6 @@ UI 단계 순서에 맞춰 서버가 먼저 만들 조회 API다. 모두 같은 
 3. **고객 모듈(C-01~04)·YES24 검색(B-01):** PRD 결정 필요.
 4. **직원 역할 변경(직원→Owner):** 서버 명령 없음.
 
-**(Bolt.new)** `00_공통_실행규칙`과 01~10단계를 이 문서의 §2 표와 `openapi/ordering.yaml`·`openapi/ordering-http.yaml`을 API 연결표로 삼아 진행한다. 대시보드(03)는 §4 3번이 1차 완료라 숫자 카드 일부는 실제 API, 나머지는 데모 값이다.
+**(Bolt.new)** 연결 방법·요청/응답 규칙·오류 처리·호출 레시피는 `Docs/05_API_Security/Bolt_API_연결_가이드_V1.0.md`에 정리했다(엔드포인트 표는 명세에서 생성). `00_공통_실행규칙`과 01~10단계를 이 문서의 §2 표와 `openapi/ordering.yaml`·`openapi/ordering-http.yaml`을 API 연결표로 삼아 진행한다. 대시보드(03)는 §4 3번이 1차 완료라 숫자 카드 일부는 실제 API, 나머지는 데모 값이다.
 
 **낡은 문서:** `Docs/05_API_Security/BookFlow_Ordering_API_구현현황표_V1.0.md`(2026-11-22, "HTTP 라우터 미확인")는 현재 상태와 다르다. UI 연결의 기준은 이 문서와 `openapi/*.yaml`이다(해당 문서 첫머리에 같은 안내를 달았다).
