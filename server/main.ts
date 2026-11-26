@@ -8,6 +8,7 @@ import { createHttpServer } from "../src/http/server";
 import { createClosureSweeper } from "../src/jobs/closureSweeper";
 import { startSweepLoop } from "../src/jobs/sweepLoop";
 import { loadConfig } from "./config";
+import { createYes24Provider } from "../src/catalog/yes24Provider";
 import { createDatabasePool } from "./pool";
 
 let config: ReturnType<typeof loadConfig>;
@@ -24,6 +25,8 @@ pool.on("error", (error) => console.error("database pool error:", error.message)
 const app = createApp({
   pool,
   jwt: config.jwt,
+  // YES24 도서 검색(DEC-17): 주소·키를 설정했을 때만 켠다. 없으면 검색은 503이고 수기 등록을 쓴다
+  ...(config.yes24 ? { bookSearch: createYes24Provider(config.yes24) } : {}),
   // 내부 오류의 원본은 서버 로그에만 남기고 응답에는 싣지 않는다
   logError: (error) => console.error("unhandled request error:", error instanceof Error ? error.stack : error),
 });

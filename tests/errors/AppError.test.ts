@@ -10,6 +10,7 @@ describe("AppError", () => {
     ["IDEMPOTENCY_CONFLICT", 409],
     ["VERSION_CONFLICT", 409],
     ["BUSINESS_INVARIANT", 422],
+    ["SERVICE_UNAVAILABLE", 503],
   ] as const)("%s는 HTTP %i로 매핑되고 message는 코드 그대로다", (code, status) => {
     const error = new AppError(code);
 

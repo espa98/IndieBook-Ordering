@@ -13,6 +13,8 @@ import { runWithAudit } from "../db/auditContext";
 import { assertWithinLimits } from "./inputLimits";
 import { createPgAccountApi } from "../db/pgAccountApi";
 import { createPgCatalogApi } from "../db/pgCatalogApi";
+import type { BookSearchProvider } from "../catalog/bookSearch";
+import { createPgBookSearchApi } from "../db/pgBookSearchApi";
 import { createPgStaffApi } from "../db/pgStaffApi";
 import { createPgStoreApi } from "../db/pgStoreApi";
 import { createPgStockApi } from "../db/pgStockApi";
@@ -37,6 +39,8 @@ export type AppDeps = {
   jwt: JwtVerifyOptions;
   /** 처리하지 못한 오류의 원본을 받는다(서버측 로깅 자리). 응답에는 쓰이지 않는다 */
   logError?: (error: unknown) => void;
+  /** 외부 도서 검색 어댑터(YES24, DEC-17). 없으면 도서 검색은 503이고 수기 등록을 쓴다 */
+  bookSearch?: BookSearchProvider;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -97,6 +101,7 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
   const suppliers = createPgSupplierApi({ pool: deps.pool });
   const staffAdmin = createPgStaffApi({ pool: deps.pool });
   const storeApi = createPgStoreApi({ pool: deps.pool });
+  const bookSearch = createPgBookSearchApi({ pool: deps.pool, ...(deps.bookSearch ? { provider: deps.bookSearch } : {}) });
   const accounts = createPgAccountApi({ pool: deps.pool });
   const catalog = createPgCatalogApi({ pool: deps.pool });
   const notifications = createPgNotificationApi({ pool: deps.pool });
@@ -406,6 +411,15 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
     route("GET", "/orders/(?<orderId>[^/]+)/notification-targets", {
       success: 200,
       run: (c) => reads.listNotificationTargets(actor(c), { tenantId: t(c), orderId: c.params.orderId! }),
+    }),
+    route("GET", "/book-search", {
+      success: 200,
+      queryFields: ["type", "q", "limit"],
+      run: (c) => bookSearch.search(actor(c), { tenantId: t(c), ...text(c, "type"), ...text(c, "q"), ...int(c, "limit") }),
+    }),
+    route("GET", "/integrations/yes24", {
+      success: 200,
+      run: (c) => bookSearch.status(actor(c), { tenantId: t(c) }),
     }),
     route("GET", "/statistics/hourly", {
       success: 200,

@@ -15,6 +15,7 @@ const FIXED_MESSAGES: Record<ErrorCode, string> = {
     "Idempotency key was already used with a different request",
   VERSION_CONFLICT: "The resource was modified; reload and retry",
   BUSINESS_INVARIANT: "The request violates a business rule",
+  SERVICE_UNAVAILABLE: "The service is temporarily unavailable",
 };
 
 export function toErrorResponse(error: unknown): ErrorResponse {

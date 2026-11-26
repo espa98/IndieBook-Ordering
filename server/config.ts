@@ -10,6 +10,8 @@ export type ServerConfig = {
   /** 종결 스위퍼 실행 간격(초). 0이면 끈다 */
   closureSweepIntervalSeconds: number;
   jwt: JwtVerifyOptions;
+  /** YES24 도서 검색 연동(DEC-17). 주소와 키를 함께 설정했을 때만 있다. 없으면 도서 검색은 503이고 수기 등록을 쓴다 */
+  yes24?: { url: string; apiKey: string; timeoutMs: number };
   /** CORS를 허용하는 브라우저 오리진(정확히 일치). 기본은 빈 목록 */
   allowedOrigins: string[];
 };
@@ -63,6 +65,26 @@ function parseOrigins(raw: string | undefined): string[] {
   return origins;
 }
 
+/** YES24 연동 설정. 주소와 키는 함께 있어야 하고, 운영 주소는 https여야 한다(로컬 개발 주소만 http 허용). 오류에 값을 싣지 않는다 */
+function parseYes24(env: Record<string, string | undefined>): ServerConfig["yes24"] {
+  const rawUrl = env.YES24_BOOK_SEARCH_URL?.trim();
+  const apiKey = env.YES24_API_KEY;
+  const hasUrl = rawUrl !== undefined && rawUrl !== "";
+  const hasKey = apiKey !== undefined && apiKey !== "";
+  if (!hasUrl && !hasKey) return undefined;
+  if (!hasKey) return fail("YES24_API_KEY is required when YES24_BOOK_SEARCH_URL is set");
+  if (!hasUrl) return fail("YES24_BOOK_SEARCH_URL is required when YES24_API_KEY is set");
+  let url: URL;
+  try {
+    url = new URL(rawUrl!);
+  } catch {
+    return fail("YES24_BOOK_SEARCH_URL must be a valid URL");
+  }
+  const local = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && local)) return fail("YES24_BOOK_SEARCH_URL must use https (http is allowed only for localhost)");
+  return { url: url.toString(), apiKey: apiKey!, timeoutMs: integer(env, "YES24_TIMEOUT_MS", 5000, 500, 30_000) };
+}
+
 /**
  * 환경 변수에서 서버 설정을 만든다(순수 함수). 서명 키는 둘 중 하나 이상 필요하다:
  * SUPABASE_JWT_KEYS(RS256/ES256 공개 키 JSON 배열), SUPABASE_JWT_SECRET(HS256 비밀, 32자 이상).
@@ -83,6 +105,7 @@ export function loadConfig(env: Record<string, string | undefined>): ServerConfi
     maxBodyBytes: integer(env, "MAX_BODY_BYTES", 1024 * 1024, 1, 64 * 1024 * 1024),
     statementTimeoutMs: integer(env, "DB_STATEMENT_TIMEOUT_MS", 10_000, 100, 120_000),
     closureSweepIntervalSeconds: integer(env, "CLOSURE_SWEEP_INTERVAL_SECONDS", 300, 0, 86_400),
+    ...(parseYes24(env) ? { yes24: parseYes24(env)! } : {}),
     allowedOrigins: parseOrigins(env.CORS_ALLOWED_ORIGINS),
     jwt: { keys, audience: "authenticated", ...(env.SUPABASE_JWT_ISSUER ? { issuer: env.SUPABASE_JWT_ISSUER } : {}) },
   };

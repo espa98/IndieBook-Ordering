@@ -1277,6 +1277,88 @@ paths:
           $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/book-search:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+    get:
+      tags: [reads]
+      operationId: searchBooks
+      summary: YES24 도서 검색 (UC-04, B-01)
+      description: |
+        활성 멤버(Owner·직원)가 ISBN·제목·저자로 **YES24**에서 도서를 찾는다(DEC-17: YES24가 **단일** 외부 검색 경로). 서버가 YES24 어댑터를 호출하며
+        **다른 외부 API로 자동 전환하지 않는다.** 결과는 서버가 정리한 필드만 담고(알 수 없는 필드·http 주소 제거) `source`(출처)와 `fetchedAt`(조회 시각)을 함께 준다.
+        이 서점에 같은 ISBN의 도서가 이미 있으면 `existingBookId`로 알려 준다(중복 등록 경고). `listPriceKrw`는 외부 정가 **참고값**이며 서점 판매가는 직원이 입력한다.
+        **도서 선택** = 결과를 `POST /books`에 `source: "YES24"`, `externalId`(결과의 `id`), `fetchedAt`과 함께 보내 등록하는 것이다.
+        YES24를 쓸 수 없으면(미설정·접속 실패·시간 초과·오류·잘못된 응답·동시 호출 상한 4개 초과) **503 `SERVICE_UNAVAILABLE`** 이고 원인은 응답에 없다 —
+        UI는 "미검색·장애" 사유를 표시하고 **수기 도서 등록**(`source: "MANUAL"`)으로 전환할 수 있게 한다.
+        **주의:** 실제 YES24 API의 형식·이용 권한은 아직 확인되지 않았다. 서버는 `YES24_BOOK_SEARCH_URL`의 게이트웨이가 정해 둔 계약을 구현한다고 가정한다(`release/new_project_runbook.md`).
+      parameters:
+        - name: type
+          in: query
+          required: true
+          schema: { type: string, enum: [ISBN, TITLE, AUTHOR] }
+        - name: q
+          in: query
+          required: true
+          description: 검색어(1~60자). `type=ISBN`이면 하이픈을 뺀 10·13자리 ISBN
+          schema: { type: string, minLength: 1, maxLength: 60 }
+        - name: limit
+          in: query
+          required: false
+          description: 결과 수(1~20, 기본 10)
+          schema: { type: string }
+      responses:
+        "200":
+          description: 성공(`data`는 검색 결과)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/BookSearchResult" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+        "503":
+          $ref: "ordering.yaml#/components/responses/ServiceUnavailable"
+  /v1/tenants/{tenantId}/integrations/yes24:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+    get:
+      tags: [reads]
+      operationId: getYes24Status
+      summary: YES24 연동 상태 (S-08)
+      description: |
+        활성 멤버가 YES24 도서 검색 연동이 설정돼 있는지(`configured`)와 이 서버 프로세스가 기억하는 마지막 검색의 시각·성공 여부(`lastSearch`)를 읽는다.
+        키·주소 같은 비밀은 없다. 서버를 다시 시작하거나 인스턴스가 여럿이면 `lastSearch`는 인스턴스별로 다르고 없을 수 있다.
+      responses:
+        "200":
+          description: 성공(`data`는 연동 상태)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Yes24Status" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/statistics/hourly:
     parameters:
       - $ref: "ordering.yaml#/components/parameters/TenantId"
@@ -5078,6 +5160,45 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    BookSearchResult:
+      type: object
+      additionalProperties: false
+      required: [source, fetchedAt, items]
+      properties:
+        source: { type: string, enum: [YES24] }
+        fetchedAt: { type: string, format: date-time }
+        items:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, title, authors]
+            properties:
+              id: { type: string, minLength: 1, maxLength: 64, description: YES24 도서 ID — 등록 시 externalId로 저장 }
+              title: { type: string, minLength: 1, maxLength: 200 }
+              authors: { type: array, maxItems: 10, items: { type: string } }
+              isbn: { type: string, pattern: "^([0-9]{13}|[0-9]{9}[0-9X])$" }
+              publisher: { type: string }
+              publishedOn: { type: string, format: date }
+              listPriceKrw: { type: string, pattern: "^[1-9][0-9]*$", description: 외부 정가 참고값. 서점 판매가는 직원이 입력한다 }
+              coverUrl: { type: string, format: uri, pattern: "^https://" }
+              detailUrl: { type: string, format: uri, pattern: "^https://" }
+              existingBookId: { type: string, format: uuid, description: 이 서점에 같은 ISBN의 도서가 이미 있으면 그 ID }
+    Yes24Status:
+      type: object
+      additionalProperties: false
+      required: [provider, configured]
+      properties:
+        provider: { type: string, enum: [YES24] }
+        configured: { type: boolean }
+        lastSearch:
+          type: object
+          additionalProperties: false
+          required: [at, ok]
+          properties:
+            at: { type: string, format: date-time }
+            ok: { type: boolean }
     HourlyMeasures:
       type: object
       required: [orders, payments, receipts, deliveries]

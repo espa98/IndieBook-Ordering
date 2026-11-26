@@ -684,3 +684,25 @@ describe("응답 계약(읽기): 시간대별 통계", () => {
     expect((await call("GET", "/statistics/hourly", undefined, "from=2026-3-4")).status).toBe(400);
   });
 });
+
+describe("응답 계약(읽기): YES24 도서 검색", () => {
+  it("검색 결과(중복 표시 포함)·연동 상태·장애(503) 응답이 선언한 스키마를 만족한다", async () => {
+    // 이 앱은 YES24를 설정하지 않았으므로 검색은 503이다(성공 응답의 모양은 아래에서 스키마로 직접 확인한다)
+    const unavailable = await call("GET", "/book-search", undefined, "type=TITLE&q=x");
+    expect(unavailable.status).toBe(503);
+    expect(declared("/book-search", "get"), "도서 검색 data 스키마").toBe(true);
+    expect(conforms("/book-search", { data: { source: "YES24", fetchedAt: "2026-03-10T00:00:00.000Z", items: [
+      { id: "Y1", title: "운영기", authors: ["박서점"], isbn: "9788960901234", publisher: "책방출판", publishedOn: "2025-03-01", listPriceKrw: "16800", coverUrl: "https://img.example.com/1.jpg", detailUrl: "https://www.example.com/1", existingBookId: "b0000000-0000-4000-8000-0000000000ce" },
+      { id: "Y2", title: "ISBN 없음", authors: [] },
+    ] } })).toMatchObject({ ok: true });
+    // 스키마가 닫혀 있다: 알 수 없는 필드·http 주소·0원 가격이 새면 잡힌다
+    expect(conforms("/book-search", { data: { source: "YES24", fetchedAt: "2026-03-10T00:00:00.000Z", items: [{ id: "Y1", title: "t", authors: [], secret: "x" }] } })).toMatchObject({ ok: false });
+    expect(conforms("/book-search", { data: { source: "YES24", fetchedAt: "2026-03-10T00:00:00.000Z", items: [{ id: "Y1", title: "t", authors: [], coverUrl: "http://insecure.example.com/x.png" }] } })).toMatchObject({ ok: false });
+    expect(conforms("/book-search", { data: { source: "YES24", fetchedAt: "2026-03-10T00:00:00.000Z", items: [{ id: "Y1", title: "t", authors: [], listPriceKrw: "0" }] } })).toMatchObject({ ok: false });
+    const status = await call("GET", "/integrations/yes24");
+    expect(status.body.data).toEqual({ provider: "YES24", configured: false }); // 미설정이면 검색 기록이 없다
+    expect(declared("/integrations/yes24", "get"), "연동 상태 data 스키마").toBe(true);
+    expect(conforms("/integrations/yes24", status.body)).toMatchObject({ ok: true });
+  });
+});
+

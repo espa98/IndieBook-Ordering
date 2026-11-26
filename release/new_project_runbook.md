@@ -49,8 +49,13 @@
 | `PORT` | 아니오 | 기본 8080 |
 | `MAX_BODY_BYTES` | 아니오 | 기본 1 MiB |
 | `DB_STATEMENT_TIMEOUT_MS` | 아니오 | DB 쿼리 하나의 시간 제한(잠금 대기 포함). 기본 10000, 100~120000 |
+| `YES24_BOOK_SEARCH_URL` | 아니오(키와 함께) | YES24 도서 검색 게이트웨이 주소(DEC-17). **https**여야 한다(로컬 개발 주소만 http). 없으면 도서 검색은 503이고 수기 등록을 쓴다 |
+| `YES24_API_KEY` | 〃(주소와 함께) | 게이트웨이 접근 키. `Authorization: Bearer`로만 보내고 로그·오류·응답에 싣지 않는다. 비밀이므로 실행 환경에서만 주입한다 |
+| `YES24_TIMEOUT_MS` | 아니오 | 상류 요청 제한 시간. 기본 5000, 500~30000 |
 | `CLOSURE_SWEEP_INTERVAL_SECONDS` | 아니오 | 종결 스위퍼 간격, 기본 300, 0이면 끔 |
 | `CORS_ALLOWED_ORIGINS` | 아니오 | 허용 오리진(쉼표 구분). **비우면 브라우저 오리진을 허용하지 않는다**(E9: 값 결정 필요) |
+
+**YES24 도서 검색 상류 계약(미확정 가정):** 공개된 YES24 도서 검색 API 문서를 찾지 못했다(웹 검색, 2026-11-26). 서버(`src/catalog/yes24Provider.ts`)는 `YES24_BOOK_SEARCH_URL`이 다음을 구현한다고 가정한다 — `GET {url}?type=ISBN|TITLE|AUTHOR&q=<검색어>&limit=<1..20>` + `Authorization: Bearer <키>` → `200 {"items":[{"id","title","authors"?,"isbn"?,"publisher"?,"publishedOn"?,"listPriceKrw"?,"coverUrl"?,"detailUrl"?}]}`. **실제 YES24 API(제휴·이용 권한 포함)가 이 형태가 아니면 어댑터의 호출·매핑 한 곳만 바꾸면 된다**(요청 검증·응답 정리·오류 처리·엔드포인트·시험은 그대로). 실제 이용 권한 검증은 PRD가 P0 출시 전 필수로 둔 항목이다(Docs/02_Policies, DEC-17).
 
 비밀은 이미지·저장소가 아니라 실행 환경에서 주입한다(`Dockerfile` 주석 참조). 이미지 빌드는 이 PC에 Docker가 없어 **검증하지 못했다.**
 

@@ -1,6 +1,6 @@
 # BookFlow Ordering — Bolt.new용 API 연결 가이드 V1.0
 
-작성일: 2026-11-26 · 기준: `openapi/ordering.yaml`(주문 4개)·`openapi/ordering-http.yaml`(나머지 97개), 격리 DB 시험 195개 파일·1574개 테스트 통과
+작성일: 2026-11-26 · 기준: `openapi/ordering.yaml`(주문 4개)·`openapi/ordering-http.yaml`(나머지 99개), 격리 DB 시험 195개 파일·1574개 테스트 통과
 
 **누구를 위한 문서인가:** `BookFlow_Ordering_BoltNew_단계별프롬프트_V1.0`으로 웹 UI를 만드는 프런트엔드 작업자(Bolt.new). 책임 분리는 그대로다 — *백엔드(이 저장소) = DB·RLS·업무 API·검증, Bolt.new = 반응형 웹 UI·업무 흐름·검증된 API 연결.* 이 문서는 **"서버가 UI에 무엇을 약속하는가"** 를 한곳에 모은 것이고, 필드 단위의 정확한 계약은 항상 `openapi/*.yaml`이 기준이다(이 문서의 예시와 어긋나면 명세가 맞다).
 
@@ -12,7 +12,7 @@
 
 | 원칙 | 이 서버에서의 의미 |
 |---|---|
-| 승인된 API만 호출 | 아래 §6의 101개 연산과 `GET /healthz`뿐이다. 문서에 없는 경로를 가정하지 않는다. |
+| 승인된 API만 호출 | 아래 §6의 103개 연산과 `GET /healthz`뿐이다. 문서에 없는 경로를 가정하지 않는다. |
 | `service_role` 키 브라우저 노출 금지 | 브라우저는 **사용자 access token(JWT)** 만 보낸다. DB 키·서버 비밀은 서버 환경에만 있다. |
 | 권한 판정은 서버가 한다 | 서버가 **매 요청** DB에서 활성 멤버십·역할을 다시 읽는다. 토큰의 역할·서점 claim은 무시한다. UI는 버튼을 숨기는 용도일 뿐, 숨겼다고 안전하지 않다. |
 | 미구현·미승인 기능은 성공 처리하지 않는다 | §10의 "서버 없음" 목록은 `DEMO MODE`/비활성으로 표시한다. |
@@ -85,6 +85,7 @@ GET /v1/me/memberships
 | 409 | `IDEMPOTENCY_CONFLICT` | 같은 키에 다른 본문 | UI 버그(키 재사용). 새 키로. |
 | 413 / 415 | `PAYLOAD_TOO_LARGE` / `UNSUPPORTED_MEDIA_TYPE` | 크기·형식 | UI 버그. |
 | 422 | `BUSINESS_INVARIANT` | 업무 규칙 위반(상태 전이·수량 한도·중복·이미 그 상태) | 사유를 사용자에게 설명(`message` 원문 대신 화면별 문구). 재시도해도 같다. |
+| 503 | `SERVICE_UNAVAILABLE` | 외부 서비스(YES24 도서 검색)를 지금 쓸 수 없다(미설정·장애·시간 초과·동시 호출 상한) | "도서 검색을 지금 쓸 수 없습니다" + **수기 도서 등록**으로 전환. 같은 요청을 잠시 후 다시 시도할 수 있다. 원인은 서버가 알려 주지 않는다. |
 | 500 | `INTERNAL_ERROR` | 서버 오류·**DB 쿼리 시간 초과(기본 10초)** | "잠시 후 다시". **같은 `Idempotency-Key`로 재시도**해도 안전하다. 연속 실패 시 `x-request-id`를 보여 준다. |
 
 **결과 불명확(응답 유실·타임아웃):** 같은 키·같은 본문으로 재전송하면 이미 처리된 경우 같은 결과를 받는다. 재전송 대신 **상세를 조회해** 반영 여부를 확인하는 것도 좋다.
@@ -106,7 +107,7 @@ GET /v1/me/memberships
 
 ---
 
-## 6. 엔드포인트 목록 (명세에서 생성 — 101개)
+## 6. 엔드포인트 목록 (명세에서 생성 — 103개)
 
 권한 열: **Owner만** = 직원은 403 / Owner·위임 직원 = 점주가 위임을 준 직원만 / Owner·직원 = 활성 멤버 / "일부 동작은 Owner" = 예) 취소·환급 요청 승인·거절·폐기 처분은 Owner, 철회·그 외는 직원도 가능. 같은 경로라도 **본문 값에 따라** 갈리는 규칙이 있으니(재배분은 다른 고객 주문으로 옮길 때 Owner) 403은 항상 처리한다.
 
@@ -131,12 +132,14 @@ GET /v1/me/memberships
 | POST | `…/books/{bookId}/stock-adjustments` | adjustStock | Owner·위임 직원 | 201 |
 | POST | `…/stock-reservations/{reservationId}/releases` | releaseStockReservation | Owner·직원 | 201 |
 
-#### reads (25)
+#### reads (27)
 
 | 메서드 | 경로(`/v1/tenants/{tenantId}` 접두 생략: …) | operationId | 권한 | 성공 |
 |---|---|---|---|---|
 | GET | `…/stock` | listStockLevels | Owner·직원 | 200 |
 | GET | `…/stock/{bookId}` | getStockLevel | Owner·직원 | 200 |
+| GET | `…/book-search` | searchBooks | Owner·직원 | 200 |
+| GET | `…/integrations/yes24` | getYes24Status | Owner·직원 | 200 |
 | GET | `…/statistics/hourly` | getHourlyStatistics | Owner·직원 | 200 |
 | GET | `…/supplier-overview` | listSupplierOverview | Owner·직원 | 200 |
 | GET | `…/exceptions` | listExceptions | Owner·직원 | 200 |
@@ -292,7 +295,8 @@ GET /v1/me/memberships
 **A. 시작·서점 선택** — `GET /v1/me/memberships` → (없으면) `POST /v1/stores {"storeName":"…"}`(이메일 claim 필요, 같은 소유자의 같은 이름 거부) 또는 `POST /v1/invitations/accept {"token":"…"}`.
 
 **B. 도서 → 주문 접수·확정**
-1. `POST …/books {"source":"MANUAL","title":"…","listPriceKrw":"16800","reason":"수기 등록","registeredAt":"…"}` → 도서 ID. (검색: `GET …/books?isbn=`·목록 커서)
+0. **YES24 검색(B-01):** `GET …/book-search?type=ISBN|TITLE|AUTHOR&q=…&limit=10` → `{ source:"YES24", fetchedAt, items:[{id,title,authors,isbn?,listPriceKrw?,…,existingBookId?}] }`. `existingBookId`가 있으면 "이미 등록된 도서" 경고를 보이고 새로 등록하지 않는다. 결과를 선택하면 `POST …/books {"source":"YES24","title":…,"authors":…,"isbn":…,"externalId":<결과 id>,"fetchedAt":<응답 fetchedAt>,"listPriceKrw":<직원이 입력한 판매가>,"registeredAt":…}`로 등록한다(외부 정가 `listPriceKrw`는 참고값). **503이면 검색 대신 아래 수기 등록으로 전환**하고 사유를 표시한다.
+1. `POST …/books {"source":"MANUAL","title":"…","listPriceKrw":"16800","reason":"수기 등록","registeredAt":"…"}` → 도서 ID. (검색: `GET …/books?isbn=`·목록 커서). 수기 등록의 `source`는 `MANUAL`이다
 2. `POST …/orders {"lines":[{"bookId":"…","quantity":2,"unitPriceKrw":"15000"}]}` → 초안(`version` 1). **표시번호는 확정 때 서버가 발급**한다(브라우저에서 만들지 않는다).
 3. (선택) 보류 `POST …/orders/{id}/hold {"expectedVersion":1,"reason":"…","heldAt":"…"}` → 재개 `/resume {"expectedVersion":2,"resumedAt":"…"}` / 폐기 `/discard {"expectedVersion":…,"reason":"…","discardedAt":"…"}`(확정 전 초안만, 되돌릴 수 없음). 보류 중에는 확정할 수 없다(422).
 4. 확정 `POST …/orders/{id}/confirm {"expectedVersion":1}` → `displayNumber`·`totalKrw` 발급.
@@ -332,12 +336,13 @@ GET /v1/me/memberships
 
 | 기능 | 상태 |
 |---|---|
-| 고객 등록·검색·이력(C-01~04) | 서버 모듈 없음. 주문은 고객 없이 만든다. |
-| YES24 도서 검색(B-01)·YES24 연동 상태(S-08) | 외부 연동 없음. 도서는 수기 등록(`source: MANUAL`). |
+| 고객 등록·검색·이력(C-01~04) | 서버 모듈 없음(개인정보 정책 DEC-12 결정 대기 — `release/customer_module_decisions.md`). 주문은 고객 없이 만든다. |
+| YES24 도서 검색(B-01) | 서버 연동은 있다(`GET …/book-search`, `GET …/integrations/yes24`). **실제 YES24 API는 아직 확인되지 않았다**(서버 설정 `YES24_*`가 없으면 항상 503). 503이면 "미검색·장애" 사유를 표시하고 **수기 등록으로 전환**한다. 다른 외부 도서 API로 자동 전환하지 않는다. |
 | 내보내기 요청·결과(S-09) | 서버 없음. |
 | 확정 후 가격/품목 변경(ST-O04, DEC-08) | **정책 미승인 — 서버가 막는다**(경로 없음, DB 거부). "승인 필요"로 비활성 표시. |
 | 예외 임의 종결(DEC-16)·타 고객 재배분 세부(DEC-15)·개인정보 보존(DEC-12)·고객 동의(DEC-01) | 미승인 — 활성화하지 않는다. |
-| 직원 역할 변경(직원→Owner), 서점 중지·해지·소유자 이전 | 서버 명령 없음. 위임(`delegations`)만 있다. |
+| 직원 역할 변경(직원→Owner) | **하지 않기로 결정**(Owner는 서점 개설자뿐, 직원은 위임으로만 권한을 받는다). 화면에 만들지 않는다. |
+| 서점 중지·해지·소유자 이전 | 서버 명령 없음. |
 | 기간별 통계 카드 | 서버 없음 → 데모 값. (공급처별 현황은 `GET …/supplier-overview`로 있다.) (발주 지연 카드는 `procurement.delayedLines`로 있으나 **전달 후 경과일 기준**이다 — 공급처 회신 ETA는 반영하지 않는다.) |
 | 고객 공개 주문(P1)·택배(D23)·PG/VAN(P2)·모바일 M1~M3 | 범위 밖. |
 | 로그인·회원가입·비밀번호·이메일 인증 | Supabase Auth가 담당(이 서버 API 없음). |

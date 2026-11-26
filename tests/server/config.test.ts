@@ -77,3 +77,32 @@ describe("loadConfig: DB 쿼리 시간 제한", () => {
     }
   });
 });
+
+describe("loadConfig: YES24 도서 검색 연동", () => {
+  it("주소와 키를 함께 줄 때만 켜지고(없으면 미설정), 운영 주소는 https여야 하며(로컬 개발은 http 허용), 제한 시간은 500~30000ms(기본 5000)이다", () => {
+    expect(loadConfig(base).yes24).toBeUndefined();
+    const on = loadConfig({ ...base, YES24_BOOK_SEARCH_URL: "https://book-gateway.example.com/search", YES24_API_KEY: "key-123" });
+    expect(on.yes24).toEqual({ url: "https://book-gateway.example.com/search", apiKey: "key-123", timeoutMs: 5000 });
+    expect(loadConfig({ ...base, YES24_BOOK_SEARCH_URL: "http://127.0.0.1:9999/search", YES24_API_KEY: "k", YES24_TIMEOUT_MS: "800" }).yes24).toEqual({ url: "http://127.0.0.1:9999/search", apiKey: "k", timeoutMs: 800 });
+    expect(loadConfig({ ...base, YES24_BOOK_SEARCH_URL: "http://localhost:9/s", YES24_API_KEY: "k" }).yes24?.url).toBe("http://localhost:9/s");
+  });
+
+  it("주소만 있거나 키만 있거나, 운영 주소가 http이거나, URL·제한 시간이 잘못되면 시작을 거부하고 오류에 키·주소 값을 싣지 않는다", () => {
+    const fails = (env: Record<string, string | undefined>) => {
+      try {
+        loadConfig(env);
+      } catch (error) {
+        return (error as Error).message;
+      }
+      throw new Error("should fail");
+    };
+    expect(fails({ ...base, YES24_BOOK_SEARCH_URL: "https://x.example.com/s" })).toMatch(/YES24_API_KEY/);
+    expect(fails({ ...base, YES24_API_KEY: "secret-key-xyz" })).toMatch(/YES24_BOOK_SEARCH_URL/);
+    expect(fails({ ...base, YES24_BOOK_SEARCH_URL: "http://book.example.com/s", YES24_API_KEY: "secret-key-xyz" })).toMatch(/https/);
+    expect(fails({ ...base, YES24_BOOK_SEARCH_URL: "not a url", YES24_API_KEY: "secret-key-xyz" })).toMatch(/YES24_BOOK_SEARCH_URL/);
+    expect(fails({ ...base, YES24_BOOK_SEARCH_URL: "https://x.example.com/s", YES24_API_KEY: "k", YES24_TIMEOUT_MS: "100" })).toMatch(/YES24_TIMEOUT_MS/);
+    for (const env of [{ ...base, YES24_API_KEY: "secret-key-xyz" }, { ...base, YES24_BOOK_SEARCH_URL: "http://book.example.com/s", YES24_API_KEY: "secret-key-xyz" }]) {
+      expect(fails(env)).not.toContain("secret-key-xyz");
+    }
+  });
+});
