@@ -42,6 +42,8 @@ export type AppDeps = {
   logError?: (error: unknown) => void;
   /** 외부 도서 검색 어댑터(YES24, DEC-17). 없으면 도서 검색은 503이고 수기 등록을 쓴다 */
   bookSearch?: BookSearchProvider;
+  /** 서점 재사용을 승인할 수 있는 플랫폼 운영자의 사용자 ID. 없으면 운영자 경로는 모두 403이다 */
+  platformAdminUserIds?: readonly string[];
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -84,7 +86,7 @@ const route = (method: Route["method"], path: string, spec: Omit<Route, "method"
 const accountRoute = (method: Route["method"], path: string, spec: Omit<Route, "method" | "pattern" | "template" | "scope">): Route => ({
   method,
   pattern: new RegExp(`^/v1${path}$`),
-  template: path,
+  template: path.replace(/\(\?<(\w+)>[^)]*\)/g, "{$1}"),
   scope: "account",
   ...spec,
 });
@@ -113,6 +115,10 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
   const cancellations = createPgCancellationApi({ pool: deps.pool });
   const dispositions = createPgDispositionApi({ pool: deps.pool });
   const actor = (c: Ctx) => ({ userId: c.userId });
+  /** 운영자 경로의 호출자 확인: 허용된 운영자 계정이 아니면 403(서점 구성원 권한과 무관하다) */
+  const requireAdmin = (c: Ctx) => {
+    if (!(deps.platformAdminUserIds ?? []).some((id) => id.toLowerCase() === c.userId.toLowerCase())) throw new AppError("FORBIDDEN");
+  };
   // 본문은 신뢰할 수 없는 JSON이다. 형식 검증은 도메인이 하므로 여기서는 경계 타입만 맞춘다
   const merge = (c: Ctx, extra: Record<string, unknown>) => ({ ...c.body, ...extra }) as never;
   const t = (c: Ctx) => c.params.tenantId!;
@@ -331,6 +337,23 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       success: 201,
       fields: ["outcome", "note", "resultAt"],
       run: (c) => notifications.recordNotificationResult(actor(c), merge(c, { tenantId: t(c), attemptId: c.params.attemptId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    accountRoute("GET", "/admin/stores", {
+      success: 200,
+      // 플랫폼 운영자 전용: 중지·해지된 서점 목록
+      run: (c) => {
+        requireAdmin(c);
+        return storeApi.listInactiveStores(actor(c));
+      },
+    }),
+    accountRoute("POST", "/admin/stores/(?<storeId>[^/]+)/reactivation", {
+      success: 200,
+      fields: ["reason", "approvedAt"],
+      // 플랫폼 운영자 전용: 중지·해지된 서점의 재사용 승인
+      run: (c) => {
+        requireAdmin(c);
+        return storeApi.reactivateStore(actor(c), merge(c, { storeId: c.params.storeId!, idempotencyKey: c.idempotencyKey }));
+      },
     }),
     accountRoute("GET", "/me/memberships", {
       success: 200,
@@ -569,6 +592,11 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       success: 200,
       fields: ["name", "longUnreceivedWarningDays", "customerRetentionDays"],
       run: (c) => storeApi.updateStoreSettings(actor(c), merge(c, { tenantId: t(c), idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/store/deactivation", {
+      success: 200,
+      fields: ["kind", "reason", "changedAt"],
+      run: (c) => storeApi.deactivateStore(actor(c), merge(c, { tenantId: t(c), idempotencyKey: c.idempotencyKey })),
     }),
     route("GET", "/members", {
       success: 200,

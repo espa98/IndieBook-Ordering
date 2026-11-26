@@ -12,6 +12,8 @@ export type ServerConfig = {
   jwt: JwtVerifyOptions;
   /** YES24 도서 검색 연동(DEC-17). 주소와 키를 함께 설정했을 때만 있다. 없으면 도서 검색은 503이고 수기 등록을 쓴다 */
   yes24?: { url: string; apiKey: string; timeoutMs: number };
+  /** 서점 재사용을 승인할 수 있는 플랫폼 운영자의 사용자 ID(UUID, 소문자). 없으면 승인할 사람이 없다 */
+  platformAdminUserIds: string[];
   /** CORS를 허용하는 브라우저 오리진(정확히 일치). 기본은 빈 목록 */
   allowedOrigins: string[];
 };
@@ -65,6 +67,15 @@ function parseOrigins(raw: string | undefined): string[] {
   return origins;
 }
 
+/** 쉼표로 구분한 운영자 사용자 UUID 목록. UUID가 아니거나 비었거나 중복이면 거부한다(오류에 값을 싣지 않는다) */
+function parseAdminUserIds(raw: string | undefined): string[] {
+  if (raw === undefined || raw.trim() === "") return [];
+  const ids = raw.split(",").map((v) => v.trim().toLowerCase());
+  if (!ids.every((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id))) return fail("PLATFORM_ADMIN_USER_IDS must be a comma-separated list of user UUIDs");
+  if (new Set(ids).size !== ids.length) return fail("PLATFORM_ADMIN_USER_IDS must not contain duplicates");
+  return ids;
+}
+
 /** YES24 연동 설정. 주소와 키는 함께 있어야 하고, 운영 주소는 https여야 한다(로컬 개발 주소만 http 허용). 오류에 값을 싣지 않는다 */
 function parseYes24(env: Record<string, string | undefined>): ServerConfig["yes24"] {
   const rawUrl = env.YES24_BOOK_SEARCH_URL?.trim();
@@ -106,6 +117,7 @@ export function loadConfig(env: Record<string, string | undefined>): ServerConfi
     statementTimeoutMs: integer(env, "DB_STATEMENT_TIMEOUT_MS", 10_000, 100, 120_000),
     closureSweepIntervalSeconds: integer(env, "CLOSURE_SWEEP_INTERVAL_SECONDS", 300, 0, 86_400),
     ...(parseYes24(env) ? { yes24: parseYes24(env)! } : {}),
+    platformAdminUserIds: parseAdminUserIds(env.PLATFORM_ADMIN_USER_IDS),
     allowedOrigins: parseOrigins(env.CORS_ALLOWED_ORIGINS),
     jwt: { keys, audience: "authenticated", ...(env.SUPABASE_JWT_ISSUER ? { issuer: env.SUPABASE_JWT_ISSUER } : {}) },
   };

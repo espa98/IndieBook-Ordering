@@ -4,6 +4,8 @@
 
 **책임 분리**: Claude Code = DB/RLS/업무 API·검증, Bolt.new = 반응형 웹 UI·업무 흐름·검증된 API 연결. API V2.2는 설계안이며 구현 완료를 의미하지 않는다.
 
+**API 연결 기준(2026-11-27 갱신)**: 백엔드는 구현·격리 시험을 마쳤다. 연결은 `Docs/05_API_Security/Bolt_API_연결_가이드_V1.0.md`와 `openapi/ordering.yaml`·`openapi/ordering-http.yaml`(115개 경로)을 기준으로 한다. 서점 상태(중지·해지)·고객·YES24 검색 흐름은 가이드 §7 레시피(F-2 포함)와 02·04·05·08·10단계 프롬프트에 반영돼 있다. 운영 배포는 여전히 보류다.
+
 **기준 문서**: OPDS V1.1, STBR V1.2, PRD/FRD V1.3, Use Case V1.5, IA V1.3, SFS V1.1, Web P0 UI/UX Guide V1.1, ERD V2.1, API/RLS V2.2, API 구현 현황표 V1.0.
 
 **운영 원칙**: `ordering-dev` 무단 변경 금지, `testBookshare` 접근 금지, 미승인 정책 활성화 금지, 운영 배포 보류. 실제 API 검증 전 화면은 데모/비활성으로 명확히 구분한다.

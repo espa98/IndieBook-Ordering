@@ -36,7 +36,7 @@ describe("GET /v1/me/memberships", () => {
   it("본인의 활성 서점과 역할만 돌려주고(이메일 claim이 없어도), 서점이 없는 계정은 빈 목록이다", async () => {
     const mine = await call("GET", ME);
     expect(mine.status).toBe(200);
-    expect(mine.body).toEqual({ data: [{ tenantId: T1, tenantName: "내 서점", role: "OWNER" }] });
+    expect(mine.body).toEqual({ data: [{ tenantId: T1, tenantName: "내 서점", role: "OWNER", storeStatus: "ACTIVE" }] });
     expect(JSON.stringify(mine.body)).not.toContain(T2);
     expect((await call("GET", "66666666-0000-4000-8000-0000000000b3")).body).toEqual({ data: [] });
   });
@@ -46,6 +46,6 @@ describe("GET /v1/me/memberships", () => {
     expect((await call("POST", ME)).status).toBe(405);
     expect((await call("GET", ME, "tenantId=" + T2)).status).toBe(400);
     const forged = await call("GET", ME, "", { app_metadata: { tenant_id: T2, role: "OWNER" }, tenant_id: T2 });
-    expect(forged.body).toEqual({ data: [{ tenantId: T1, tenantName: "내 서점", role: "OWNER" }] });
+    expect(forged.body).toEqual({ data: [{ tenantId: T1, tenantName: "내 서점", role: "OWNER", storeStatus: "ACTIVE" }] });
   });
 });

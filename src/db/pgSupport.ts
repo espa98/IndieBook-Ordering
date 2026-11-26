@@ -106,16 +106,17 @@ export function isCommandKeyConflict(error: unknown): boolean {
 export async function loadMembership(client: PoolClient, userId: string, tenantId: string): Promise<Membership[]> {
   if (!isUuid(userId) || !isUuid(tenantId)) return [];
   const rows = (
-    await client.query("select user_id, tenant_id, role, active from public.ordering_members where user_id = $1 and tenant_id = $2", [
-      userId,
-      tenantId,
-    ])
+    await client.query(
+      // 중지·해지된 서점(status <> 'ACTIVE')은 멤버십이 있어도 사용할 수 없다(서점 범위 요청 전부 FORBIDDEN)
+      "select m.user_id, m.tenant_id, m.role, m.active, t.status = 'ACTIVE' as store_active from public.ordering_members m join public.ordering_tenants t on t.id = m.tenant_id where m.user_id = $1 and m.tenant_id = $2",
+      [userId, tenantId],
+    )
   ).rows;
   return rows.map((r) => ({
     userId: r.user_id,
     tenantId: r.tenant_id,
     role: r.role,
-    status: r.active ? "ACTIVE" : "INACTIVE",
+    status: r.active && r.store_active ? "ACTIVE" : "INACTIVE",
   }));
 }
 

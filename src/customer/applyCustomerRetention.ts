@@ -12,7 +12,11 @@ export type ApplyCustomerRetentionDeps = {
   customerChanges: { save(change: CustomerChange): void };
   stores: { getRetentionDays(tenantId: string): number | undefined };
   /** 고객의 마지막 활동(등록·수정·주문 연결 중 가장 늦은 시각) */
-  activity: { lastActivityAt(tenantId: string, customerId: string): string | undefined };
+  activity: {
+    lastActivityAt(tenantId: string, customerId: string): string | undefined;
+    /** 고객이 현재 연결된 주문이 아직 열려 있는가(종결·취소·폐기 전). 열려 있으면 안내 연락처가 필요해 익명화하지 않는다 */
+    hasOpenOrder(tenantId: string, customerId: string): boolean;
+  };
   idempotency: IdempotencyStore;
   now?: () => Date;
 };
@@ -29,7 +33,7 @@ export type ApplyCustomerRetentionResult = { retentionDays: number; cutoff: stri
 
 /**
  * Owner가 정한 보존기간(일)이 지난 고객을 익명화한다(고객 결정 #2). 마지막 활동이 `appliedAt - 보존기간`보다 이전인 고객만 대상이고
- * 정확히 기한인 고객은 아직 아니다. 보존기간이 없으면(기한 없음) 거부한다. 익명화는 `anonymizeCustomer`와 같은 규칙·이력을 쓴다.
+ * 정확히 기한인 고객은 아직 아니다. 아직 열려 있는 주문에 연결된 고객은 제외한다(안내 연락처가 필요하다). 보존기간이 없으면(기한 없음) 거부한다. 익명화는 `anonymizeCustomer`와 같은 규칙·이력을 쓴다.
  */
 export function applyCustomerRetention(deps: ApplyCustomerRetentionDeps, request: ApplyCustomerRetentionRequest): ApplyCustomerRetentionResult {
   if (!isNonEmptyString(request.appliedBy)) invalid("appliedBy", "must be a non-empty string");
@@ -43,7 +47,7 @@ export function applyCustomerRetention(deps: ApplyCustomerRetentionDeps, request
       const cutoffMs = appliedMs - retentionDays * 86_400_000;
       const due = deps.customers
         .list(request.tenantId)
-        .filter((c) => c.anonymizedAt === undefined)
+        .filter((c) => c.anonymizedAt === undefined && !deps.activity.hasOpenOrder(request.tenantId, c.id))
         .map((c) => ({ c, last: Date.parse(deps.activity.lastActivityAt(request.tenantId, c.id) ?? "") }))
         .filter((x) => !Number.isNaN(x.last) && x.last < cutoffMs)
         .sort((a, b) => a.last - b.last || (a.c.id < b.c.id ? -1 : 1));

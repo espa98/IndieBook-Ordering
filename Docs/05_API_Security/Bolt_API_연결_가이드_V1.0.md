@@ -1,6 +1,6 @@
 # BookFlow Ordering — Bolt.new용 API 연결 가이드 V1.0
 
-작성일: 2026-11-26 · 기준: `openapi/ordering.yaml`(주문 4개)·`openapi/ordering-http.yaml`(나머지 108개), 격리 DB 시험 211개 파일·1650개 테스트 통과
+작성일: 2026-11-26 · 기준: `openapi/ordering.yaml`(주문 4개)·`openapi/ordering-http.yaml`(나머지 111개), 격리 DB 시험 216개 파일·1670개 테스트 통과
 
 **누구를 위한 문서인가:** `BookFlow_Ordering_BoltNew_단계별프롬프트_V1.0`으로 웹 UI를 만드는 프런트엔드 작업자(Bolt.new). 책임 분리는 그대로다 — *백엔드(이 저장소) = DB·RLS·업무 API·검증, Bolt.new = 반응형 웹 UI·업무 흐름·검증된 API 연결.* 이 문서는 **"서버가 UI에 무엇을 약속하는가"** 를 한곳에 모은 것이고, 필드 단위의 정확한 계약은 항상 `openapi/*.yaml`이 기준이다(이 문서의 예시와 어긋나면 명세가 맞다).
 
@@ -107,7 +107,7 @@ GET /v1/me/memberships
 
 ---
 
-## 6. 엔드포인트 목록 (명세에서 생성 — 103개)
+## 6. 엔드포인트 목록 (명세에서 생성 — 115개)
 
 권한 열: **Owner만** = 직원은 403 / Owner·위임 직원 = 점주가 위임을 준 직원만 / Owner·직원 = 활성 멤버 / "일부 동작은 Owner" = 예) 취소·환급 요청 승인·거절·폐기 처분은 Owner, 철회·그 외는 직원도 가능. 같은 경로라도 **본문 값에 따라** 갈리는 규칙이 있으니(재배분은 다른 고객 주문으로 옮길 때 Owner) 403은 항상 처리한다.
 
@@ -239,6 +239,7 @@ GET /v1/me/memberships
 | 메서드 | 경로(`/v1/tenants/{tenantId}` 접두 생략: …) | operationId | 권한 | 성공 |
 |---|---|---|---|---|
 | GET | `…/store` | getStore | Owner·직원 | 200 |
+| POST | `…/store/deactivation` | deactivateStore | Owner만 | 200 |
 | POST | `…/store/settings` | updateStoreSettings | **Owner만** | 200 |
 | GET | `…/members` | listMembers | **Owner만** | 200 |
 | GET | `…/staff-invitations` | listInvitations | **Owner만** | 200 |
@@ -252,7 +253,9 @@ GET /v1/me/memberships
 
 | 메서드 | 경로(`/v1/tenants/{tenantId}` 접두 생략: …) | operationId | 권한 | 성공 |
 |---|---|---|---|---|
-| GET | `/v1/me/memberships` | listMyMemberships | 로그인한 계정 | 200 |
+| GET | `/v1/me/memberships` | listMyMemberships | 로그인한 계정(응답에 `storeStatus`) | 200 |
+| GET | `/v1/admin/stores` | listInactiveStores | **플랫폼 운영자만**(그 밖은 403) | 200 |
+| POST | `/v1/admin/stores/{storeId}/reactivation` | reactivateStore | **플랫폼 운영자만** | 200 |
 | POST | `/v1/stores` | openStore | 로그인한 계정 | 201 |
 | POST | `/v1/invitations/accept` | acceptInvitation | 로그인한 계정 | 201 |
 
@@ -324,6 +327,8 @@ GET /v1/me/memberships
 **E. 취소·반품·환급** — 취소 요청 `POST …/orders/{id}/cancellation-requests` → (Owner) 결정 `/order-cancellation-requests/{id}/decision` → 적용 `/application`(취소 물량이 처분 대기가 된다) → Owner가 재고 편입 `/allocation-cancellations/{id}/stock-intakes` 또는 반품 `/return-requests`(회신·출고·완료·예외). 환급은 `POST …/orders/{id}/refund-tasks`(Owner) → 요청·시도·결정. 목록: `GET …/allocation-cancellations?open=true`, `GET …/refund-tasks?open=true`.
 
 **F. 직원·설정(Owner)** — 초대 `POST …/staff-invitations {"email":"…","expiresAt":"…"}`(**응답의 `token`은 이때만** 한 번 보인다, 목록에는 없다) → 직원 목록 `GET …/members`·초대 목록 → 비활성화 `POST …/members/{id}/status {"status":"INACTIVE"}` → 위임 `POST …/members/{id}/delegations {"kind":"MANAGEMENT|STOCK_ADJUSTMENT","delegated":true}` → 서점 설정 `POST …/store/settings {"name":"…","longUnreceivedWarningDays":7}`.
+
+**F-2. 서점 중지·해지와 운영자 승인 재사용(ST-A06/A07)** — Owner가 `POST …/store/deactivation {"kind":"SUSPENDED|TERMINATED","reason":"…","changedAt":"…"}`로 중지·해지하면 **그 순간부터 그 서점의 서점 범위 요청은 Owner·직원 모두 403**이다(서점 선택 화면 `GET /v1/me/memberships`의 항목에 `storeStatus: "SUSPENDED"|"TERMINATED"`가 나오므로 UI는 이 값으로 "사용할 수 없음 — 운영자 승인이 필요합니다" 화면을 보여 준다. 403만으로는 권한 없음과 구분되지 않는다). 다시 쓰려면 **플랫폼 운영자**(서버 `PLATFORM_ADMIN_USER_IDS`에 등록된 계정)가 `GET /v1/admin/stores`로 중지·해지된 서점과 사유를 보고 `POST /v1/admin/stores/{storeId}/reactivation {"reason":"…","approvedAt":"…"}`로 승인한다. 운영자 화면은 서점 UI와 별개의 관리자 화면이다(서점 구성원이 아니어도 된다). 중지 중에는 백그라운드 종결도 멈춘다. 서점 설정의 `customerRetentionDays`(기본 15)는 `GET …/store`·`POST …/store/settings`로 읽고 바꾸며(null이면 기한 없음), Owner가 `POST …/customers/retention-applications {"appliedAt":"…"}`를 실행하면 보존기간이 지난 고객이 익명화된다(열린 주문에 연결된 고객은 제외).
 
 **G. 대시보드(O-01)** — `GET …/dashboard[?since=<UTC 시각>&thresholdDays=&delayDays=]`: 주문·발주·환급·안내·미결제·미배분 입고·부분입고 잔량·**발주 지연**(전달 후 `delayDays`일, 기본 7)·취소 후속·장기 미수령 **건수**(숫자 카드). 카드를 누르면 해당 목록(§6)으로 이동한다. "오늘 접수 주문"은 서점 시간대를 아는 UI가 정한 자정을 `since`로 보낸다. 공급처별 현황은 `GET …/supplier-overview[?delayDays=]`, 예외 큐는 `GET …/exceptions`, 장기 미수령 목록은 `GET …/long-unreceived-warnings`(경고일은 서점 설정이 기본값).
 

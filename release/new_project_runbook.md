@@ -52,6 +52,7 @@
 | `YES24_BOOK_SEARCH_URL` | 아니오(키와 함께) | YES24 상품 검색 주소(DEC-17). 실제 서비스는 `https://apis.yes24.com/v1/goods/itemList`. **https**여야 한다(로컬 개발 주소만 http). 없으면 도서 검색은 503이고 수기 등록을 쓴다 |
 | `YES24_API_KEY` | 〃(주소와 함께) | YES24 Developers에서 발급한 API 키. `X-Api-Key` 헤더로만 보내고 로그·오류·응답에 싣지 않는다. 비밀이므로 실행 환경에서만 주입한다(서버는 `.env`를 자동으로 읽지 않으니 로컬에서는 `node --env-file=.env dist/server.mjs`) |
 | `YES24_TIMEOUT_MS` | 아니오 | 상류 요청 제한 시간. 기본 5000, 500~30000 |
+| `PLATFORM_ADMIN_USER_IDS` | 아니오(운영 시 사실상 필수) | 서점 재사용을 승인할 수 있는 **플랫폼 운영자**의 사용자 ID(UUID, 쉼표 구분). 비면 중지·해지된 서점을 되살릴 사람이 없다(이 경우 승인 API가 모두 403). 서점 Owner·Staff와 별개이며 서점을 열지 않아도 된다. 비밀은 아니지만 권한이 크므로 신뢰할 계정만 넣는다 |
 | `CLOSURE_SWEEP_INTERVAL_SECONDS` | 아니오 | 종결 스위퍼 간격, 기본 300, 0이면 끔 |
 | `CORS_ALLOWED_ORIGINS` | 아니오 | 허용 오리진(쉼표 구분). **비우면 브라우저 오리진을 허용하지 않는다**(E9: 값 결정 필요) |
 

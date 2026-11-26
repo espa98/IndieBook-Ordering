@@ -132,6 +132,7 @@ describe("openapi/ordering-http.yaml: 서버 경로표와 명세의 드리프트
       "POST /books source": ["MANUAL", "YES24"],
       "POST /members/{targetUserId}/status status": ["ACTIVE", "INACTIVE"],
       "POST /members/{targetUserId}/delegations kind": ["MANAGEMENT", "STOCK_ADJUSTMENT"],
+      "POST /store/deactivation kind": ["SUSPENDED", "TERMINATED"],
       "POST /suppliers orderChannel": ["API", "EMAIL", "FILE", "MESSENGER", "PHONE", "WEB"],
       "POST /orders/{orderId}/lines/{lineId}/duplicate-risk-approvals surplusPlan": ["STOCK_INTAKE", "SUPPLIER_RETURN"],
       "POST /purchase-orders/{purchaseOrderId}/delivery method": ["API", "EMAIL", "FILE", "MESSENGER", "PHONE", "WEB"],

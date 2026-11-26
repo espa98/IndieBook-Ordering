@@ -152,6 +152,7 @@ describe("고객 보존기간 HTTP (고객 결정 #2)", () => {
     const apply = (sub: string) => call("POST", "/customers/retention-applications", sub, { body: { appliedAt: PAST } });
 
     expect((await apply(STAFF)).status).toBe(403);
+    expect((await call("POST", "/store/settings", OWNER, { body: { customerRetentionDays: null } })).status).toBe(200); // 기본 15일을 해제
     expect((await apply(OWNER)).status).toBe(422);
     expect((await call("POST", "/store/settings", OWNER, { body: { customerRetentionDays: 30 } })).status).toBe(200);
     expect((await call("GET", "/store", STAFF)).body.data.customerRetentionDays).toBe(30);

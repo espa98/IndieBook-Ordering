@@ -51,9 +51,9 @@ afterAll(async () => {
 }, 60_000);
 
 describe("서점 기본정보 조회 (S-01)", () => {
-  it("활성 멤버는 서점 정보(이름·상태·개설일·경고일 기본 7일)와 자기 역할을 읽고, 비멤버·비활성·다른 서점은 FORBIDDEN이다", async () => {
+  it("활성 멤버는 서점 정보(이름·상태·개설일·경고일 기본 7일·고객 정보 보존기간 기본 15일)와 자기 역할을 읽고, 비멤버·비활성·다른 서점은 FORBIDDEN이다", async () => {
     const info = await api().getStore({ userId: STAFF }, { tenantId: T });
-    expect(info).toEqual({ id: T, name: "책방 오후 세시", status: "ACTIVE", createdAt: expect.any(String), longUnreceivedWarningDays: 7, myRole: "STAFF" });
+    expect(info).toEqual({ id: T, name: "책방 오후 세시", status: "ACTIVE", createdAt: expect.any(String), longUnreceivedWarningDays: 7, customerRetentionDays: 15, myRole: "STAFF" });
     expect((await api().getStore(owner, { tenantId: T })).myRole).toBe("OWNER");
     for (const userId of [STRANGER, EX_STAFF, OTHER_OWNER]) expect(await codeOf(() => api().getStore({ userId }, { tenantId: T })), userId).toBe("FORBIDDEN");
   });
@@ -109,13 +109,13 @@ describe("서점 설정 변경 (S-01·S-07, Owner만)", () => {
 });
 
 describe("고객 정보 보존기간 설정 (고객 결정 #2, Postgres)", () => {
-  it("Owner가 정하면 서점 정보에 나타나고(없으면 필드 없음) 이력에 전·후가 남으며, 직원은 FORBIDDEN이고 null로 해제된다", async () => {
+  it("Owner가 정하면 서점 정보에 나타나고(기본 15일, 해제하면 필드 없음) 이력에 전·후가 남으며, 직원은 FORBIDDEN이고 null로 해제된다", async () => {
     expect(await codeOf(() => update({ userId: STAFF }, T, { customerRetentionDays: 365 }))).toBe("FORBIDDEN");
 
     await update(owner, T, { customerRetentionDays: 365 });
     expect(await api().getStore({ userId: STAFF }, { tenantId: T })).toMatchObject({ customerRetentionDays: 365 });
     expect((await q(`select customer_retention_days from public.ordering_tenants where id = $1`, [T]))[0]).toEqual({ customer_retention_days: 365 });
-    expect((await q(`select changes from public.ordering_tenant_setting_changes where tenant_id = $1 and changes ? 'customerRetentionDays'`, [T]))[0]).toEqual({ changes: { customerRetentionDays: { from: null, to: 365 } } });
+    expect((await q(`select changes from public.ordering_tenant_setting_changes where tenant_id = $1 and changes ? 'customerRetentionDays'`, [T]))[0]).toEqual({ changes: { customerRetentionDays: { from: 15, to: 365 } } });
 
     await update(owner, T, { customerRetentionDays: null });
     expect(await api().getStore(owner, { tenantId: T })).not.toHaveProperty("customerRetentionDays");

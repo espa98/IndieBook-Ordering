@@ -35,6 +35,15 @@ const send = async (template: string, body: Record<string, unknown>) => {
   const token = signHs256({ sub: OWNER, aud: "authenticated", role: "authenticated", exp: now + 3600, iat: now }, SECRET, { kid: "k1" });
   const path = `/v1/tenants/${T}${template}`.replace(/\{code\}/g, "missing-code").replace(/\{[^}]+\}/g, MISSING);
   const response = await app({ method: "POST", path, query: new URLSearchParams(), headers: { authorization: `Bearer ${token}`, "idempotency-key": `agree-${++seq}`, "content-type": "application/json" }, rawBody: JSON.stringify(body) });
+  // 서점 자체를 중지·해지하는 경로는 기준 본문이 성공하면 이후 모든 요청이 403이 된다. 시험 격리를 위해 호출마다 서점을 다시 켠다
+  if (template === "/store/deactivation") {
+    const c = await db.connect();
+    try {
+      await c.query(`update public.ordering_tenants set status = 'ACTIVE' where id = $1`, [T]);
+    } finally {
+      await c.end();
+    }
+  }
   return { status: response.status, message: (response.body as any)?.error?.message as string | undefined };
 };
 

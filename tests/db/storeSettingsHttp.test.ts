@@ -40,7 +40,7 @@ describe("서점 기본정보·설정 HTTP", () => {
   it("직원도 서점 정보를 읽고, Owner가 이름·경고일을 바꾸면 조회에 반영되며 변경 기록(전·후 값)이 돌아온다", async () => {
     const info = await call("GET", "/store", STAFF);
     expect(info.status).toBe(200);
-    expect(info.body.data).toEqual({ id: T, name: "책방 오후 세시", status: "ACTIVE", createdAt: expect.any(String), longUnreceivedWarningDays: 7, myRole: "STAFF" });
+    expect(info.body.data).toEqual({ id: T, name: "책방 오후 세시", status: "ACTIVE", createdAt: expect.any(String), longUnreceivedWarningDays: 7, customerRetentionDays: 15, myRole: "STAFF" });
 
     const changed = await call("POST", "/store/settings", OWNER, { name: "책방, 오후 네시", longUnreceivedWarningDays: 10 });
     expect(changed.status).toBe(200);

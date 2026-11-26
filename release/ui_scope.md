@@ -34,7 +34,7 @@
 - **YES24 도서 검색(B-01)**: 서버 연동이 있고 **실제 YES24 API 계약을 확인했다**(2026-11-26). 설정이 없거나 장애면 503 → 수기 등록.
 - **ST-O04 확정 후 가격/품목 변경, 고객 동의(DEC-08)**: 정책 미승인.
 - **공개 고객 주문(P1), 택배(D23), PG/VAN(P2), 모바일 M1~M3**: 범위 밖.
-- S-09 내보내기: 서버 없음. (S-08 YES24 상태는 `GET /integrations/yes24`로 있다.) (S-01 서점 기본정보와 S-07 미수령 경고일은 `GET /store`·`POST /store/settings`로 구현됨 — 보고서 §108. 서점 중지·해지·소유자 이전은 없다.)
+- S-09 내보내기: 서버 없음. (S-08 YES24 상태는 `GET /integrations/yes24`로 있다.) (S-01 서점 기본정보와 S-07 미수령 경고일은 `GET /store`·`POST /store/settings`로 구현됨 — 보고서 §108. 서점 중지·해지는 `POST /store/deactivation`(Owner) + 운영자 승인 `POST /v1/admin/stores/{id}/reactivation`으로 구현됐다(2026-11-27, 아래 §서점 상태). 소유자 이전은 없다.)
 
 ## 4. 백엔드 보강 목록 (UI 막힘 순)
 
@@ -72,3 +72,8 @@ UI 단계 순서에 맞춰 서버가 먼저 만들 조회 API다. 모두 같은 
 **(Bolt.new)** 연결 방법·요청/응답 규칙·오류 처리·호출 레시피는 `Docs/05_API_Security/Bolt_API_연결_가이드_V1.0.md`에 정리했다(엔드포인트 표는 명세에서 생성). `00_공통_실행규칙`과 01~10단계를 이 문서의 §2 표와 `openapi/ordering.yaml`·`openapi/ordering-http.yaml`을 API 연결표로 삼아 진행한다. 대시보드(03)는 §4 3번이 1차 완료라 숫자 카드 일부는 실제 API, 나머지는 데모 값이다.
 
 **낡은 문서:** `Docs/05_API_Security/BookFlow_Ordering_API_구현현황표_V1.0.md`(2026-11-22, "HTTP 라우터 미확인")는 현재 상태와 다르다. UI 연결의 기준은 이 문서와 `openapi/*.yaml`이다(해당 문서 첫머리에 같은 안내를 달았다).
+
+## 서점 상태(중지·해지)와 운영자 화면 — 2026-11-27 추가
+- Owner가 `POST /store/deactivation`으로 서점을 **중지(SUSPENDED)·해지(TERMINATED)** 하면 그 서점의 서점 범위 요청은 Owner·직원 모두 403이다. UI는 서점 선택 화면(`GET /v1/me/memberships`)의 `storeStatus`로 상태를 알고, ACTIVE가 아니면 **"사용할 수 없음 — 운영자 승인이 필요합니다"** 화면을 보여 준다(403만으로는 권한 없음과 구분되지 않는다).
+- 재사용은 **플랫폼 운영자**(서버 `PLATFORM_ADMIN_USER_IDS`)만 `GET /v1/admin/stores`·`POST /v1/admin/stores/{storeId}/reactivation`로 승인한다. 운영자 화면은 서점 UI와 별개의 관리자 화면이다. 운영자의 서점 데이터 열람(지원 권한)은 없다.
+- 고객 정보 보존기간은 서점 설정 `customerRetentionDays`(기본 15일, Owner가 변경·해제)이고 Owner가 `POST /customers/retention-applications`를 실행하면 익명화된다(열린 주문의 고객 제외).

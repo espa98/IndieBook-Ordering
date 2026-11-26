@@ -185,6 +185,9 @@ export function createPgCustomerApi(deps: { pool: PoolLike }) {
                       coalesce((select max(l.recorded_at) from public.ordering_order_customer_links l where l.tenant_id = c.tenant_id and l.customer_id = c.id), c.created_at)) as last_activity
                from public.ordering_customers c
               where c.tenant_id = $1 and c.anonymized_at is null
+                and not exists (select 1 from (select l.order_id from public.ordering_order_customer_links l where l.tenant_id = c.tenant_id and l.customer_id = c.id order by l.recorded_at desc, l.id desc limit 1) cur
+                                  join public.ordering_orders o on o.tenant_id = c.tenant_id and o.id = cur.order_id
+                                 where o.closed_at is null and o.cancelled_at is null and o.discarded_at is null)
                 and greatest(c.created_at,
                       coalesce((select max(h.recorded_at) from public.ordering_customer_changes h where h.tenant_id = c.tenant_id and h.customer_id = c.id), c.created_at),
                       coalesce((select max(l.recorded_at) from public.ordering_order_customer_links l where l.tenant_id = c.tenant_id and l.customer_id = c.id), c.created_at)) < $2::timestamptz
@@ -207,7 +210,7 @@ export function createPgCustomerApi(deps: { pool: PoolLike }) {
           customers: { list: () => [...candidates.values()].map((x) => x.customer), get: (_x, id) => candidates.get(id)?.customer, save: (c) => void saved.push(c) },
           customerChanges: { save: (c) => void changes.push(c) },
           stores: { getRetentionDays: () => (days === null || days === undefined ? undefined : days) },
-          activity: { lastActivityAt: (_x, id) => candidates.get(id)?.last },
+          activity: { lastActivityAt: (_x, id) => candidates.get(id)?.last, hasOpenOrder: () => false }, // 열려 있는 주문의 고객은 후보 조회에서 이미 제외했다
           idempotency,
         },
         principal,

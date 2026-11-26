@@ -138,6 +138,11 @@ describe("저장 도중 실패 주입: 모든 쓰기 뒤 실패해도 아무것�
     await write("고객 익명화", `/customers/${customer.customer.id}/anonymization`, { expectedVersion: 2, anonymizedAt: PAST }, 200);
     await write("보존기간 설정", "/store/settings", { customerRetentionDays: 30 }, 200);
     await write("보존기간 적용", "/customers/retention-applications", { appliedAt: PAST }, 200);
+    await write("서점 중지", "/store/deactivation", { kind: "SUSPENDED", reason: "원자성 시험", changedAt: PAST }, 200);
+    // 중지된 서점은 이후 단계의 요청을 모두 막으므로, 시나리오를 잇기 위해 직접 다시 켠다(운영자 승인 경로는 pgStoreStatus·storeStatusHttp 시험이 확인한다)
+    const reopen = await db.connect();
+    await reopen.query(`update public.ordering_tenants set status = 'ACTIVE' where id = $1`, [T]);
+    await reopen.end();
     await write("문구 템플릿 게시", "/message-templates", { key: "ATOMIC_READY", body: "{{storeName}}입니다", expectedVersion: 0, publishedAt: PAST }, 201);
 
     const order = await write("주문 생성", "/orders", { lines: [{ bookId: book.id, quantity: 2, unitPriceKrw: "10000" }] }, 201);

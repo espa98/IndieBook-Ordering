@@ -207,3 +207,25 @@ describe("종결 스위퍼: 주문 재개", () => {
     expect(await closedAt(stuck.orderId)).not.toBeNull();
   });
 });
+
+describe("종결 스위퍼: 중지·해지된 서점은 건드리지 않는다 (ST-A06/A07)", () => {
+  it("서점이 중지된 동안에는 종결 가능한 주문·발주도 처리하지 않고(후보가 아님), 운영자 승인으로 다시 ACTIVE가 되면 처리한다", async () => {
+    const ready = await order(12, { deliver: true, close: true });
+    const po = await purchaseOrder(13, { receive: true });
+    await rows("update public.ordering_tenants set status = 'SUSPENDED' where id = $1", [T_A]);
+
+    const suspended = await sweeper().runOnce();
+
+    expect(suspended.orders).toMatchObject({ attempted: 0, closed: 0 });
+    expect(suspended.purchaseOrders).toMatchObject({ attempted: 0, closed: 0 });
+    expect(await closedAt(ready.orderId)).toBeNull();
+    expect(await poStatus(po)).toBe("SENT");
+
+    await rows("update public.ordering_tenants set status = 'ACTIVE' where id = $1", [T_A]);
+    const active = await sweeper().runOnce();
+
+    expect(active.orders.closed).toBeGreaterThanOrEqual(1);
+    expect(await closedAt(ready.orderId)).not.toBeNull();
+    expect(await poStatus(po)).toBe("CLOSED");
+  });
+});

@@ -15,11 +15,12 @@ function retentionScene(retentionDays: number | null = 30) {
   const stale = make("오래된고객", "010-1000-0003", 31);
   const ancient = make("아주오래된", "010-1000-0004", 400);
   const activity = new Map([fresh, edge, stale, ancient].map((x) => [x.customer.id, x.lastActivityAt]));
+  const openOrderCustomers = new Set<string>();
   const deps = {
     customers: scene.deps.customers,
     customerChanges: scene.deps.customerChanges,
     stores: { getRetentionDays: (tenantId: string) => (tenantId === "tenant-a" ? retentionDays ?? undefined : undefined) },
-    activity: { lastActivityAt: (_t: string, id: string) => activity.get(id) },
+    activity: { lastActivityAt: (_t: string, id: string) => activity.get(id), hasOpenOrder: (_t: string, id: string) => openOrderCustomers.has(id) },
     idempotency: scene.deps.idempotency,
     now: () => new Date(NOW),
   };
@@ -32,7 +33,7 @@ function retentionScene(retentionDays: number | null = 30) {
     idempotencyKey: `ret-${++seq}`,
     ...extra,
   });
-  return { ...scene, deps, fresh, edge, stale, ancient, apply };
+  return { ...scene, deps, fresh, edge, stale, ancient, apply, openOrderCustomers };
 }
 
 describe("applyCustomerRetention: 보존기간이 지난 고객 익명화 (고객 결정 #2, Owner 재량)", () => {
@@ -76,7 +77,7 @@ describe("applyCustomerRetention: 보존기간이 지난 고객 익명화 (고�
       activity.set(c.id, daysAgo(100 + i));
     }
     const base = deps.activity.lastActivityAt;
-    deps.activity = { lastActivityAt: (t, id) => activity.get(id) ?? base(t, id) };
+    deps.activity = { ...deps.activity, lastActivityAt: (t, id) => activity.get(id) ?? base(t, id) };
 
     const first = applyCustomerRetention(deps, apply());
     const second = applyCustomerRetention(deps, apply());
@@ -87,5 +88,18 @@ describe("applyCustomerRetention: 보존기간이 지난 고객 익명화 (고�
     expect(second.hasMore).toBe(false);
     expect(first.anonymizedCustomerIds.length + second.anonymizedCustomerIds.length).toBe(customers.filter((c) => c.anonymizedAt !== undefined).length);
     expect(customers.filter((c) => c.anonymizedAt === undefined).map((c) => c.name).sort()).toEqual(["경계고객", "최근고객"]);
+  });
+
+  it("아직 열려 있는 주문에 연결된 고객은 기한이 지나도 익명화하지 않는다(주문이 닫히면 그때 대상이 된다)", () => {
+    const { deps, customers, stale, ancient, apply, openOrderCustomers } = retentionScene(30);
+    openOrderCustomers.add(stale.customer.id);
+
+    const first = applyCustomerRetention(deps, apply());
+
+    expect(first.anonymizedCustomerIds).toEqual([ancient.customer.id]);
+    expect(customers.find((c) => c.id === stale.customer.id)!.anonymizedAt).toBeUndefined();
+
+    openOrderCustomers.clear();
+    expect(applyCustomerRetention(deps, apply()).anonymizedCustomerIds).toEqual([stale.customer.id]);
   });
 });

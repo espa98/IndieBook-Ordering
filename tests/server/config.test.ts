@@ -106,3 +106,27 @@ describe("loadConfig: YES24 도서 검색 연동", () => {
     }
   });
 });
+
+describe("loadConfig: 플랫폼 운영자 계정(서점 재사용 승인)", () => {
+  const A = "11111111-0000-4000-8000-0000000000a9";
+  const B = "11111111-0000-4000-8000-0000000000b9";
+
+  it("PLATFORM_ADMIN_USER_IDS의 사용자 UUID 목록을 받고(공백 허용, 대소문자 무시), 없으면 빈 목록이다 — 운영자가 없으면 승인할 사람이 없다", () => {
+    expect(loadConfig(base).platformAdminUserIds).toEqual([]);
+    expect(loadConfig({ ...base, PLATFORM_ADMIN_USER_IDS: "" }).platformAdminUserIds).toEqual([]);
+    expect(loadConfig({ ...base, PLATFORM_ADMIN_USER_IDS: ` ${A.toUpperCase()} , ${B}` }).platformAdminUserIds).toEqual([A, B]);
+  });
+
+  it("UUID가 아니거나 중복이면 시작을 거부하고 오류에 값을 싣지 않는다", () => {
+    for (const bad of ["not-a-uuid", `${A},${A}`, `${A},`, "*"]) {
+      let message = "";
+      try {
+        loadConfig({ ...base, PLATFORM_ADMIN_USER_IDS: bad });
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message, bad).toMatch(/PLATFORM_ADMIN_USER_IDS/);
+      expect(message, bad).not.toContain("not-a-uuid");
+    }
+  });
+});

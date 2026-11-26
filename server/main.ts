@@ -26,6 +26,7 @@ const app = createApp({
   pool,
   jwt: config.jwt,
   // YES24 도서 검색(DEC-17): 주소·키를 설정했을 때만 켠다. 없으면 검색은 503이고 수기 등록을 쓴다
+  platformAdminUserIds: config.platformAdminUserIds,
   ...(config.yes24 ? { bookSearch: createYes24Provider(config.yes24) } : {}),
   // 내부 오류의 원본은 서버 로그에만 남기고 응답에는 싣지 않는다
   logError: (error) => console.error("unhandled request error:", error instanceof Error ? error.stack : error),

@@ -224,6 +224,7 @@ describe("고객 보존기간 적용 (고객 결정 #2, Postgres)", () => {
     await api().linkOrderCustomer({ userId: ROWNER }, { tenantId: RT, orderId: ORD, customerId: linked.id, linkedAt: AT, idempotencyKey: key() } as never);
 
     expect(await codeOf(() => apply({ userId: RSTAFF }))).toBe("FORBIDDEN");
+    await q(`update public.ordering_tenants set customer_retention_days = null where id = $1`, [RT]); // 기본은 15일이므로 먼저 해제한다
     expect(await codeOf(() => apply({ userId: ROWNER }))).toBe("BUSINESS_INVARIANT"); // 보존기간 없음
     await q(`update public.ordering_tenants set customer_retention_days = 365 where id = $1`, [RT]);
 
@@ -234,5 +235,27 @@ describe("고객 보존기간 적용 (고객 결정 #2, Postgres)", () => {
     expect(states.map((r: any) => [r.anonymized])).toEqual([[true], [false], [false], [false]]);
     expect((await q(`select by_ok from (select "by" = $2 as by_ok from public.ordering_customer_changes where customer_id = $1 and kind = 'ANONYMIZED') x`, [stale.id, ROWNER]))[0]).toEqual({ by_ok: true });
     expect(fresh.id).toBeDefined();
+  });
+
+  it("열려 있는 주문에 연결된 고객은 오래돼도 익명화하지 않고, 그 주문이 폐기·종결되면 대상이 된다", async () => {
+    const make = async (name: string, phone: string) => (await register({ userId: ROWNER }, { name, phone }, RT)).customer;
+    const holder = await make("열린주문고객", "010-4200-0001");
+    const ORD = "b0000000-0000-4000-8000-0000000000fa";
+    await q(`insert into public.ordering_orders (id, tenant_id) values ($1, $2)`, [ORD, RT]);
+    await api().linkOrderCustomer({ userId: ROWNER }, { tenantId: RT, orderId: ORD, customerId: holder.id, linkedAt: AT, idempotencyKey: key() } as never);
+    // 활동 시각(등록·연결 기록)을 모두 과거로 돌린다
+    const c = await db.connect();
+    await c.query("alter table public.ordering_customer_changes disable trigger ordering_customer_changes_append_only");
+    await c.query("alter table public.ordering_order_customer_links disable trigger ordering_order_customer_links_append_only");
+    await c.query("update public.ordering_customer_changes set recorded_at = now() - interval '400 days' where customer_id = $1", [holder.id]);
+    await c.query("update public.ordering_order_customer_links set recorded_at = now() - interval '400 days' where customer_id = $1", [holder.id]);
+    await c.query("alter table public.ordering_customer_changes enable trigger ordering_customer_changes_append_only");
+    await c.query("alter table public.ordering_order_customer_links enable trigger ordering_order_customer_links_append_only");
+    await c.query("update public.ordering_customers set created_at = now() - interval '400 days' where id = $1", [holder.id]);
+    await c.end();
+
+    expect((await apply({ userId: ROWNER })).anonymizedCustomerIds).not.toContain(holder.id);
+    await q(`update public.ordering_orders set version = version + 1, discarded_at = now(), discard_reason = '시험', discarded_by = 'x' where id = $1`, [ORD]);
+    expect((await apply({ userId: ROWNER })).anonymizedCustomerIds).toContain(holder.id);
   });
 });

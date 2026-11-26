@@ -3004,6 +3004,58 @@ paths:
           $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/store/deactivation:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+    post:
+      tags: [staff]
+      operationId: deactivateStore
+      summary: deactivateStore
+      description: Owner만. 서점을 중지(SUSPENDED)·해지(TERMINATED)한다. 그 순간부터 이 서점의 서점 범위 요청은 모두 403이며(내 서점 목록 `GET /v1/me/memberships`의 `storeStatus`로 확인), 플랫폼 운영자 승인(`POST /v1/admin/stores/{storeId}/reactivation`)으로만 다시 사용할 수 있다.
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [kind, reason, changedAt]
+              properties:
+                kind: { type: string, enum: [SUSPENDED, TERMINATED] }
+                reason: { type: string, minLength: 1, maxLength: 500 }
+                changedAt: { type: string, format: date-time }
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/StoreStatusChange" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "413":
+          $ref: "ordering.yaml#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/store/settings:
     parameters:
       - $ref: "ordering.yaml#/components/parameters/TenantId"
@@ -3371,7 +3423,7 @@ paths:
       operationId: listMyMemberships
       summary: 내 서점 목록 (A-05 서점 선택)
       description: |
-        로그인한 계정이 **활성** 멤버로 속한 서점과 자기 역할을 서점 이름 순으로 돌려준다. 비활성 멤버십은 나오지 않으며 서점이 없으면 빈 배열이다.
+        로그인한 계정이 **활성** 멤버로 속한 서점과 자기 역할·서점 상태(`storeStatus`)를 서점 이름 순으로 돌려준다. 중지·해지된 서점도 상태와 함께 나온다. 비활성 멤버십은 나오지 않으며 서점이 없으면 빈 배열이다.
         대상은 토큰의 사용자 본인뿐이다(서점 ID·역할 claim은 쓰지 않는다). 이메일 claim이 없어도 조회할 수 있다. 서점 범위 경로가 아니다(`/v1/tenants/{tenantId}` 접두어 없음).
       responses:
         "200":
@@ -3389,6 +3441,87 @@ paths:
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":
           $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/admin/stores:
+    get:
+      tags: [staff]
+      operationId: listInactiveStores
+      summary: listInactiveStores
+      description: 플랫폼 운영자 전용(서버 `PLATFORM_ADMIN_USER_IDS`에 등록된 계정). 중지·해지된 서점과 마지막 중지·해지 사유를 최근 순으로 돌려준다. 운영자가 아니면 403. 서점 범위 경로가 아니다.
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/InactiveStore" } } } }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/admin/stores/{storeId}/reactivation:
+    parameters:
+      - name: storeId
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [staff]
+      operationId: reactivateStore
+      summary: reactivateStore
+      description: 플랫폼 운영자 전용. 중지·해지된 서점의 재사용을 승인한다. 이미 사용 중인 서점은 422, 없는 서점은 404, 운영자가 아니면 403.
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason, approvedAt]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500 }
+                approvedAt: { type: string, format: date-time }
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/StoreStatusChange" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "413":
+          $ref: "ordering.yaml#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
         "405":
           $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
@@ -6003,11 +6136,12 @@ components:
     MyMembership:
       type: object
       additionalProperties: false
-      required: [tenantId, tenantName, role]
+      required: [tenantId, tenantName, role, storeStatus]
       properties:
         tenantId: { type: string, format: uuid }
         tenantName: { type: string }
         role: { type: string, enum: [OWNER, STAFF] }
+        storeStatus: { type: string, enum: [ACTIVE, SUSPENDED, TERMINATED], description: ACTIVE가 아니면 서점을 사용할 수 없다(서점 범위 요청 전부 403). 운영자 승인으로만 ACTIVE로 돌아온다 }
     OrderEvent:
       type: object
       additionalProperties: false
@@ -6931,3 +7065,26 @@ components:
         customerId: { type: string, format: uuid }
         linkedBy: { type: string }
         linkedAt: { type: string, format: date-time }
+    StoreStatusChange:
+      type: object
+      required: [id, tenantId, kind, from, to, reason, by, at]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        kind: { type: string, enum: [DEACTIVATED, REACTIVATED] }
+        from: { type: string, enum: [ACTIVE, SUSPENDED, TERMINATED] }
+        to: { type: string, enum: [ACTIVE, SUSPENDED, TERMINATED] }
+        reason: { type: string }
+        by: { type: string, description: 중지·해지는 Owner, 재사용 승인은 운영자의 사용자 ID }
+        at: { type: string, format: date-time }
+    InactiveStore:
+      type: object
+      required: [storeId, name, status, ownerUserId]
+      properties:
+        storeId: { type: string, format: uuid }
+        name: { type: string }
+        status: { type: string, enum: [SUSPENDED, TERMINATED] }
+        ownerUserId: { type: string, format: uuid }
+        reason: { type: string }
+        deactivatedAt: { type: string, format: date-time }
+        deactivatedBy: { type: string }

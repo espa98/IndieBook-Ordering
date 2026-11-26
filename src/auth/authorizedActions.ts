@@ -77,6 +77,7 @@ import { bindActor } from "./bindActor";
 import { inviteStaff } from "./inviteStaff";
 import { revokeInvitation } from "./revokeInvitation";
 import { setDelegation } from "./setDelegation";
+import { deactivateStore } from "./deactivateStore";
 import { updateStoreSettings } from "./updateStoreSettings";
 import { setMembershipStatus } from "./setMembershipStatus";
 
@@ -115,6 +116,8 @@ export const authorizedActions = {
   setMembershipStatus: bindActor(setMembershipStatus, { roleField: "actorRole", nameField: "changedBy", allow: OWNER }),
   setDelegation: bindActor(setDelegation, { roleField: "actorRole", nameField: "changedBy", allow: OWNER }),
   updateStoreSettings: bindActor(updateStoreSettings, { roleField: "actorRole", nameField: "changedBy", allow: OWNER }),
+  // 서점 중지·해지(ST-A06/A07): Owner 전용. 재사용 승인(`reactivateStore`)은 서점 구성원이 아니라 플랫폼 운영자 주체의 명령이라 여기에 없다
+  deactivateStore: bindActor(deactivateStore, { roleField: "actorRole", nameField: "changedBy", allow: OWNER }),
   // 고객(C-01~04): 등록·수정은 Owner·Staff, 익명화는 Owner만(고객 결정 #10)
   applyCustomerRetention: bindActor(applyCustomerRetention, { roleField: "actorRole", nameField: "appliedBy", allow: OWNER }),
   anonymizeCustomer: bindActor(anonymizeCustomer, { roleField: "actorRole", nameField: "anonymizedBy", allow: OWNER }),

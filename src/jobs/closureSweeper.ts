@@ -95,6 +95,7 @@ export function createClosureSweeper(deps: ClosureSweeperDeps) {
              select tenant_id, order_id, 'FULFILLMENT_CORRECTION' as kind, id as trigger_id, recorded_at from public.ordering_fulfillment_corrections
            ) c
              join public.ordering_orders o on o.tenant_id = c.tenant_id and o.id = c.order_id
+             join public.ordering_tenants t on t.id = c.tenant_id and t.status = 'ACTIVE'
             where o.closed_at is not null and c.recorded_at > o.closed_at
               and not exists (select 1 from public.ordering_order_reopenings r where r.tenant_id = c.tenant_id and r.trigger_id = c.trigger_id)
             order by c.recorded_at, c.trigger_id limit $1`,
@@ -105,6 +106,7 @@ export function createClosureSweeper(deps: ClosureSweeperDeps) {
         await client.query(
           `select r.tenant_id, r.id as closure_request_id, r.order_id from public.ordering_order_closure_requests r
              join public.ordering_orders o on o.tenant_id = r.tenant_id and o.id = r.order_id
+             join public.ordering_tenants t on t.id = r.tenant_id and t.status = 'ACTIVE'
             where o.closed_at is null and o.version = r.expected_version
               and not exists (select 1 from public.ordering_order_closures c where c.tenant_id = r.tenant_id and c.closure_request_id = r.id)
             order by r.recorded_at, r.id limit $1`,
@@ -113,7 +115,7 @@ export function createClosureSweeper(deps: ClosureSweeperDeps) {
       ).rows,
       purchaseOrders: (
         await client.query(
-          "select tenant_id, id, version from public.ordering_purchase_orders where status in ('SENT', 'ACKNOWLEDGED') order by created_at, id limit $1",
+          "select p.tenant_id, p.id, p.version from public.ordering_purchase_orders p join public.ordering_tenants t on t.id = p.tenant_id and t.status = 'ACTIVE' where p.status in ('SENT', 'ACKNOWLEDGED') order by p.created_at, p.id limit $1",
           [batchSize],
         )
       ).rows,
