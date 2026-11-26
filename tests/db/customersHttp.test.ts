@@ -144,3 +144,22 @@ describe("고객 정보 조회 감사 (고객 결정 #3)", () => {
     await c.end();
   });
 });
+
+describe("고객 보존기간 HTTP (고객 결정 #2)", () => {
+  it("Owner가 POST /store/settings로 보존기간을 정하고 POST /customers/retention-applications로 적용한다(직원 403, 설정 전 422, 기한 안의 고객은 그대로)", async () => {
+    const { body } = await call("POST", "/customers", STAFF, { body: { name: "보존확인", phone: "010-5000-0001", registeredAt: PAST } });
+    const id = body.data.customer.id as string;
+    const apply = (sub: string) => call("POST", "/customers/retention-applications", sub, { body: { appliedAt: PAST } });
+
+    expect((await apply(STAFF)).status).toBe(403);
+    expect((await apply(OWNER)).status).toBe(422);
+    expect((await call("POST", "/store/settings", OWNER, { body: { customerRetentionDays: 30 } })).status).toBe(200);
+    expect((await call("GET", "/store", STAFF)).body.data.customerRetentionDays).toBe(30);
+
+    const applied = await apply(OWNER);
+    expect(applied.status).toBe(200);
+    expect(applied.body.data).toMatchObject({ retentionDays: 30, hasMore: false });
+    expect(applied.body.data.anonymizedCustomerIds).not.toContain(id);
+    expect((await call("GET", `/customers/${id}`, STAFF)).body.data.name).toBe("보존확인");
+  });
+});

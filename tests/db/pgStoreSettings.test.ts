@@ -107,3 +107,18 @@ describe("서점 설정 변경 (S-01·S-07, Owner만)", () => {
     expect(results.filter((r) => r === "BUSINESS_INVARIANT")).toHaveLength(1);
   });
 });
+
+describe("고객 정보 보존기간 설정 (고객 결정 #2, Postgres)", () => {
+  it("Owner가 정하면 서점 정보에 나타나고(없으면 필드 없음) 이력에 전·후가 남으며, 직원은 FORBIDDEN이고 null로 해제된다", async () => {
+    expect(await codeOf(() => update({ userId: STAFF }, T, { customerRetentionDays: 365 }))).toBe("FORBIDDEN");
+
+    await update(owner, T, { customerRetentionDays: 365 });
+    expect(await api().getStore({ userId: STAFF }, { tenantId: T })).toMatchObject({ customerRetentionDays: 365 });
+    expect((await q(`select customer_retention_days from public.ordering_tenants where id = $1`, [T]))[0]).toEqual({ customer_retention_days: 365 });
+    expect((await q(`select changes from public.ordering_tenant_setting_changes where tenant_id = $1 and changes ? 'customerRetentionDays'`, [T]))[0]).toEqual({ changes: { customerRetentionDays: { from: null, to: 365 } } });
+
+    await update(owner, T, { customerRetentionDays: null });
+    expect(await api().getStore(owner, { tenantId: T })).not.toHaveProperty("customerRetentionDays");
+    expect(await sqlState(() => q(`update public.ordering_tenants set customer_retention_days = 0 where id = $1`, [T]))).toBe("23514");
+  });
+});

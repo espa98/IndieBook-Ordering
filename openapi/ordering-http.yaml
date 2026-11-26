@@ -3029,6 +3029,7 @@ paths:
               properties:
                 name: { type: string, minLength: 1, maxLength: 60 }
                 longUnreceivedWarningDays: { type: integer, minimum: 1, maximum: 365 }
+                customerRetentionDays: { type: [integer, "null"], minimum: 1, maximum: 3650, description: 고객 정보 보존기간(일). null이면 기한 없음 }
       responses:
         "200":
           description: 성공(`data`는 변경 기록)
@@ -5241,6 +5242,61 @@ paths:
           $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/customers/retention-applications:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+    post:
+      tags: [customers]
+      operationId: applyCustomerRetention
+      summary: applyCustomerRetention
+      description: Owner만. 서점의 보존기간(`customerRetentionDays`)이 지난 고객을 익명화한다(한 번에 최대 100명, 남으면 `hasMore`).
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [appliedAt]
+              properties:
+                appliedAt: { type: string, format: date-time }
+      responses:
+        "200":
+          description: 성공(`data`는 적용 결과)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [retentionDays, cutoff, anonymizedCustomerIds, hasMore]
+                    properties:
+                      retentionDays: { type: integer }
+                      cutoff: { type: string, format: date-time }
+                      anonymizedCustomerIds: { type: array, items: { type: string, format: uuid } }
+                      hasMore: { type: boolean }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "413":
+          $ref: "ordering.yaml#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/customers/{customerId}:
     parameters:
       - $ref: "ordering.yaml#/components/parameters/TenantId"
@@ -5638,6 +5694,7 @@ components:
         status: { type: string, enum: [ACTIVE] }
         createdAt: { type: string, format: date-time }
         longUnreceivedWarningDays: { type: integer, minimum: 1, maximum: 365 }
+        customerRetentionDays: { type: integer, minimum: 1, maximum: 3650, description: 고객 정보 보존기간(일). 없으면 기한 없음 }
         myRole: { type: string, enum: [OWNER, STAFF] }
     StoreSettingsChange:
       type: object
@@ -5661,6 +5718,11 @@ components:
               additionalProperties: false
               required: [from, to]
               properties: { from: { type: integer }, to: { type: integer } }
+            customerRetentionDays:
+              type: object
+              additionalProperties: false
+              required: [from, to]
+              properties: { from: { type: [integer, "null"] }, to: { type: [integer, "null"] } }
         changedBy: { type: string }
         changedAt: { type: string, format: date-time }
     ExceptionItem:

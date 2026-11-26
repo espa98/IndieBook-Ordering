@@ -190,3 +190,49 @@ describe("고객 목록 커서 페이지 (Postgres)", () => {
     expect(await codeOf(() => api().listCustomers(staff, { tenantId: T, cursor: "garbage" } as never))).toBe("VALIDATION_ERROR");
   });
 });
+
+describe("고객 보존기간 적용 (고객 결정 #2, Postgres)", () => {
+  const RT = "aaaaaaaa-0000-4000-8000-0000000000f3";
+  const ROWNER = "11111111-0000-4000-8000-0000000000f3";
+  const RSTAFF = "11111111-0000-4000-8000-0000000000f4";
+  const apply = (actor: { userId: string }) => api().applyCustomerRetention(actor, { tenantId: RT, appliedAt: new Date().toISOString().replace(/\.\d+Z$/, ".000Z"), idempotencyKey: key() } as never);
+  /** 시험 준비: 활동 시각을 과거로 돌린다(이력은 추가 전용이라 이 시험 연결에서만 트리거를 잠시 끈다) */
+  const backdate = async (customerId: string, days: number) => {
+    const c = await db.connect();
+    try {
+      await c.query("alter table public.ordering_customer_changes disable trigger ordering_customer_changes_append_only");
+      await c.query("update public.ordering_customer_changes set recorded_at = now() - make_interval(days => $2) where customer_id = $1", [customerId, days]);
+      await c.query("alter table public.ordering_customer_changes enable trigger ordering_customer_changes_append_only");
+      await c.query("update public.ordering_customers set created_at = now() - make_interval(days => $2) where id = $1", [customerId, days]);
+    } finally {
+      await c.end();
+    }
+  };
+
+  it("Owner만 실행하고(직원 FORBIDDEN), 보존기간이 없으면 거부하며, 기한을 넘긴 고객만 익명화한다(최근 변경·주문 연결이 있으면 활동 중으로 본다)", async () => {
+    await q(`insert into public.ordering_tenants (id, name, owner_user_id) values ($1, '보존서점', $2)`, [RT, ROWNER]);
+    await q(`insert into public.ordering_members (tenant_id, user_id, role, active) values ($1, $2, 'OWNER', true), ($1, $3, 'STAFF', true)`, [RT, ROWNER, RSTAFF]);
+    const make = async (name: string, phone: string) => (await register({ userId: ROWNER }, { name, phone }, RT)).customer;
+    const stale = await make("만료고객", "010-4100-0001");
+    const touched = await make("수정으로활동중", "010-4100-0002");
+    const linked = await make("연결로활동중", "010-4100-0003");
+    const fresh = await make("최근고객", "010-4100-0004");
+    for (const c of [stale, touched, linked]) await backdate(c.id, 400);
+    await api().updateCustomer({ userId: ROWNER }, { tenantId: RT, customerId: touched.id, expectedVersion: 1, changes: { name: "수정으로활동중" }, changedAt: AT, idempotencyKey: key() } as never);
+    const ORD = "b0000000-0000-4000-8000-0000000000f9";
+    await q(`insert into public.ordering_orders (id, tenant_id) values ($1, $2)`, [ORD, RT]);
+    await api().linkOrderCustomer({ userId: ROWNER }, { tenantId: RT, orderId: ORD, customerId: linked.id, linkedAt: AT, idempotencyKey: key() } as never);
+
+    expect(await codeOf(() => apply({ userId: RSTAFF }))).toBe("FORBIDDEN");
+    expect(await codeOf(() => apply({ userId: ROWNER }))).toBe("BUSINESS_INVARIANT"); // 보존기간 없음
+    await q(`update public.ordering_tenants set customer_retention_days = 365 where id = $1`, [RT]);
+
+    const result = await apply({ userId: ROWNER });
+
+    expect(result).toMatchObject({ retentionDays: 365, anonymizedCustomerIds: [stale.id], hasMore: false });
+    const states = await q(`select name, anonymized_at is not null as anonymized from public.ordering_customers where tenant_id = $1 and id <> $2 order by created_at`, [RT, "00000000-0000-4000-8000-000000000000"]);
+    expect(states.map((r: any) => [r.anonymized])).toEqual([[true], [false], [false], [false]]);
+    expect((await q(`select by_ok from (select "by" = $2 as by_ok from public.ordering_customer_changes where customer_id = $1 and kind = 'ANONYMIZED') x`, [stale.id, ROWNER]))[0]).toEqual({ by_ok: true });
+    expect(fresh.id).toBeDefined();
+  });
+});

@@ -365,6 +365,11 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       fields: ["name", "phone", "registeredAt"],
       run: (c) => customers.registerCustomer(actor(c), merge(c, { tenantId: t(c), idempotencyKey: c.idempotencyKey })),
     }),
+    route("POST", "/customers/retention-applications", {
+      success: 200,
+      fields: ["appliedAt"],
+      run: (c) => customers.applyCustomerRetention(actor(c), merge(c, { tenantId: t(c), idempotencyKey: c.idempotencyKey })),
+    }),
     route("POST", "/orders/(?<orderId>[^/]+)/customer", {
       success: 201,
       fields: ["customerId", "linkedAt"],
@@ -562,7 +567,7 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
     }),
     route("POST", "/store/settings", {
       success: 200,
-      fields: ["name", "longUnreceivedWarningDays"],
+      fields: ["name", "longUnreceivedWarningDays", "customerRetentionDays"],
       run: (c) => storeApi.updateStoreSettings(actor(c), merge(c, { tenantId: t(c), idempotencyKey: c.idempotencyKey })),
     }),
     route("GET", "/members", {

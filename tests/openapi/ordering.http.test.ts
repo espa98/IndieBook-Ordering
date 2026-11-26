@@ -97,7 +97,7 @@ describe("openapi/ordering-http.yaml: 서버 경로표와 명세의 드리프트
       "POST /purchase-orders/{purchaseOrderId}/delivery fileVersion",
       "POST /purchase-orders/{purchaseOrderId}/supplier-replies source",
       "POST /purchase-orders/{purchaseOrderId}/supplier-replies eta",
-      "POST /store/settings name", "POST /store/settings longUnreceivedWarningDays", // 보낸 항목만 바꾼다(하나 이상은 minProperties)
+      "POST /store/settings name", "POST /store/settings longUnreceivedWarningDays", "POST /store/settings customerRetentionDays", // 보낸 항목만 바꾼다(하나 이상은 minProperties)
     ]);
     const problems: string[] = [];
     for (const { key, path, op } of operations(load(HTTP_SPEC))) {

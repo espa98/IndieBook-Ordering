@@ -6,6 +6,7 @@ export function customerScene() {
   const changes: CustomerChange[] = [];
   const deps = {
     customers: {
+      list: (tenantId: string) => customers.filter((c) => c.tenantId === tenantId),
       get: (tenantId: string, id: string) => customers.find((c) => c.tenantId === tenantId && c.id === id),
       listByPhone: (tenantId: string, phone: string) => customers.filter((c) => c.tenantId === tenantId && c.phone === phone),
       save: (c: Customer) => {

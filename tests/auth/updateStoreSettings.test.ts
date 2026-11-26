@@ -99,3 +99,31 @@ describe("updateStoreSettings: 서점 기본정보·미수령 경고일 변경 (
     expect(thrown(() => updateStoreSettings(deps, request({ idempotencyKey: "same", name: "다른 이름" })))).toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
   });
 });
+
+describe("updateStoreSettings: 고객 정보 보존기간 (고객 결정 #2, Owner 재량)", () => {
+  it("Owner가 보존기간(일)을 정하고 null로 해제할 수 있으며, 바뀐 전·후 값이 기록된다(기본은 기한 없음)", () => {
+    const { deps, stores, changes, request } = scene();
+    const { name: _name, ...base } = request();
+
+    const set = updateStoreSettings(deps, { ...base, idempotencyKey: "r-1", customerRetentionDays: 365 } as never);
+    expect(set.changes).toEqual({ customerRetentionDays: { from: null, to: 365 } });
+    expect(stores[0]!.customerRetentionDays).toBe(365);
+
+    const cleared = updateStoreSettings(deps, { ...base, idempotencyKey: "r-2", customerRetentionDays: null } as never);
+    expect(cleared.changes).toEqual({ customerRetentionDays: { from: 365, to: null } });
+    expect(stores[0]!.customerRetentionDays).toBeUndefined();
+    expect(changes).toHaveLength(2);
+  });
+
+  it("범위(1~3650일 정수)를 벗어나거나 숫자가 아니면 VALIDATION_ERROR, 같은 값(기한 없음 → null 포함)으로 바꾸려 하면 BUSINESS_INVARIANT이다", () => {
+    const { deps, changes, request } = scene();
+    const { name: _name, ...base } = request();
+    const run = (extra: Record<string, unknown>) => thrown(() => updateStoreSettings(deps, { ...base, idempotencyKey: `v-${Math.random()}`, ...extra } as never));
+
+    for (const bad of [0, 3651, 1.5, "30", -1]) expect(run({ customerRetentionDays: bad })).toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(run({ customerRetentionDays: null })).toMatchObject({ code: "BUSINESS_INVARIANT" }); // 이미 기한 없음
+    updateStoreSettings(deps, { ...base, idempotencyKey: "ok-1", customerRetentionDays: 90 } as never);
+    expect(run({ customerRetentionDays: 90 })).toMatchObject({ code: "BUSINESS_INVARIANT" });
+    expect(changes).toHaveLength(1);
+  });
+});

@@ -1,6 +1,7 @@
 import type { PoolClient } from "pg";
 import { authorizedActions } from "../auth/authorizedActions";
 import type { Customer, CustomerChange, RegisterCustomerRequest } from "../customer/registerCustomer";
+import { RETENTION_BATCH_SIZE, type ApplyCustomerRetentionRequest } from "../customer/applyCustomerRetention";
 import type { LinkOrderCustomerRequest, OrderCustomerLink } from "../customer/linkOrderCustomer";
 import type { AnonymizeCustomerRequest } from "../customer/anonymizeCustomer";
 import type { UpdateCustomerRequest } from "../customer/updateCustomer";
@@ -15,6 +16,7 @@ export type RegisterCustomerBody = Omit<RegisterCustomerRequest, "actorRole" | "
 
 export type UpdateCustomerBody = Omit<UpdateCustomerRequest, "actorRole" | "changedBy">;
 export type LinkOrderCustomerBody = Omit<LinkOrderCustomerRequest, "actorRole" | "linkedBy">;
+export type ApplyCustomerRetentionBody = Omit<ApplyCustomerRetentionRequest, "actorRole" | "appliedBy">;
 export type AnonymizeCustomerBody = Omit<AnonymizeCustomerRequest, "actorRole" | "anonymizedBy">;
 
 /** 목록 화면용: 번호는 끝 4자리만(고객 결정 #3) */
@@ -49,8 +51,9 @@ export function createPgCustomerApi(deps: { pool: PoolLike }) {
     }
   };
 
-  async function persistChanges(client: PoolClient, customers: Customer[], changes: CustomerChange[], previous?: Customer) {
+  async function persistChanges(client: PoolClient, customers: Customer[], changes: CustomerChange[], previousList?: Customer | Customer[]) {
     for (const c of customers) {
+      const previous = Array.isArray(previousList) ? previousList.find((p) => p.id === c.id) : previousList;
       if (previous) {
         const updated = await client.query("update public.ordering_customers set name = $3, phone = $4, version = $5, anonymized_at = $7 where tenant_id = $1 and id = $2 and version = $6", [c.tenantId, c.id, c.name, c.phone, c.version, previous.version, c.anonymizedAt ?? null]);
         if (updated.rowCount !== 1) throw new AppError("VERSION_CONFLICT");
@@ -165,7 +168,60 @@ export function createPgCustomerApi(deps: { pool: PoolLike }) {
       return result;
     });
 
+  const retentionOnce = (actor: Actor, body: ApplyCustomerRetentionBody) =>
+    inTransaction(deps.pool, "service_role", actor.userId, async (client) => {
+      const principal = principalFor(await loadMembership(client, actor.userId, body.tenantId), actor.userId, body.tenantId);
+      const okTenant = isUuid(body.tenantId);
+      if (okTenant) await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`ret:${body.tenantId}`]);
+      const days = okTenant ? (await client.query("select customer_retention_days from public.ordering_tenants where id = $1", [body.tenantId])).rows[0]?.customer_retention_days : null;
+      // 후보: 마지막 활동(등록·변경·주문 연결 중 서버가 기록한 가장 늦은 시각)이 기한 이전인 고객. 도메인이 기준을 다시 확인한다
+      const candidates = new Map<string, { customer: Customer; last: string }>();
+      const appliedMs = typeof body.appliedAt === "string" ? Date.parse(body.appliedAt) : Number.NaN;
+      if (okTenant && days !== null && days !== undefined && !Number.isNaN(appliedMs)) {
+        const rows = (
+          await client.query(
+            `select c.*, greatest(c.created_at,
+                      coalesce((select max(h.recorded_at) from public.ordering_customer_changes h where h.tenant_id = c.tenant_id and h.customer_id = c.id), c.created_at),
+                      coalesce((select max(l.recorded_at) from public.ordering_order_customer_links l where l.tenant_id = c.tenant_id and l.customer_id = c.id), c.created_at)) as last_activity
+               from public.ordering_customers c
+              where c.tenant_id = $1 and c.anonymized_at is null
+                and greatest(c.created_at,
+                      coalesce((select max(h.recorded_at) from public.ordering_customer_changes h where h.tenant_id = c.tenant_id and h.customer_id = c.id), c.created_at),
+                      coalesce((select max(l.recorded_at) from public.ordering_order_customer_links l where l.tenant_id = c.tenant_id and l.customer_id = c.id), c.created_at)) < $2::timestamptz
+              order by last_activity, c.id
+              limit $3
+                for update of c`,
+            [body.tenantId, new Date(appliedMs - days * 86_400_000).toISOString(), RETENTION_BATCH_SIZE + 1],
+          )
+        ).rows;
+        for (const r of rows) candidates.set(r.id, { customer: toCustomer(r), last: (r.last_activity as Date).toISOString() });
+      }
+      const idempotency = await loadCommands(client, body.tenantId, body.idempotencyKey);
+      const known = new Set(idempotency.keys());
+      const saved: Customer[] = [];
+      const changes: CustomerChange[] = [];
+      const { tenantId: _t, ...rest } = body;
+      void _t;
+      const result = authorizedActions.applyCustomerRetention(
+        {
+          customers: { list: () => [...candidates.values()].map((x) => x.customer), get: (_x, id) => candidates.get(id)?.customer, save: (c) => void saved.push(c) },
+          customerChanges: { save: (c) => void changes.push(c) },
+          stores: { getRetentionDays: () => (days === null || days === undefined ? undefined : days) },
+          activity: { lastActivityAt: (_x, id) => candidates.get(id)?.last },
+          idempotency,
+        },
+        principal,
+        rest,
+      );
+      await persistChanges(client, saved, changes, [...candidates.values()].map((x) => x.customer));
+      await saveNewCommands(client, idempotency, known);
+      return result;
+    });
+
   return {
+    /** Owner가 정한 보존기간이 지난 고객을 익명화한다(한 번에 최대 100명, 남으면 `hasMore`) */
+    applyCustomerRetention: (actor: Actor, body: ApplyCustomerRetentionBody) => withRetry(() => retentionOnce(actor, body)),
+
     /** 주문에 고객을 연결한다(선택). 같은 고객이면 기록을 늘리지 않고, 다른 고객이면 새 연결이 추가된다 */
     linkOrderCustomer: (actor: Actor, body: LinkOrderCustomerBody) => withRetry(() => linkOnce(actor, body)),
 

@@ -136,6 +136,8 @@ describe("저장 도중 실패 주입: 모든 쓰기 뒤 실패해도 아무것�
     const customer = await write("고객 등록", "/customers", { name: "원자 고객", phone: "010-0000-1234", registeredAt: PAST }, 201);
     await write("고객 수정", `/customers/${customer.customer.id}/updates`, { expectedVersion: 1, changes: { name: "원자 고객 2" }, changedAt: PAST }, 200);
     await write("고객 익명화", `/customers/${customer.customer.id}/anonymization`, { expectedVersion: 2, anonymizedAt: PAST }, 200);
+    await write("보존기간 설정", "/store/settings", { customerRetentionDays: 30 }, 200);
+    await write("보존기간 적용", "/customers/retention-applications", { appliedAt: PAST }, 200);
     await write("문구 템플릿 게시", "/message-templates", { key: "ATOMIC_READY", body: "{{storeName}}입니다", expectedVersion: 0, publishedAt: PAST }, 201);
 
     const order = await write("주문 생성", "/orders", { lines: [{ bookId: book.id, quantity: 2, unitPriceKrw: "10000" }] }, 201);

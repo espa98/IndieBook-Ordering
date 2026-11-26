@@ -38,6 +38,7 @@ const OWNER_ONLY_ROUTES: Record<string, string> = {
   setMembershipStatus: "POST /v1/tenants/{tenantId}/members/{targetUserId}/status",
   setDelegation: "POST /v1/tenants/{tenantId}/members/{targetUserId}/delegations",
   updateStoreSettings: "POST /v1/tenants/{tenantId}/store/settings",
+  applyCustomerRetention: "POST /v1/tenants/{tenantId}/customers/retention-applications",
   anonymizeCustomer: "POST /v1/tenants/{tenantId}/customers/{customerId}/anonymization",
 };
 /** Owner만 읽는 조회 경로(권한 규칙이 명령 모음이 아니라 어댑터에 있다) */
