@@ -49,13 +49,14 @@
 | `PORT` | 아니오 | 기본 8080 |
 | `MAX_BODY_BYTES` | 아니오 | 기본 1 MiB |
 | `DB_STATEMENT_TIMEOUT_MS` | 아니오 | DB 쿼리 하나의 시간 제한(잠금 대기 포함). 기본 10000, 100~120000 |
-| `YES24_BOOK_SEARCH_URL` | 아니오(키와 함께) | YES24 도서 검색 게이트웨이 주소(DEC-17). **https**여야 한다(로컬 개발 주소만 http). 없으면 도서 검색은 503이고 수기 등록을 쓴다 |
-| `YES24_API_KEY` | 〃(주소와 함께) | 게이트웨이 접근 키. `Authorization: Bearer`로만 보내고 로그·오류·응답에 싣지 않는다. 비밀이므로 실행 환경에서만 주입한다 |
+| `YES24_BOOK_SEARCH_URL` | 아니오(키와 함께) | YES24 상품 검색 주소(DEC-17). 실제 서비스는 `https://apis.yes24.com/v1/goods/itemList`. **https**여야 한다(로컬 개발 주소만 http). 없으면 도서 검색은 503이고 수기 등록을 쓴다 |
+| `YES24_API_KEY` | 〃(주소와 함께) | YES24 Developers에서 발급한 API 키. `X-Api-Key` 헤더로만 보내고 로그·오류·응답에 싣지 않는다. 비밀이므로 실행 환경에서만 주입한다(서버는 `.env`를 자동으로 읽지 않으니 로컬에서는 `node --env-file=.env dist/server.mjs`) |
 | `YES24_TIMEOUT_MS` | 아니오 | 상류 요청 제한 시간. 기본 5000, 500~30000 |
 | `CLOSURE_SWEEP_INTERVAL_SECONDS` | 아니오 | 종결 스위퍼 간격, 기본 300, 0이면 끔 |
 | `CORS_ALLOWED_ORIGINS` | 아니오 | 허용 오리진(쉼표 구분). **비우면 브라우저 오리진을 허용하지 않는다**(E9: 값 결정 필요) |
 
-**YES24 도서 검색 상류 계약(미확정 가정):** 공개된 YES24 도서 검색 API 문서를 찾지 못했다(웹 검색, 2026-11-26). 서버(`src/catalog/yes24Provider.ts`)는 `YES24_BOOK_SEARCH_URL`이 다음을 구현한다고 가정한다 — `GET {url}?type=ISBN|TITLE|AUTHOR&q=<검색어>&limit=<1..20>` + `Authorization: Bearer <키>` → `200 {"items":[{"id","title","authors"?,"isbn"?,"publisher"?,"publishedOn"?,"listPriceKrw"?,"coverUrl"?,"detailUrl"?}]}`. **실제 YES24 API(제휴·이용 권한 포함)가 이 형태가 아니면 어댑터의 호출·매핑 한 곳만 바꾸면 된다**(요청 검증·응답 정리·오류 처리·엔드포인트·시험은 그대로). 실제 이용 권한 검증은 PRD가 P0 출시 전 필수로 둔 항목이다(Docs/02_Policies, DEC-17).
+**YES24 도서 검색 상류 계약(확인됨, 2026-11-26):** YES24 Developers 문서(`developers.yes24.com/api-doc/goods-item-list`)와 실제 호출로 확인했다. 서버(`src/catalog/yes24Provider.ts`)는 `GET {url}?query=<검색어>&category=BOOK&pageSize=<limit>` + 헤더 `X-Api-Key`를 보내고 `200 {success, data:{items:[…]}}`를 읽는다(`itemId`→id, `author`, `isbn13`/`isbn10`, `publisher`, `publishDate`(YYYYMMDD→YYYY-MM-DD), `shopPrice`→정가, `cover`, `link`). **검색은 자유 텍스트 `query` 하나뿐이라 ISBN·제목·저자를 구분하지 못한다**(제목·저자 검색은 구분 없이 같은 검색, ISBN은 숫자를 넣으면 그 도서가 나오며 서버가 ISBN이 정확히 같은 것만 남긴다). 결과 없음은 404 `SEARCH_001`(→ 빈 목록), 키 오류(401)·속도 제한(429)·상류 장애(502/504)는 503 `SERVICE_UNAVAILABLE`이다. 속도 제한은 키 단위(기본키 하루 20,000회·초당 10회, 제휴키 100,000/20).
+**YES24 이용약관 준수(운영 책임):** ① 검색 결과를 보여 주는 화면은 **출처가 YES24임을 표시하고 `detailUrl`(YES24 상세 페이지)로 연결**해야 한다(약관 6조 ③ 4). ② 데이터를 체계적으로 대량 수집해 별도 DB로 쌓는 것은 금지다 — 이 서버는 직원이 선택한 도서만 서점 카탈로그에 등록한다(대량 수집·일괄 저장 기능을 만들지 말 것). ③ 키는 이용 주체별 1개이며 제3자와 공유하거나 브라우저 코드에 넣지 않는다. ④ 가격·재고는 운영 정책의 갱신 주기에 맞춰 최신으로 유지해야 하므로 외부 정가는 참고값으로만 쓴다(서점 판매가는 직원이 따로 입력). 약관 해석은 법률 검토가 아니다.
 
 비밀은 이미지·저장소가 아니라 실행 환경에서 주입한다(`Dockerfile` 주석 참조). 이미지 빌드는 이 PC에 Docker가 없어 **검증하지 못했다.**
 

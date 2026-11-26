@@ -33,7 +33,8 @@ beforeAll(async () => {
     }
     const url = new URL(req.url ?? "", "http://x");
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ items: [{ id: "Y24-1", title: `${url.searchParams.get("q")} 시집`, authors: ["박서점"], isbn: "978-89-6090-123-4", listPriceKrw: 12000, publisher: "책방출판", publishedOn: "2025-03-01" }] }));
+    // YES24 Open API(`GET /v1/goods/itemList`) 응답 형식: `X-Api-Key` 헤더, 검색어는 `query`
+    res.end(JSON.stringify({ success: true, message: "성공", errorCode: null, data: { items: [{ itemId: 2401, title: `${url.searchParams.get("query")} 시집`, author: "박서점", isbn10: "8960901237", isbn13: "9788960901234", shopPrice: 12000.0, publisher: "책방출판", publishDate: "20250301" }] } }));
   });
   await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
   upstreamUrl = `http://127.0.0.1:${(upstream.address() as { port: number }).port}/search`;
@@ -68,7 +69,7 @@ describe("YES24 도서 검색 HTTP (B-01)", () => {
     expect(found.status).toBe(200);
     expect(found.body.data).toMatchObject({ source: "YES24", fetchedAt: expect.any(String) });
     const item = found.body.data.items[0];
-    expect(item).toMatchObject({ id: "Y24-1", title: "운영 시집", isbn: "9788960901234", listPriceKrw: "12000" });
+    expect(item).toMatchObject({ id: "2401", title: "운영 시집", isbn: "9788960901234", listPriceKrw: "12000" });
     expect(item.existingBookId).toBeUndefined();
 
     // 선택 → 도서 등록(출처 YES24, 외부 ID·조회 시각 저장). 판매가는 직원이 입력한다
@@ -76,7 +77,7 @@ describe("YES24 도서 검색 HTTP (B-01)", () => {
       source: "YES24", title: item.title, authors: item.authors, isbn: item.isbn, externalId: item.id, fetchedAt: found.body.data.fetchedAt, listPriceKrw: "13000", registeredAt: PAST,
     });
     expect(registered.status).toBe(201);
-    expect(registered.body.data).toMatchObject({ source: "YES24", externalId: "Y24-1", isbn: "9788960901234" });
+    expect(registered.body.data).toMatchObject({ source: "YES24", externalId: "2401", isbn: "9788960901234" });
 
     const again = await call(withProvider, "GET", "/book-search", OWNER, "type=ISBN&q=978-89-6090-123-4");
     expect(again.body.data.items[0].existingBookId).toBe(registered.body.data.id);

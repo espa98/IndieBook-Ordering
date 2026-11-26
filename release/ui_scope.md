@@ -17,7 +17,7 @@
 | Bolt 단계 | 화면 | 실제 API 연결 | 비고 |
 |---|---|---|---|
 | 02 인증 | A-04 서점 개설, A-05 서점 선택, A-06 초대 수락 | `POST /v1/stores`, `GET /v1/me/memberships`, `POST /v1/invitations/accept` | 로그인·회원가입·비밀번호·이메일 인증(A-01~03, 07)은 Supabase Auth가 담당(서버 API 없음) |
-| 04 도서 | B-01 YES24 검색, B-02~05 도서 목록·상세·수기 등록·수정·이력 | `GET /book-search`(YES24 검색, 503이면 수기 등록으로 전환), `GET /integrations/yes24`(S-08), `GET/POST /books`(검색 결과 선택 = `source:"YES24"` 등록), `GET /books/{id}`, `/updates`, `GET /books/{id}/revisions` | **실제 YES24 API는 미확인**(공개 문서·주소를 찾지 못함, 2026-11-26 재조사) — 서버는 게이트웨이 계약을 가정한다(보고서 §113). 사용자가 제휴 키를 받았으나 **검색 주소를 알 수 없어 연동은 꺼져 있다**(`YES24_BOOK_SEARCH_URL`+`YES24_API_KEY`를 함께 설정해야 켜진다). 고객 C-01~04는 아래 고객 항목 참조 |
+| 04 도서 | B-01 YES24 검색, B-02~05 도서 목록·상세·수기 등록·수정·이력 | `GET /book-search`(YES24 검색, 503이면 수기 등록으로 전환), `GET /integrations/yes24`(S-08), `GET/POST /books`(검색 결과 선택 = `source:"YES24"` 등록), `GET /books/{id}`, `/updates`, `GET /books/{id}/revisions` | **YES24 Open API 계약 확인·연동 완료**(2026-11-26, `X-Api-Key`+`query`, 런북 참조). UI는 결과에 **출처 YES24 표시와 `detailUrl` 링크**를 넣어야 한다(약관). 제목·저자·ISBN 검색은 서버에서 구분되지 않는다. 고객 C-01~04는 아래 고객 항목 참조 |
 | 05 주문 | O-02 목록, O-03 신규, O-04 상세, 확정, **보류·재개·폐기** | `GET/POST /orders`, `GET /orders/{id}`, `/confirm`, `/hold`, `/resume`, `/discard`, `GET /orders/{id}/history` | 목록은 폐기 초안 기본 제외(`includeDiscarded`), 커서 페이지네이션, 상태 `DRAFT`/`CONFIRMED` + 보류·폐기는 필드(`heldAt`·`discardedAt`)로 표시. 고객 선택은 서버 없음 |
 | 06 조달·발주 | O-04-02 조달 배정, O-05 공급처, O-06 발주 현황·작성·전달·회신 | `POST /orders/{id}/lines/{id}/sourcing-allocations`, `/sourcing-allocations/{id}/releases`, `/suppliers*`, `/purchase-orders*`, `/supplier-replies`, 취소 요청·응답·확정, 중복 위험 승인 | 공급처·발주 목록·상세 조회 있음 |
 | 07 입고·재고 | O-07 입고 현황, O-07-01 입고, O-07-02 배분, I-01 재고 | `POST /purchase-orders/{id}/receipts`, `/receipts/{id}/allocations`·`/defect-resolutions`·`/excess-decisions`·`/corrections`, `/allocations/{id}/cancellations`·`/reallocations`·`/releases`, `GET /receipts`, `GET /receipts/{id}`, `GET /stock`, `GET /stock/{bookId}`, 초기 재고·조정 | 입고 현황·상세 조회 있음 |
@@ -31,7 +31,7 @@
 ## 3. 데모·비활성으로 둘 화면 (서버 없음)
 
 - **고객(C-01~04)**: 1차판 서버 있음(`GET/POST /customers`, `GET /customers/{id}`, `/updates`, `/anonymization`(Owner), `GET /customers/{id}/changes`; 이름+번호 최소 수집, 정책은 `customer_module_decisions.md`). 주문 연결은 `POST/GET /orders/{id}/customer`(선택, 주문은 고객 없이도 만들어진다), 안내 대기열(`GET /notification-targets`) 항목에 `customer`(이름·번호)가 실린다. 주문 목록·상세 응답에는 고객이 없다.
-- **YES24 도서 검색(B-01)**: 서버 연동은 있으나 **실제 YES24 API 확인 전**이다(보고서 §113). 설정이 없거나 장애면 503 → 수기 등록.
+- **YES24 도서 검색(B-01)**: 서버 연동이 있고 **실제 YES24 API 계약을 확인했다**(2026-11-26). 설정이 없거나 장애면 503 → 수기 등록.
 - **ST-O04 확정 후 가격/품목 변경, 고객 동의(DEC-08)**: 정책 미승인.
 - **공개 고객 주문(P1), 택배(D23), PG/VAN(P2), 모바일 M1~M3**: 범위 밖.
 - S-09 내보내기: 서버 없음. (S-08 YES24 상태는 `GET /integrations/yes24`로 있다.) (S-01 서점 기본정보와 S-07 미수령 경고일은 `GET /store`·`POST /store/settings`로 구현됨 — 보고서 §108. 서점 중지·해지·소유자 이전은 없다.)
@@ -66,7 +66,7 @@ UI 단계 순서에 맞춰 서버가 먼저 만들 조회 API다. 모두 같은 
 **(이 저장소) §4의 1~8번은 모두 완료됐다(2026-11-26).** 남은 백엔드 일은 다음과 같다. 모두 정책 결정이나 정의가 먼저 필요하다.
 1. **대시보드 나머지:** 공급처 회신 ETA를 반영한 발주 지연 정의(현재는 전달 후 경과일), 서점별 시간대·일/주/월 추이 통계(현재 시간대별 합계는 KST 고정). 예외 큐의 담당자 지정·처리 근거(담당 지정 명령 없음)와 유형 추가(정의 필요).
 2. **내보내기(S-09):** 서버 없음. PRD 정책 확인 필요. (S-01·S-07 완료, S-08 상태 조회 완료)
-3. **고객 모듈(C-01~04):** 1차판 완료(제안안 채택). 남은 것: 연결 해제(필요 시) — `release/customer_module_decisions.md`. **YES24 검색(B-01):** 서버 연동 완료, **실제 YES24 API 계약·이용 권한 확인 필요**(어댑터 한 곳 교체).
+3. **고객 모듈(C-01~04):** 1차판 완료(제안안 채택). 남은 것: 연결 해제(필요 시) — `release/customer_module_decisions.md`. **YES24 검색(B-01):** 서버 연동 완료, 실제 API 계약 확인됨. 남은 것: 운영 키·이용 약관 준수 확인(런북).
 4. **직원 역할 변경(직원→Owner):** **하지 않기로 결정(2026-11-26)** — Owner는 서점 개설자뿐이며 직원은 위임(`delegations`)으로만 권한을 받는다. 구현하지 않는다.
 
 **(Bolt.new)** 연결 방법·요청/응답 규칙·오류 처리·호출 레시피는 `Docs/05_API_Security/Bolt_API_연결_가이드_V1.0.md`에 정리했다(엔드포인트 표는 명세에서 생성). `00_공통_실행규칙`과 01~10단계를 이 문서의 §2 표와 `openapi/ordering.yaml`·`openapi/ordering-http.yaml`을 API 연결표로 삼아 진행한다. 대시보드(03)는 §4 3번이 1차 완료라 숫자 카드 일부는 실제 API, 나머지는 데모 값이다.
