@@ -82,23 +82,35 @@ async function stopIgnoringCleanupLock(server: { stop(): Promise<void> }): Promi
   }
 }
 
+/** 시험이 닫지 않은 연결을 기다리다 멈추지 않도록 상한을 둔다 */
+const withTimeout = (promise: Promise<unknown>, ms: number) => Promise.race([promise.catch(() => undefined), new Promise((resolve) => setTimeout(resolve, ms))]);
+
 export async function startIsolatedPostgres(): Promise<IsolatedPostgres> {
   const { dir, port, server } = await bootServer();
   const pools: pg.Pool[] = [];
+  const clients: pg.Client[] = [];
+  // 연결이 서버 쪽에서 끊기면(서버 종료·종료 신호) 'error' 이벤트가 나온다. 받는 쪽이 없으면 프로세스 전체의 처리되지 않은 오류가 되어
+  // 시험이 모두 통과해도 실행이 실패한다. 시험의 검증 대상이 아닌 연결 수명 오류이므로 여기서 삼킨다(질의 자체의 오류는 질의가 거부된다).
+  const ignoreConnectionError = () => undefined;
   return {
     port,
     async connect(database = "bookflow_test") {
       const client = new pg.Client({ host: "127.0.0.1", port, user: "postgres", password: "isolated-test-only", database });
+      client.on("error", ignoreConnectionError);
+      clients.push(client);
       await client.connect();
       return client;
     },
     pool(database = "bookflow_test") {
       const pool = new pg.Pool({ host: "127.0.0.1", port, user: "postgres", password: "isolated-test-only", database, max: 8, idleTimeoutMillis: 1_000 });
+      pool.on("error", ignoreConnectionError);
       pools.push(pool);
       return pool;
     },
     async stop() {
-      await Promise.all(pools.map((p) => p.end()));
+      // 닫지 않고 끝난 시험의 연결을 서버를 멈추기 전에 먼저 끊는다(서버가 끊으면 FATAL 오류 이벤트가 난다)
+      await Promise.all(pools.map((p) => withTimeout(p.end(), 5_000)));
+      await Promise.all(clients.map((c) => withTimeout(c.end(), 2_000)));
       await stopIgnoringCleanupLock(server);
       removeBestEffort(dir);
     },
