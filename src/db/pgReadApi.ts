@@ -161,6 +161,12 @@ export type Dashboard = {
   orders: { draft: number; held: number; discarded: number; confirmed: number };
   purchaseOrders: { draft: number; ready: number; sent: number; acknowledged: number };
   refunds: { required: number; partial: number; remainingKrw: string };
+  /** 미배분 입고(DASH-008): 미배분량이 남은 입고 수와 그 합계(권). 취소 후속 처리(처분 대기)는 아직 집계하지 않는다 */
+  receipts: { unallocatedReceipts: number; unallocatedQuantity: number };
+  /** 미결제(DASH-005): 잔액이 남은 확정 주문 수, 잔액 합계(정수 문자열), 확인도 무효도 아닌 거래 수 */
+  payments: { unpaidOrders: number; balanceKrw: string; unconfirmedPayments: number };
+  /** 안내 대상(재안내로 대체된 것·완료된 것 제외): 대기(시도 없음)·시도만(결과 없음)·실패(재안내 필요) */
+  notifications: { pending: number; attempted: number; failed: number };
   longUnreceivedWarnings: number;
   receivedSince?: number;
 };
@@ -370,11 +376,65 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
             [t],
           )
         ).rows[0];
+        // 미결제(DASH-005): 확정 주문별 결제 요약과 같은 규칙 — 확인된 거래(무효 제외) − 확인된 환급 − 보정, 잔액 = max(총액 − 확인 금액, 0)
+        const payments = (
+          await client.query(
+            `select count(*) filter (where total_krw > confirmed)::int as unpaid,
+                    coalesce(sum(greatest(total_krw - confirmed, 0)), 0)::text as balance
+               from (select o.total_krw,
+                            coalesce((select sum(p.amount_krw) from public.ordering_payments p
+                                       where p.tenant_id = o.tenant_id and p.order_id = o.id
+                                         and exists (select 1 from public.ordering_payment_confirmations c where c.tenant_id = p.tenant_id and c.payment_id = p.id)
+                                         and not exists (select 1 from public.ordering_payment_voids v where v.tenant_id = p.tenant_id and v.payment_id = p.id)), 0)
+                          - coalesce((select sum(r.amount_krw) from public.ordering_refund_confirmations r where r.tenant_id = o.tenant_id and r.order_id = o.id), 0)
+                          - coalesce((select sum(k.reduced_krw) from public.ordering_payment_corrections k where k.tenant_id = o.tenant_id and k.order_id = o.id), 0) as confirmed
+                       from public.ordering_orders o where o.tenant_id = $1 and o.status = 'CONFIRMED') x`,
+            [t],
+          )
+        ).rows[0];
+        const unconfirmed = (
+          await client.query(
+            `select count(*)::int as n from public.ordering_payments p
+              where p.tenant_id = $1
+                and not exists (select 1 from public.ordering_payment_confirmations c where c.tenant_id = p.tenant_id and c.payment_id = p.id)
+                and not exists (select 1 from public.ordering_payment_voids v where v.tenant_id = p.tenant_id and v.payment_id = p.id)`,
+            [t],
+          )
+        ).rows[0];
+        // 미배분 입고(DASH-008): 입고별 UNALLOCATED 버킷 = (검수 정상 − 검수 정정) − 배분 + 배분 해제 (receiptBalances와 같은 규칙)
+        const receipts = (
+          await client.query(
+            `select count(*) filter (where unallocated > 0)::int as receipts, coalesce(sum(unallocated) filter (where unallocated > 0), 0)::int as quantity
+               from (select g.normal_quantity
+                            - coalesce((select sum(c.quantity) from public.ordering_receipt_corrections c where c.tenant_id = g.tenant_id and c.receipt_id = g.id), 0)
+                            - coalesce((select sum(a.quantity) from public.ordering_receipt_allocations a where a.tenant_id = g.tenant_id and a.receipt_id = g.id), 0)
+                            + coalesce((select sum(r.quantity) from public.ordering_allocation_releases r join public.ordering_receipt_allocations a on a.tenant_id = r.tenant_id and a.id = r.allocation_id where a.tenant_id = g.tenant_id and a.receipt_id = g.id), 0) as unallocated
+                       from public.ordering_goods_receipts g where g.tenant_id = $1) x`,
+            [t],
+          )
+        ).rows[0];
+        // 안내 대상의 상태는 시도·결과 기록에서 파생한다(notificationState와 같은 규칙). 재안내로 대체된 대상과 완료(MANUAL_RECORDED) 대상은 세지 않는다
+        const notifications = (
+          await client.query(
+            `select count(*) filter (where attempts = 0)::int as pending,
+                    count(*) filter (where attempts > 0 and last_outcome is null)::int as attempted,
+                    count(*) filter (where last_outcome = 'FAILED')::int as failed
+               from (select (select count(*) from public.ordering_notification_attempts a where a.tenant_id = t.tenant_id and a.target_id = t.id) as attempts,
+                            (select r.outcome from public.ordering_notification_results r where r.tenant_id = t.tenant_id and r.target_id = t.id order by r.recorded_at desc, r.id desc limit 1) as last_outcome
+                       from public.ordering_notification_targets t
+                      where t.tenant_id = $1
+                        and not exists (select 1 from public.ordering_notification_targets n where n.tenant_id = t.tenant_id and n.renotice_of_target_id = t.id)) x`,
+            [t],
+          )
+        ).rows[0];
         const warnings = await api.longUnreceivedWarnings(actor, { tenantId: t, ...(request.thresholdDays !== undefined ? { thresholdDays: request.thresholdDays } : {}) });
         return {
           orders: { draft: orders.draft, held: orders.held, discarded: orders.discarded, confirmed: orders.confirmed },
           purchaseOrders: { draft: po.draft, ready: po.ready, sent: po.sent, acknowledged: po.acknowledged },
           refunds: { required: refunds.required, partial: refunds.partial, remainingKrw: refunds.remaining },
+          receipts: { unallocatedReceipts: receipts.receipts, unallocatedQuantity: receipts.quantity },
+          payments: { unpaidOrders: payments.unpaid, balanceKrw: payments.balance, unconfirmedPayments: unconfirmed.n },
+          notifications: { pending: notifications.pending, attempted: notifications.attempted, failed: notifications.failed },
           longUnreceivedWarnings: warnings.length,
           ...(request.since !== undefined ? { receivedSince: orders.received_since } : {}),
         };

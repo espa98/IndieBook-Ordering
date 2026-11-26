@@ -2308,9 +2308,9 @@ paths:
       description: |
         활성 멤버(Owner·직원)가 서점의 운영 현황 숫자를 한 번에 읽는다. 숫자는 테이블·원장에서 직접 센다.
         `orders`(초안·보류·폐기·확정, 초안은 보류·폐기를 뺀 건수), `purchaseOrders`(활성 발주 초안·준비·전달·회신),
-        `refunds`(미환급 업무·일부 환급 업무·남은 환급액 합계), `longUnreceivedWarnings`(장기 미수령 경고 수, `GET /long-unreceived-warnings`와 같은 계산).
+        `refunds`(미환급 업무·일부 환급 업무·남은 환급액 합계), `receipts`(미배분 입고 수·수량: 정상 − 정정 − 배분 + 해제), `payments`(미결제 주문 수·잔액 합계·미확인 거래 수, 주문별 결제 요약과 같은 규칙), `notifications`(안내 대기·시도만·실패 대상, 재안내로 대체된 대상과 완료 대상 제외), `longUnreceivedWarnings`(장기 미수령 경고 수, `GET /long-unreceived-warnings`와 같은 계산).
         `since`(RFC3339 UTC, 미래 불가)를 주면 그 시각 이후 접수된 주문 수(`receivedSince`, 폐기 제외)도 돌려준다. "오늘"의 기준 시각은 서점 시간대를 아는 클라이언트가 정한다.
-        안내 대기·미결제·미배분 입고·부분입고 잔량 등 나머지 DASH 항목은 아직 집계하지 않는다.
+        부분입고 잔량·취소 후속 처리(처분 대기)·발주 지연 등 나머지 DASH 항목은 아직 집계하지 않는다.
       parameters:
         - name: since
           in: query
@@ -4453,7 +4453,7 @@ components:
     Dashboard:
       type: object
       additionalProperties: false
-      required: [orders, purchaseOrders, refunds, longUnreceivedWarnings]
+      required: [orders, purchaseOrders, refunds, receipts, payments, notifications, longUnreceivedWarnings]
       properties:
         orders:
           type: object
@@ -4481,6 +4481,29 @@ components:
             required: { type: integer, minimum: 0 }
             partial: { type: integer, minimum: 0 }
             remainingKrw: { type: string, pattern: "^(0|[1-9][0-9]*)$" }
+        receipts:
+          type: object
+          additionalProperties: false
+          required: [unallocatedReceipts, unallocatedQuantity]
+          properties:
+            unallocatedReceipts: { type: integer, minimum: 0, description: 미배분량이 남은 입고 수 }
+            unallocatedQuantity: { type: integer, minimum: 0, description: 미배분 정상 수량 합계(권) }
+        payments:
+          type: object
+          additionalProperties: false
+          required: [unpaidOrders, balanceKrw, unconfirmedPayments]
+          properties:
+            unpaidOrders: { type: integer, minimum: 0, description: 잔액이 남은 확정 주문 수 }
+            balanceKrw: { type: string, pattern: "^(0|[1-9][0-9]*)$", description: 미결제 잔액 합계 }
+            unconfirmedPayments: { type: integer, minimum: 0, description: 입력됐지만 아직 확인도 무효도 되지 않은 거래 수 }
+        notifications:
+          type: object
+          additionalProperties: false
+          required: [pending, attempted, failed]
+          properties:
+            pending: { type: integer, minimum: 0, description: 안내 대상 중 외부 발송 시도가 아직 없는 것 }
+            attempted: { type: integer, minimum: 0, description: 시도는 기록했지만 결과가 없는 것 }
+            failed: { type: integer, minimum: 0, description: 결과가 실패이고 재안내가 아직 없는 것 }
         longUnreceivedWarnings: { type: integer, minimum: 0 }
         receivedSince: { type: integer, minimum: 0, description: since를 줬을 때만 있다 }
     MemberView:

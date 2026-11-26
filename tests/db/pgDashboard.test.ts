@@ -66,6 +66,25 @@ beforeAll(async () => {
     );
   }
   void t1;
+
+  // 안내 대상(확정 주문 A·B·C): 대기 / 시도만 / 실패→재안내(원 대상은 대체됨) / 실패(재안내 없음) / 완료
+  const [A, B, C] = confirmedOrders as [string, string, string];
+  const target = async (orderId: string, renoticeOf: string | null = null) =>
+    (await q(`insert into public.ordering_notification_targets (tenant_id, order_id, mode, renotice_of_target_id, lines, secured_total, created_by, created_at) values ($1, $2, 'FULL', $3, '[]'::jsonb, 1, 'u', now()) returning id`, [T, orderId, renoticeOf]))[0].id as string;
+  const attempt = async (targetId: string) =>
+    (await q(`insert into public.ordering_notification_attempts (tenant_id, target_id, channel, message_snapshot, attempted_by, attempted_at) values ($1, $2, 'SMS', '안내', 'u', now()) returning id`, [T, targetId]))[0].id as string;
+  const result = (targetId: string, attemptId: string, outcome: string) =>
+    q(`insert into public.ordering_notification_results (tenant_id, target_id, attempt_id, outcome, note, recorded_by, result_at) values ($1, $2, $3, $4, '메모', 'u', now())`, [T, targetId, attemptId, outcome]);
+  await target(A); // 대기
+  const attempted = await target(B);
+  await attempt(attempted); // 시도만
+  const failedThenRenoticed = await target(C);
+  await result(failedThenRenoticed, await attempt(failedThenRenoticed), "FAILED");
+  await target(C, failedThenRenoticed); // 재안내로 새 대기 대상이 생겼다
+  const failedOnly = await target(A);
+  await result(failedOnly, await attempt(failedOnly), "FAILED");
+  const done = await target(B);
+  await result(done, await attempt(done), "MANUAL_RECORDED");
 }, 180_000);
 afterAll(async () => {
   await db?.stop();
@@ -87,6 +106,8 @@ describe("대시보드 집계 (O-01)", () => {
     expect(dashboard.orders).toEqual({ draft: 2, held: 1, discarded: 1, confirmed: 3 });
     expect(dashboard.purchaseOrders).toEqual({ draft: 1, ready: 1, sent: 2, acknowledged: 1 });
     expect(dashboard.refunds).toEqual({ required: 1, partial: 1, remainingKrw: "25000" });
+    // 안내 대상(재안내로 대체된 대상·완료된 대상은 세지 않는다): 대기 = 새 대기 대상 2, 시도만 1, 실패 1
+    expect(dashboard.notifications).toEqual({ pending: 2, attempted: 1, failed: 1 });
     expect(dashboard.longUnreceivedWarnings).toBe(0);
   });
 
@@ -107,5 +128,6 @@ describe("대시보드 집계 (O-01)", () => {
     expect(theirs.orders).toEqual({ draft: 3, held: 0, discarded: 0, confirmed: 0 });
     expect(theirs.purchaseOrders).toEqual({ draft: 0, ready: 0, sent: 1, acknowledged: 0 });
     expect(theirs.refunds).toEqual({ required: 0, partial: 0, remainingKrw: "0" });
+    expect(theirs.notifications).toEqual({ pending: 0, attempted: 0, failed: 0 });
   });
 });
