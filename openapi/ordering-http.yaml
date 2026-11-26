@@ -1300,7 +1300,7 @@ paths:
         - name: q
           in: query
           required: true
-          description: 검색어(1~60자). `type=ISBN`이면 하이픈을 뺀 10·13자리 ISBN
+          description: 검색어(1~60자). `type=ISBN`이면 하이픈을 뺀 13자리 ISBN(ISBN-10은 검색 불가)
           schema: { type: string, minLength: 1, maxLength: 60 }
         - name: limit
           in: query

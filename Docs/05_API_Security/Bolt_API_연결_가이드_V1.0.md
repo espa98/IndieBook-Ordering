@@ -1,6 +1,6 @@
 # BookFlow Ordering — Bolt.new용 API 연결 가이드 V1.0
 
-작성일: 2026-11-26 · 기준: `openapi/ordering.yaml`(주문 4개)·`openapi/ordering-http.yaml`(나머지 108개), 격리 DB 시험 211개 파일·1649개 테스트 통과
+작성일: 2026-11-26 · 기준: `openapi/ordering.yaml`(주문 4개)·`openapi/ordering-http.yaml`(나머지 108개), 격리 DB 시험 211개 파일·1650개 테스트 통과
 
 **누구를 위한 문서인가:** `BookFlow_Ordering_BoltNew_단계별프롬프트_V1.0`으로 웹 UI를 만드는 프런트엔드 작업자(Bolt.new). 책임 분리는 그대로다 — *백엔드(이 저장소) = DB·RLS·업무 API·검증, Bolt.new = 반응형 웹 UI·업무 흐름·검증된 API 연결.* 이 문서는 **"서버가 UI에 무엇을 약속하는가"** 를 한곳에 모은 것이고, 필드 단위의 정확한 계약은 항상 `openapi/*.yaml`이 기준이다(이 문서의 예시와 어긋나면 명세가 맞다).
 

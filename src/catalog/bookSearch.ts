@@ -35,7 +35,7 @@ export type BookSearchProvider = {
   search(query: BookSearchQuery): Promise<BookSearchItem[]>;
 };
 
-/** 검색 요청(쿼리 값)을 검증한다. ISBN은 하이픈·공백을 뺀 10·13자리 */
+/** 검색 요청(쿼리 값)을 검증한다. ISBN은 하이픈·공백을 뺀 13자리 숫자만(ISBN-10은 검색 대상에서 제외, YES24 상품 상세 조회가 ISBN13만 받는다) */
 export function parseBookSearchRequest(request: { type?: unknown; q?: unknown; limit?: unknown }): BookSearchQuery {
   if (typeof request.type !== "string" || !BOOK_SEARCH_TYPES.includes(request.type as BookSearchType)) invalid("type", "must be ISBN, TITLE or AUTHOR");
   const type = request.type as BookSearchType;
@@ -44,8 +44,8 @@ export function parseBookSearchRequest(request: { type?: unknown; q?: unknown; l
   }
   let q = (request.q as string).trim();
   if (type === "ISBN") {
-    const digits = q.replace(/[-\s]/g, "").toUpperCase();
-    if (!/^(\d{13}|\d{9}[\dX])$/.test(digits)) invalid("q", "must be a 10 or 13 digit ISBN");
+    const digits = q.replace(/[-\s]/g, "");
+    if (!/^\d{13}$/.test(digits)) invalid("q", "must be a 13 digit ISBN (ISBN-10 is not searchable)");
     q = digits;
   }
   const limit = request.limit === undefined ? DEFAULT_SEARCH_LIMIT : request.limit;

@@ -6,14 +6,13 @@ import { AppError } from "../../src/errors/AppError";
 import { thrown } from "../helpers/thrown";
 
 describe("parseBookSearchRequest: 검색 요청 해석 (ISBN·제목·저자)", () => {
-  it("type과 검색어를 검증한다: ISBN은 하이픈을 뺀 10·13자리, 제목·저자는 1~60자, limit은 기본 10·1~20", () => {
+  it("type과 검색어를 검증한다: ISBN은 하이픈을 뺀 13자리(ISBN-10은 검색 대상에서 제외), 제목·저자는 1~60자, limit은 기본 10·1~20", () => {
     expect(parseBookSearchRequest({ type: "ISBN", q: "978-89-6090-123-4" })).toEqual({ type: "ISBN", q: "9788960901234", limit: 10 });
-    expect(parseBookSearchRequest({ type: "ISBN", q: " 896090123X " })).toEqual({ type: "ISBN", q: "896090123X", limit: 10 });
     expect(parseBookSearchRequest({ type: "TITLE", q: "  독립서점 운영기 ", limit: 5 })).toEqual({ type: "TITLE", q: "독립서점 운영기", limit: 5 });
     expect(parseBookSearchRequest({ type: "AUTHOR", q: "박서점" })).toEqual({ type: "AUTHOR", q: "박서점", limit: 10 });
     for (const bad of [
       { type: "ALL", q: "x" }, { type: undefined, q: "x" }, { type: "TITLE", q: "" }, { type: "TITLE", q: "   " }, { type: "TITLE", q: "가".repeat(61) },
-      { type: "ISBN", q: "12345" }, { type: "ISBN", q: "abcdefghij" }, { type: "TITLE", q: 5 }, { type: "TITLE", q: "x", limit: 0 }, { type: "TITLE", q: "x", limit: 21 }, { type: "TITLE", q: "x", limit: 1.5 },
+      { type: "ISBN", q: "12345" }, { type: "ISBN", q: "8960901237" }, { type: "ISBN", q: "896090123X" }, { type: "ISBN", q: "978896090123X" }, { type: "ISBN", q: "abcdefghij" }, { type: "TITLE", q: 5 }, { type: "TITLE", q: "x", limit: 0 }, { type: "TITLE", q: "x", limit: 21 }, { type: "TITLE", q: "x", limit: 1.5 },
     ]) {
       expect(thrown(() => parseBookSearchRequest(bad as never)), JSON.stringify(bad)).toMatchObject({ code: "VALIDATION_ERROR" });
     }
@@ -103,20 +102,33 @@ describe("createYes24Provider: YES24 Open API 어댑터(서버 측)", () => {
     expect(seen[0]!.authorization).toBeUndefined();
   });
 
-  it("ISBN 검색은 자유 텍스트 검색이라 다른 도서가 섞일 수 있어 ISBN-13 또는 ISBN-10이 정확히 같은 항목만 남기고, 제목·저자 검색은 거르지 않는다", async () => {
-    const other = realItem({ itemId: 2, title: "다른 책", isbn10: "1111111111", isbn13: "9781111111111" });
-    const noIsbn13 = realItem({ itemId: 3, title: "ISBN13 빈 값", isbn10: "896626095X", isbn13: "" });
-    behavior = () => ({ status: 200, body: ok([other, realItem(), noIsbn13]) });
+  it("ISBN 검색은 상품 상세 조회(itemDetail, searchType=ISBN13)로 그 도서 하나를 찾고(category·pageSize 없음), 제목·저자 검색은 상품 검색(itemList)을 쓴다", async () => {
+    behavior = () => ({ status: 200, body: ok([realItem()]) });
+    seen.length = 0;
 
-    const byIsbn13 = await provider().search({ type: "ISBN", q: "9788966260959", limit: 10 });
-    const byIsbn10 = await provider().search({ type: "ISBN", q: "8966260950", limit: 10 });
-    const byIsbn10WithoutIsbn13 = await provider().search({ type: "ISBN", q: "896626095X", limit: 10 });
-    const byTitle = await provider().search({ type: "TITLE", q: "책", limit: 10 });
+    const byIsbn = await provider().search({ type: "ISBN", q: "9788966260959", limit: 10 });
+    const byTitle = await provider().search({ type: "TITLE", q: "클린 코드", limit: 3 });
 
-    expect(byIsbn13.map((b) => b.id)).toEqual(["11681152"]);
-    expect(byIsbn10.map((b) => b.id)).toEqual(["11681152"]);
-    expect(byIsbn10WithoutIsbn13.map((b) => [b.id, b.isbn])).toEqual([["3", "896626095X"]]);
-    expect(byTitle.map((b) => b.id)).toEqual(["2", "11681152", "3"]);
+    expect(byIsbn.map((b) => [b.id, b.isbn])).toEqual([["11681152", "9788966260959"]]);
+    expect(byTitle).toHaveLength(1);
+    const isbnCall = new URL(seen[0]!.url, "http://x");
+    expect(isbnCall.pathname).toBe("/itemDetail"); // 검색 주소(…/itemList)와 같은 위치의 itemDetail
+    expect(Object.fromEntries(isbnCall.searchParams)).toEqual({ searchType: "ISBN13", query: "9788966260959" });
+    expect(seen[0]!.apiKey).toBe("secret-key-123");
+    expect(new URL(seen[1]!.url, "http://x").pathname).toBe("/search");
+  });
+
+  it("ISBN 상세 조회의 상품 없음(404 GOODS_001·GOODS_002)은 빈 목록이고, 응답의 ISBN이 검색한 ISBN과 다르면 버리며, 엔드포인트에 맞지 않는 오류 코드는 장애로 본다", async () => {
+    for (const code of ["GOODS_001", "GOODS_002"]) {
+      behavior = () => ({ status: 404, body: failure(code) });
+      expect(await provider().search({ type: "ISBN", q: "9788966260959", limit: 10 }), code).toEqual([]);
+    }
+    behavior = () => ({ status: 200, body: ok([realItem({ isbn13: "9781111111111", isbn10: "1111111111" })]) });
+    expect(await provider().search({ type: "ISBN", q: "9788966260959", limit: 10 })).toEqual([]);
+    behavior = () => ({ status: 404, body: failure("SEARCH_001") }); // 검색용 코드가 상세 조회에서 오면 이상한 응답이다
+    expect(((await failureOf(() => provider().search({ type: "ISBN", q: "9788966260959", limit: 10 }))) as AppError).code).toBe("SERVICE_UNAVAILABLE");
+    behavior = () => ({ status: 404, body: failure("GOODS_002") }); // 제목 검색에서 상품 코드는 이상한 응답이다
+    expect(((await failureOf(() => provider().search({ type: "TITLE", q: "x", limit: 10 }))) as AppError).code).toBe("SERVICE_UNAVAILABLE");
   });
 
   it("결과 없음(404 SEARCH_001)은 오류가 아니라 빈 목록이다", async () => {

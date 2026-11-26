@@ -1,7 +1,10 @@
 import { normalizeSearchItems, searchUnavailable, type BookSearchProvider, type BookSearchQuery } from "./bookSearch";
 
 export type Yes24ProviderOptions = {
-  /** YES24 상품 검색 주소(환경 변수 `YES24_BOOK_SEARCH_URL`). 실제 서비스는 `https://apis.yes24.com/v1/goods/itemList` */
+  /**
+   * YES24 상품 검색 주소(환경 변수 `YES24_BOOK_SEARCH_URL`). 실제 서비스는 `https://apis.yes24.com/v1/goods/itemList`.
+   * ISBN 검색에 쓰는 상품 상세 조회는 같은 위치의 `itemDetail`(`https://apis.yes24.com/v1/goods/itemDetail`)이다.
+   */
   url: string;
   /** 발급받은 API 키(환경 변수 `YES24_API_KEY`). `X-Api-Key` 헤더로만 보내고 로그·오류·응답에 싣지 않는다 */
   apiKey: string;
@@ -25,11 +28,9 @@ const publishDate = (value: unknown): string | undefined => {
 /** 가격은 소수 표기(`33000.00`)다. 정수 값만 받아들인다 */
 const wholeNumber = (value: unknown): number | undefined => (typeof value === "number" && Number.isSafeInteger(value) ? value : undefined);
 
-/** 원본 항목의 ISBN-13 또는 ISBN-10이 검색한 ISBN과 같은지(하이픈 없는 대문자 숫자열끼리 비교) */
-function hasIsbn(entry: unknown, isbn: string): boolean {
-  if (entry === null || typeof entry !== "object") return false;
-  const e = entry as Record<string, unknown>;
-  return [e.isbn13, e.isbn10].some((v) => typeof v === "string" && v.toUpperCase() === isbn);
+/** 원본 항목의 ISBN-13이 검색한 ISBN-13과 같은지 */
+function hasIsbn13(entry: unknown, isbn13: string): boolean {
+  return entry !== null && typeof entry === "object" && (entry as Record<string, unknown>).isbn13 === isbn13;
 }
 
 /** YES24 항목 → `normalizeSearchItems`가 받는 형태. 검증과 정리는 그쪽이 한다 */
@@ -52,11 +53,12 @@ function toCandidate(entry: unknown): unknown {
 }
 
 /**
- * YES24 도서 검색 어댑터(서버 측, DEC-17 단일 외부 경로). 계약은 YES24 Developers(`developers.yes24.com/api-doc/goods-item-list`)와 실제 호출로 확인했다:
- * `GET {url}?query=<검색어>&category=BOOK&pageSize=<1..100>` + 헤더 `X-Api-Key` → 성공 `200 { success, data: { items: [...] } }`.
- * 검색은 자유 텍스트 `query` 하나뿐이라 ISBN·제목·저자를 구분해 찾을 수 없다. ISBN은 숫자만 넣으면 그 도서가 나오므로(실제 확인) 결과에서 ISBN이 정확히 같은 것만 남긴다.
+ * YES24 도서 검색 어댑터(서버 측, DEC-17 단일 외부 경로). 계약은 YES24 Developers(`developers.yes24.com/api-doc/goods-item-list`, `…/goods-item-detail`)와 실제 호출로 확인했다. 인증은 모두 헤더 `X-Api-Key`이고 성공은 `200 { success, data: { items: [...] } }`다.
+ * - 제목·저자: `GET {url}?query=<검색어>&category=BOOK&pageSize=<1..100>`(상품 검색 `itemList`). 자유 텍스트 `query` 하나뿐이라 제목과 저자를 구분해 찾을 수 없다. 결과 없음은 404 `SEARCH_001`.
+ * - ISBN: `GET {url의 itemDetail}?searchType=ISBN13&query=<ISBN-13>`(상품 상세 조회). 그 ISBN 한 건을 돌려주며 ISBN-10은 지원하지 않는다(검색 요청 검증이 13자리만 받는다). 상품 없음은 404 `GOODS_001`·`GOODS_002`.
+ *   응답의 ISBN-13이 검색한 값과 다르면 버린다.
  *
- * 결과 없음은 404 `SEARCH_001`이며 빈 목록으로 돌려준다. 그 밖의 모든 실패(접속·시간 초과·상태 코드·깨진 JSON·너무 큰 응답·`success:false`·`items` 없음, 키 오류·속도 제한 포함)는
+ * 결과 없음은 빈 목록이다. 그 밖의 모든 실패(접속·시간 초과·상태 코드·깨진 JSON·너무 큰 응답·`success:false`·`items` 없음, 키 오류·속도 제한 포함)는
  * `SERVICE_UNAVAILABLE`이며 키·주소·상류 본문은 오류에 싣지 않는다.
  */
 export function createYes24Provider(options: Yes24ProviderOptions): BookSearchProvider {
@@ -65,10 +67,16 @@ export function createYes24Provider(options: Yes24ProviderOptions): BookSearchPr
   return {
     name: "YES24",
     async search(query: BookSearchQuery) {
-      const url = new URL(options.url);
-      url.searchParams.set("query", query.q);
-      url.searchParams.set("category", "BOOK");
-      url.searchParams.set("pageSize", String(query.limit));
+      // ISBN은 상품 상세 조회(ISBN13 한 건), 제목·저자는 상품 검색(자유 텍스트)
+      const url = query.type === "ISBN" ? new URL("itemDetail", options.url) : new URL(options.url);
+      if (query.type === "ISBN") {
+        url.searchParams.set("searchType", "ISBN13");
+        url.searchParams.set("query", query.q);
+      } else {
+        url.searchParams.set("query", query.q);
+        url.searchParams.set("category", "BOOK");
+        url.searchParams.set("pageSize", String(query.limit));
+      }
       let body: unknown;
       let status: number;
       try {
@@ -88,12 +96,14 @@ export function createYes24Provider(options: Yes24ProviderOptions): BookSearchPr
         throw searchUnavailable();
       }
       const envelope = body as { success?: unknown; errorCode?: unknown; data?: { items?: unknown } | null } | null;
-      if (status === 404 && envelope?.errorCode === "SEARCH_001") return [];
+      // 결과 없음: 검색(itemList)은 SEARCH_001, 상세 조회(itemDetail)는 GOODS_001·GOODS_002(404). 엔드포인트에 맞지 않는 코드는 장애로 본다
+      const notFound = query.type === "ISBN" ? ["GOODS_001", "GOODS_002"] : ["SEARCH_001"];
+      if (status === 404 && typeof envelope?.errorCode === "string" && notFound.includes(envelope.errorCode)) return [];
       if (status < 200 || status >= 300 || envelope?.success !== true) throw searchUnavailable();
       const items = envelope.data?.items;
       if (!Array.isArray(items)) throw searchUnavailable();
-      // ISBN 검색은 자유 텍스트 검색이라 다른 도서가 섞일 수 있다: ISBN-13 또는 ISBN-10이 정확히 같은 항목만 남긴다(거른 뒤에 limit 적용)
-      const relevant = query.type === "ISBN" ? items.filter((e) => hasIsbn(e, query.q)) : items;
+      // ISBN 검색: 상세 조회가 그 ISBN-13 한 건을 돌려주지만, 다른 ISBN의 항목이 오면 버린다(잘못된 도서 등록 방지)
+      const relevant = query.type === "ISBN" ? items.filter((e) => hasIsbn13(e, query.q)) : items;
       return normalizeSearchItems(relevant.map(toCandidate), query.limit);
     },
   };
