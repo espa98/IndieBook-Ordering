@@ -66,6 +66,8 @@ type Route = {
   /** 허용하는 쿼리 파라미터 */
   queryFields?: readonly string[];
   success: number;
+  /** true면 GET인데도 성공 시 감사 행을 남긴다(개인정보 전체가 나가는 조회, 고객 결정 #3) */
+  auditRead?: true;
   /** `account`: 서점에 속하기 전의 계정 업무(`/v1/...`). 기본은 서점 범위(`/v1/tenants/{tenantId}/...`) */
   scope: "tenant" | "account";
   run: (ctx: Ctx) => Promise<unknown>;
@@ -355,8 +357,8 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
     }),
     route("GET", "/customers", {
       success: 200,
-      queryFields: ["search", "limit"],
-      run: (c) => customers.listCustomers(actor(c), { tenantId: t(c), ...text(c, "search"), ...int(c, "limit") }),
+      queryFields: ["search", "limit", "cursor"],
+      run: (c) => customers.listCustomers(actor(c), { tenantId: t(c), ...text(c, "search"), ...int(c, "limit"), ...text(c, "cursor") }),
     }),
     route("POST", "/customers", {
       success: 201,
@@ -370,10 +372,12 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
     }),
     route("GET", "/orders/(?<orderId>[^/]+)/customer", {
       success: 200,
+      auditRead: true,
       run: (c) => customers.getOrderCustomer(actor(c), { tenantId: t(c), orderId: c.params.orderId! }),
     }),
     route("GET", "/customers/(?<customerId>[^/]+)", {
       success: 200,
+      auditRead: true,
       run: (c) => customers.getCustomer(actor(c), { tenantId: t(c), customerId: c.params.customerId! }),
     }),
     route("POST", "/customers/(?<customerId>[^/]+)/updates", {
@@ -388,6 +392,7 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
     }),
     route("GET", "/customers/(?<customerId>[^/]+)/changes", {
       success: 200,
+      auditRead: true,
       run: (c) => customers.listCustomerChanges(actor(c), { tenantId: t(c), customerId: c.params.customerId! }),
     }),
     route("GET", "/suppliers", {
@@ -774,16 +779,16 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
         body = parseBody(request, hit.r.fields ?? []);
       }
       const run = () => hit.r.run({ params: hit.params, query, body, userId, email, idempotencyKey });
-      // 쓰기 요청은 성공 시 감사 행을 명령과 같은 트랜잭션에 남긴다(읽기는 남기지 않는다)
+      // 쓰기 요청은 성공 시 감사 행을 명령과 같은 트랜잭션에 남긴다(읽기는 `auditRead` 경로만)
       const { tenantId, ...targets } = hit.params;
       const data =
-        hit.r.method === "POST"
+        hit.r.method === "POST" || hit.r.auditRead
           ? await runWithAudit(
               {
                 actorId: userId,
                 ...(hit.r.scope === "tenant" && tenantId ? { tenantId } : {}),
-                operation: `POST ${hit.r.scope === "tenant" ? "/v1/tenants/{tenantId}" : "/v1"}${hit.r.template}`,
-                commandKey: idempotencyKey,
+                operation: `${hit.r.method} ${hit.r.scope === "tenant" ? "/v1/tenants/{tenantId}" : "/v1"}${hit.r.template}`,
+                ...(hit.r.method === "POST" ? { commandKey: idempotencyKey } : {}),
                 requestHash: createHash("sha256").update(request.rawBody ?? "").digest("hex"),
                 targets,
               },

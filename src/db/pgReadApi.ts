@@ -17,7 +17,7 @@ import { loadLedger, type PaymentLedger } from "./pgPaymentApi";
 import { toSupplier } from "./pgSupplierApi";
 import { loadSecuredDeps, toAttempt, toResult, toTarget } from "./pgNotificationApi";
 import { parseUtcTimestamp } from "../procurement/validation";
-import { inTransaction, isUuid, loadMembership, loadOrders, principalFor, type PoolLike } from "./pgSupport";
+import { inTransaction, isUuid, loadMembership, loadOrders, principalFor, type PoolLike, encodeCursor, decodeCursor } from "./pgSupport";
 
 type Actor = { userId: string };
 
@@ -30,19 +30,6 @@ function pageSize(limit: number | undefined): number {
   const value = limit ?? DEFAULT_LIMIT;
   if (!Number.isInteger(value) || value < 1 || value > MAX_LIMIT) throw validation("limit must be an integer 1..100");
   return value;
-}
-
-/** 불투명 커서: 정렬 키 배열을 base64 JSON으로 감싼다. 형식이 맞지 않으면 400 */
-const encodeCursor = (key: string[]) => btoa(unescape(encodeURIComponent(JSON.stringify(key))));
-function decodeCursor(cursor: string, size: number): string[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(decodeURIComponent(escape(atob(cursor))));
-  } catch {
-    throw validation("invalid cursor");
-  }
-  if (!Array.isArray(parsed) || parsed.length !== size || !parsed.every((p) => typeof p === "string")) throw validation("invalid cursor");
-  return parsed as string[];
 }
 
 /** 안내 대상과 기록에서 파생한 상태(BR-M01) */

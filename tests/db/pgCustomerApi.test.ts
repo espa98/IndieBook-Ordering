@@ -168,3 +168,25 @@ describe("주문-고객 연결 (고객 결정 #4, Postgres)", () => {
     expect(await codeOf(() => link(staff, ORDER_2, a.id))).toBe("BUSINESS_INVARIANT");
   });
 });
+
+describe("고객 목록 커서 페이지 (Postgres)", () => {
+  it("limit만큼 최신순으로 자르고 nextCursor로 이어 받으면 겹침·누락 없이 전부 나오며(마지막 페이지엔 nextCursor 없음), 잘못된 커서는 VALIDATION_ERROR이다", async () => {
+    const made: string[] = [];
+    for (let i = 1; i <= 5; i++) made.push((await register(staff, { name: `페이지${i}`, phone: `010-9${i}00-0000` })).customer.id);
+
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    const sizes: number[] = [];
+    for (let guard = 0; guard < 5; guard++) {
+      const page = await api().listCustomers(staff, { tenantId: T, search: "페이지", limit: 2, ...(cursor ? { cursor } : {}) } as never);
+      sizes.push(page.items.length);
+      seen.push(...page.items.map((i: { id: string }) => i.id));
+      cursor = page.nextCursor;
+      if (!cursor) break;
+    }
+
+    expect(sizes).toEqual([2, 2, 1]);
+    expect(seen).toEqual([...made].reverse());
+    expect(await codeOf(() => api().listCustomers(staff, { tenantId: T, cursor: "garbage" } as never))).toBe("VALIDATION_ERROR");
+  });
+});

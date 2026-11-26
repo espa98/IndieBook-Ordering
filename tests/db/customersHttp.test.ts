@@ -118,3 +118,29 @@ describe("주문-고객 연결 HTTP (고객 결정 #4)", () => {
     expect(byOrder(plainOrder)).not.toHaveProperty("customer");
   });
 });
+
+describe("고객 정보 조회 감사 (고객 결정 #3)", () => {
+  it("고객 상세·변경 이력·주문의 현재 고객 조회는 감사 로그에 남고(누가 어느 고객을), 목록 조회와 실패한 조회는 남지 않는다", async () => {
+    const ORDER = "b0000000-0000-4000-8000-0000000000c4";
+    const c = await db.connect();
+    await c.query(`insert into public.ordering_orders (id, tenant_id) values ($1, $2)`, [ORDER, T]);
+    const audits = async () => (await c.query(`select actor_id, operation, targets from public.ordering_audit_log where operation like 'GET %' order by seq`)).rows;
+    const { body } = await call("POST", "/customers", STAFF, { body: { name: "감사고객", phone: "010-6000-0001", registeredAt: PAST } });
+    const id = body.data.customer.id as string;
+    const before = (await audits()).length;
+
+    await call("GET", "/customers", STAFF);
+    await call("GET", `/customers/${id}`, STAFF);
+    await call("GET", `/customers/${id}/changes`, OWNER);
+    await call("GET", `/orders/${ORDER}/customer`, STAFF);
+    await call("GET", `/customers/${id}`, STRANGER); // 403: 남지 않는다
+    await call("GET", "/customers/00000000-0000-4000-8000-000000000000", STAFF); // 404: 남지 않는다
+
+    expect((await audits()).slice(before)).toEqual([
+      { actor_id: STAFF, operation: "GET /v1/tenants/{tenantId}/customers/{customerId}", targets: { customerId: id } },
+      { actor_id: OWNER, operation: "GET /v1/tenants/{tenantId}/customers/{customerId}/changes", targets: { customerId: id } },
+      { actor_id: STAFF, operation: "GET /v1/tenants/{tenantId}/orders/{orderId}/customer", targets: { orderId: ORDER } },
+    ]);
+    await c.end();
+  });
+});

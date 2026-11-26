@@ -6,7 +6,7 @@ import type { AnonymizeCustomerRequest } from "../customer/anonymizeCustomer";
 import type { UpdateCustomerRequest } from "../customer/updateCustomer";
 import { normalizePhone } from "../customer/normalizePhone";
 import { AppError } from "../errors/AppError";
-import { inTransaction, isCommandKeyConflict, isUuid, loadCommands, loadMembership, principalFor, saveNewCommands, type PoolLike } from "./pgSupport";
+import { decodeCursor, encodeCursor, inTransaction, isCommandKeyConflict, isUuid, loadCommands, loadMembership, principalFor, saveNewCommands, type PoolLike } from "./pgSupport";
 
 type Actor = { userId: string };
 
@@ -20,7 +20,7 @@ export type AnonymizeCustomerBody = Omit<AnonymizeCustomerRequest, "actorRole" |
 /** 목록 화면용: 번호는 끝 4자리만(고객 결정 #3) */
 export type CustomerListItem = { id: string; name: string; phoneLast4?: string; version: number; anonymized: boolean };
 export type CustomerChangeView = { id: string; kind: "REGISTERED" | "UPDATED" | "ANONYMIZED"; before?: unknown; after?: unknown; by: string; at: string };
-export type ListCustomersRequest = { tenantId: string; search?: string; limit?: number };
+export type ListCustomersRequest = { tenantId: string; search?: string; limit?: number; cursor?: string };
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
@@ -199,7 +199,7 @@ export function createPgCustomerApi(deps: { pool: PoolLike }) {
       }),
 
     /** 최신 등록순. 이름 부분 일치 + 번호 숫자열 부분 일치(숫자 3자리 이상)(고객 결정 #9) */
-    listCustomers: (actor: Actor, request: ListCustomersRequest): Promise<{ items: CustomerListItem[] }> =>
+    listCustomers: (actor: Actor, request: ListCustomersRequest): Promise<{ items: CustomerListItem[]; nextCursor?: string }> =>
       asMember(actor, request.tenantId, async (client) => {
         const limit = request.limit ?? DEFAULT_LIMIT;
         if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) throw new AppError("VALIDATION_ERROR", "limit must be an integer 1..100");
@@ -217,9 +217,18 @@ export function createPgCustomerApi(deps: { pool: PoolLike }) {
           }
           where += ")";
         }
-        params.push(limit);
-        const rows = (await client.query(`select * from public.ordering_customers where tenant_id = $1${where} order by created_at desc, id desc limit $${params.length}`, params)).rows;
+        if (request.cursor !== undefined) {
+          const [at, id] = decodeCursor(request.cursor, 2) as [string, string];
+          if (Number.isNaN(Date.parse(at)) || !isUuid(id)) throw new AppError("VALIDATION_ERROR", "invalid cursor");
+          params.push(at, id);
+          where += ` and (created_at, id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`;
+        }
+        params.push(limit + 1);
+        const found = (await client.query(`select *, created_at::text as created_at_text from public.ordering_customers where tenant_id = $1${where} order by created_at desc, id desc limit $${params.length}`, params)).rows;
+        const rows = found.slice(0, limit);
+        const last = rows[rows.length - 1];
         return {
+          ...(found.length > limit && last ? { nextCursor: encodeCursor([last.created_at_text, last.id]) } : {}),
           items: rows.map((r): CustomerListItem => ({ id: r.id, name: r.name, ...(r.phone === null ? {} : { phoneLast4: (r.phone as string).slice(-4) }), version: Number(r.version), anonymized: r.anonymized_at !== null })),
         };
       }),

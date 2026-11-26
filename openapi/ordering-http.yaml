@@ -5170,6 +5170,11 @@ paths:
           required: false
           schema:
             type: string
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: 성공(`data`는 도메인 객체)
@@ -5179,7 +5184,7 @@ paths:
                 type: object
                 required: [data]
                 properties:
-                  data: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/CustomerListItem" } } } }
+                  data: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/CustomerListItem" } }, nextCursor: { type: string, description: 다음 페이지가 있을 때만 있다 } } }
         "400":
           $ref: "ordering.yaml#/components/responses/ValidationError"
         "401":

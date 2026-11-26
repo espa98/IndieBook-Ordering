@@ -306,3 +306,16 @@ export async function loadOrders(
     ),
   );
 }
+
+/** 불투명 커서: 정렬 키 배열을 base64 JSON으로 감싼다. 형식이 맞지 않으면 400 */
+export const encodeCursor = (key: string[]) => btoa(unescape(encodeURIComponent(JSON.stringify(key))));
+export function decodeCursor(cursor: string, size: number): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(decodeURIComponent(escape(atob(cursor))));
+  } catch {
+    throw new AppError("VALIDATION_ERROR", "invalid cursor");
+  }
+  if (!Array.isArray(parsed) || parsed.length !== size || !parsed.every((p) => typeof p === "string")) throw new AppError("VALIDATION_ERROR", "invalid cursor");
+  return parsed as string[];
+}
