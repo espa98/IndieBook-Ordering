@@ -183,6 +183,10 @@ describe("고객 안내 조회·미수령 경고 (읽기 API)", () => {
     expect(warnings.map((w) => w.orderId)).not.toContain(fresh.orderId);
     expect(warnings.map((w) => w.orderId)).not.toContain(released.orderId);
     expect(warnings.find((w) => w.orderId === old.orderId)).toMatchObject({ securedQuantity: 2, daysElapsed: 10 });
+    // 대시보드의 장기 미수령 건수는 목록 API와 같은 계산이다
+    expect((await read().getDashboard(staff, { tenantId: T_A })).longUnreceivedWarnings).toBe(warnings.length);
+    expect(warnings.length).toBeGreaterThan(0);
+    expect((await read().getDashboard(staff, { tenantId: T_A, thresholdDays: 30 })).longUnreceivedWarnings).toBe((await read().longUnreceivedWarnings(staff, { tenantId: T_A, thresholdDays: 30 })).length);
     expect((await read().longUnreceivedWarnings(staff, { tenantId: T_A, thresholdDays: 30 })).map((w) => w.orderId)).not.toContain(old.orderId);
     expect((await read().longUnreceivedWarnings(staff, { tenantId: T_A, thresholdDays: 1 })).map((w) => w.orderId)).toContain(fresh.orderId);
     expect(await codeOf(() => read().longUnreceivedWarnings(staff, { tenantId: T_A, thresholdDays: 0 }))).toBe("VALIDATION_ERROR");

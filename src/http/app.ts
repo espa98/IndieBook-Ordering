@@ -404,6 +404,11 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       success: 200,
       run: (c) => reads.listNotificationTargets(actor(c), { tenantId: t(c), orderId: c.params.orderId! }),
     }),
+    route("GET", "/dashboard", {
+      success: 200,
+      queryFields: ["since", "thresholdDays"],
+      run: (c) => reads.getDashboard(actor(c), { tenantId: t(c), ...text(c, "since"), ...int(c, "thresholdDays") }),
+    }),
     route("GET", "/long-unreceived-warnings", {
       success: 200,
       queryFields: ["thresholdDays"],

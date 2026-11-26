@@ -16,6 +16,7 @@ import type { Payment } from "../payment/recordPayment";
 import { loadLedger, type PaymentLedger } from "./pgPaymentApi";
 import { toSupplier } from "./pgSupplierApi";
 import { loadSecuredDeps, toAttempt, toResult, toTarget } from "./pgNotificationApi";
+import { parseUtcTimestamp } from "../procurement/validation";
 import { inTransaction, isUuid, loadMembership, loadOrders, principalFor, type PoolLike } from "./pgSupport";
 
 type Actor = { userId: string };
@@ -155,6 +156,14 @@ export type AuditLogEntry = {
   targets: Record<string, string>;
   recordedAt: string;
 };
+/** 대시보드(O-01) 서버 집계 */
+export type Dashboard = {
+  orders: { draft: number; held: number; discarded: number; confirmed: number };
+  purchaseOrders: { draft: number; ready: number; sent: number; acknowledged: number };
+  refunds: { required: number; partial: number; remainingKrw: string };
+  longUnreceivedWarnings: number;
+  receivedSince?: number;
+};
 /** 주문 보류·재개·폐기 이력의 한 줄 */
 export type OrderEventView = { kind: "HOLD" | "RESUME" | "DISCARD"; reason?: string; by: string; at: string };
 export type ListAuditLogRequest = { tenantId: string; limit?: number; cursor?: string; actorId?: string };
@@ -180,7 +189,7 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
     return toBook(row);
   }
 
-  return {
+  const api = {
     getBook: (actor: Actor, request: { tenantId: string; bookId: string }): Promise<Book> =>
       asMember(actor, request.tenantId, (client) => requireBook(client, request.tenantId, request.bookId)),
 
@@ -321,6 +330,56 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
         return { items: page.map(toStockLevel), ...(rows.length > limit && last ? { nextCursor: encodeCursor([last.book_key]) } : {}) };
       }),
 
+    /**
+     * 대시보드(O-01) 서버 집계: 주문(초안·보류·폐기·확정), 활성 발주(초안·준비·전달·회신), 환급 업무(미환급·일부 환급·남은 금액),
+     * 장기 미수령 경고 수. 숫자는 테이블·원장에서 직접 센다. `since`(RFC3339 UTC, 미래 불가)를 주면 그 시각 이후 접수된 주문 수(폐기 제외)도 돌려준다.
+     * 장기 미수령 경고는 목록 API와 같은 계산을 별도 트랜잭션으로 한 번 더 실행한다.
+     */
+    getDashboard: (actor: Actor, request: { tenantId: string; since?: string; thresholdDays?: number }): Promise<Dashboard> =>
+      asMember(actor, request.tenantId, async (client) => {
+        const now = (deps.now ?? (() => new Date()))();
+        if (request.since !== undefined) parseUtcTimestamp("since", request.since, now);
+        const t = request.tenantId;
+        const orders = (
+          await client.query(
+            `select count(*) filter (where status = 'DRAFT' and held_at is null and discarded_at is null)::int as draft,
+                    count(*) filter (where held_at is not null)::int as held,
+                    count(*) filter (where discarded_at is not null)::int as discarded,
+                    count(*) filter (where status = 'CONFIRMED')::int as confirmed,
+                    count(*) filter (where discarded_at is null and $2::timestamptz is not null and created_at >= $2::timestamptz)::int as received_since
+               from public.ordering_orders where tenant_id = $1`,
+            [t, request.since ?? null],
+          )
+        ).rows[0];
+        const po = (
+          await client.query(
+            `select count(*) filter (where status = 'DRAFT')::int as draft, count(*) filter (where status = 'READY')::int as ready,
+                    count(*) filter (where status = 'SENT')::int as sent, count(*) filter (where status = 'ACKNOWLEDGED')::int as acknowledged
+               from public.ordering_purchase_orders where tenant_id = $1`,
+            [t],
+          )
+        ).rows[0];
+        // 환급 업무의 상태·잔량은 환급 확인 합계에서 파생한다(refundTaskState와 같은 규칙: 0이면 미환급, 남으면 일부 환급)
+        const refunds = (
+          await client.query(
+            `select count(*) filter (where refunded = 0)::int as required,
+                    count(*) filter (where refunded > 0 and refunded < required_krw)::int as partial,
+                    coalesce(sum(greatest(required_krw - refunded, 0)), 0)::text as remaining
+               from (select k.required_krw, coalesce((select sum(c.amount_krw) from public.ordering_refund_confirmations c where c.tenant_id = k.tenant_id and c.refund_task_id = k.id), 0) as refunded
+                       from public.ordering_refund_tasks k where k.tenant_id = $1) x`,
+            [t],
+          )
+        ).rows[0];
+        const warnings = await api.longUnreceivedWarnings(actor, { tenantId: t, ...(request.thresholdDays !== undefined ? { thresholdDays: request.thresholdDays } : {}) });
+        return {
+          orders: { draft: orders.draft, held: orders.held, discarded: orders.discarded, confirmed: orders.confirmed },
+          purchaseOrders: { draft: po.draft, ready: po.ready, sent: po.sent, acknowledged: po.acknowledged },
+          refunds: { required: refunds.required, partial: refunds.partial, remainingKrw: refunds.remaining },
+          longUnreceivedWarnings: warnings.length,
+          ...(request.since !== undefined ? { receivedSince: orders.received_since } : {}),
+        };
+      }),
+
     /** 주문의 보류·재개·폐기 이력(오래된 순). 재개·폐기 뒤에도 사유가 남는다 */
     getOrderHistory: (actor: Actor, request: { tenantId: string; orderId: string }): Promise<OrderEventView[]> =>
       asMember(actor, request.tenantId, async (client) => {
@@ -407,5 +466,5 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
         return { items: page.map(toBook), ...(rows.length > limit && last ? { nextCursor: encodeCursor([last.title, last.id]) } : {}) };
       }),
   };
+  return api;
 }
-

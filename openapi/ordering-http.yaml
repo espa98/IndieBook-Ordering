@@ -2298,6 +2298,49 @@ paths:
           $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/dashboard:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+    get:
+      tags: [reads]
+      operationId: getDashboard
+      summary: 대시보드 서버 집계 (O-01)
+      description: |
+        활성 멤버(Owner·직원)가 서점의 운영 현황 숫자를 한 번에 읽는다. 숫자는 테이블·원장에서 직접 센다.
+        `orders`(초안·보류·폐기·확정, 초안은 보류·폐기를 뺀 건수), `purchaseOrders`(활성 발주 초안·준비·전달·회신),
+        `refunds`(미환급 업무·일부 환급 업무·남은 환급액 합계), `longUnreceivedWarnings`(장기 미수령 경고 수, `GET /long-unreceived-warnings`와 같은 계산).
+        `since`(RFC3339 UTC, 미래 불가)를 주면 그 시각 이후 접수된 주문 수(`receivedSince`, 폐기 제외)도 돌려준다. "오늘"의 기준 시각은 서점 시간대를 아는 클라이언트가 정한다.
+        안내 대기·미결제·미배분 입고·부분입고 잔량 등 나머지 DASH 항목은 아직 집계하지 않는다.
+      parameters:
+        - name: since
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: thresholdDays
+          in: query
+          required: false
+          description: 장기 미수령 기준일(1~365, 기본 7)
+          schema: { type: string }
+      responses:
+        "200":
+          description: 성공(`data`는 집계)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Dashboard" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/long-unreceived-warnings:
     parameters:
       - $ref: "ordering.yaml#/components/parameters/TenantId"
@@ -4407,6 +4450,39 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    Dashboard:
+      type: object
+      additionalProperties: false
+      required: [orders, purchaseOrders, refunds, longUnreceivedWarnings]
+      properties:
+        orders:
+          type: object
+          additionalProperties: false
+          required: [draft, held, discarded, confirmed]
+          properties:
+            draft: { type: integer, minimum: 0 }
+            held: { type: integer, minimum: 0 }
+            discarded: { type: integer, minimum: 0 }
+            confirmed: { type: integer, minimum: 0 }
+        purchaseOrders:
+          type: object
+          additionalProperties: false
+          required: [draft, ready, sent, acknowledged]
+          properties:
+            draft: { type: integer, minimum: 0 }
+            ready: { type: integer, minimum: 0 }
+            sent: { type: integer, minimum: 0 }
+            acknowledged: { type: integer, minimum: 0 }
+        refunds:
+          type: object
+          additionalProperties: false
+          required: [required, partial, remainingKrw]
+          properties:
+            required: { type: integer, minimum: 0 }
+            partial: { type: integer, minimum: 0 }
+            remainingKrw: { type: string, pattern: "^(0|[1-9][0-9]*)$" }
+        longUnreceivedWarnings: { type: integer, minimum: 0 }
+        receivedSince: { type: integer, minimum: 0, description: since를 줬을 때만 있다 }
     MemberView:
       type: object
       additionalProperties: false

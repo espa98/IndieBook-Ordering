@@ -12,7 +12,7 @@
 
 ## 2. UI 1차 범위: 실제 API에 연결할 수 있는 화면
 
-서버 근거는 `tests/db`·`tests/openapi`(격리 Postgres, 실제 서명 JWT, 전 경로 계약·권한·롤백 검증, 전체 170개 파일 1494개 테스트 통과)다. 계약은 `openapi/ordering.yaml`(주문 4)과 `openapi/ordering-http.yaml`(나머지, 총 83개 연산)이며 **미검증 엔드포인트는 호출하지 않는다**.
+서버 근거는 `tests/db`·`tests/openapi`(격리 Postgres, 실제 서명 JWT, 전 경로 계약·권한·롤백 검증, 전체 172개 파일 1500개 테스트 통과)다. 계약은 `openapi/ordering.yaml`(주문 4)과 `openapi/ordering-http.yaml`(나머지, 총 83개 연산)이며 **미검증 엔드포인트는 호출하지 않는다**.
 
 | Bolt 단계 | 화면 | 실제 API 연결 | 비고 |
 |---|---|---|---|
@@ -24,7 +24,7 @@
 | 08 안내·수령·결제 | O-08-01 안내, O-09-01 수령, O-09-02 결제 | `/orders/{id}/notification-targets`(GET/POST), `/notification-targets/{id}/copies`·`/attempts`·`/renotices`, `/notification-attempts/{id}/result`, `GET /message-templates`, `/orders/{id}/fulfillments`(+정정), `/orders/{id}/payments`(GET/POST), `/payments/{id}/confirmation`·`/void`·`/corrections` | 복사·공유는 발송 완료가 아니다(서버도 결과 기록을 분리) |
 | 09 취소·반품·환급·정정 | O-04-01 취소, R-01 처분, R-03 반품, R-04 재고 편입, O-09-04 환급, R-05 정정 | `/orders/{id}/cancellation-requests`, `/order-cancellation-requests/{id}/decision`·`/application`, `/allocation-cancellations/{id}/return-requests`·`/stock-intakes`, `/return-requests/{id}/*`, `/return-exceptions/{id}/resolutions`, `/orders/{id}/refund-tasks`, `/refund-tasks/{id}/*`, `/refund-requests/{id}/decision`, `/refund-attempts/{id}/resolution`, `/orders/{id}/closure-requests` | 종결 실행·재개는 서버 내부(스위퍼), UI 경로 없음 |
 | 10 설정 | S-02 직원 목록·초대·비활성, 안내 템플릿 버전, 감사 이력 | `GET /members`, `GET/POST /staff-invitations`, `POST /staff-invitations/{id}/revocation`, `POST /members/{id}/status`, `GET/POST /message-templates`, `GET /audit-log` | 위임 부여는 서버 없음(§4). 직원은 이름·이메일 없이 사용자 ID로 식별된다 |
-| 03 대시보드 | O-01-02 장기 미수령 경고 | `GET /long-unreceived-warnings` | 나머지 집계·예외 큐는 서버 없음(§4) |
+| 03 대시보드 | O-01 숫자 카드, O-01-02 장기 미수령 경고 | `GET /dashboard`, `GET /long-unreceived-warnings` | 안내·미결제·입고 잔량 카드와 예외 큐(O-01-01)는 서버 없음 → 데모 값(§4) |
 
 **공통 규칙(UI가 지킬 서버 계약):** Bearer JWT; 모든 POST에 `Idempotency-Key`; 낡은 `expectedVersion`은 409 `VERSION_CONFLICT`; 같은 키·다른 본문은 409 `IDEMPOTENCY_CONFLICT`; 업무 규칙 위반 422 `BUSINESS_INVARIANT`; 본문 413(기본 1 MiB); 쿼리 시간 초과·내부 오류는 500(재시도 구분 없음); 금액은 정수 문자열; 시각은 RFC3339 UTC(미래 불가); 행위자·역할은 토큰에서만(본문으로 보낼 수 없음); 다른 서점·없는 대상은 같은 404.
 
@@ -44,7 +44,7 @@ UI 단계 순서에 맞춰 서버가 먼저 만들 조회 API다. 모두 같은 
 |---|---|---|---|
 | 1 | A-05 서점 선택, 앱 셸 | ✅ **완료(2026-11-26)** `GET /v1/me/memberships`: 내가 활성 멤버인 서점·이름·내 역할. 보고서 §99 | 소 |
 | 2 | S-02 직원 관리 | ✅ **완료(2026-11-26)** `GET /members`(구성원·역할·활성·합류일), `GET /staff-invitations`(PENDING/ACCEPTED/REVOKED/EXPIRED, 토큰 없음). Owner만. 보고서 §100 | 소 |
-| 3 | O-01 대시보드, O-01-01 예외 큐 | **서버 집계**: 상태별 주문 수, 발주·입고·안내·미수령·미결제·환급 필요·차단 예외 건수와 큐 | 중 |
+| 3 | O-01 대시보드, O-01-01 예외 큐 | 🟡 **1차 완료(2026-11-26)** `GET /dashboard`: 주문(초안·보류·폐기·확정)·활성 발주·환급 업무·장기 미수령 건수·`since` 이후 접수 주문. **남음**: 안내 대기·실패, 미결제, 미배분 입고·부분입고 잔량, 공급처별 현황, 기간 통계, 예외 큐 목록(O-01-01). 보고서 §101 | 중 |
 | 4 | O-07 입고 현황, O-07-02 배분 | 입고·배분·미배분량 목록·상세 조회(`GET /receipts`, `/receipts/{id}`) | 중 |
 | 5 | O-08 안내 대기, O-09 수령·결제 현황 | 서점 전체 안내 대기 큐, 수령·결제 현황 목록(지금은 주문별 조회만) | 중 |
 | 6 | O-09-04 환급, R-01·R-03·R-04 | 환급 필요 업무 목록, 취소 물량 처분·반품 목록 | 중 |

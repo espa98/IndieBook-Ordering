@@ -333,6 +333,19 @@ describe("응답 계약(쓰기): 초안 보류·재개·폐기", () => {
   });
 });
 
+describe("응답 계약(읽기): 대시보드", () => {
+  it("대시보드 집계 응답(since 유무)이 선언한 스키마를 만족한다", async () => {
+    const plain = await call("GET", "/dashboard");
+    const withSince = await call("GET", "/dashboard", undefined, "since=2020-01-01T00:00:00.000Z");
+    expect(plain.status).toBe(200);
+    expect(withSince.status).toBe(200);
+    expect(withSince.body.data.receivedSince).toBeGreaterThanOrEqual(0);
+    expect(declared("/dashboard", "get"), "data 스키마").toBe(true);
+    expect(conforms("/dashboard", plain.body)).toMatchObject({ ok: true });
+    expect(conforms("/dashboard", withSince.body)).toMatchObject({ ok: true });
+  });
+});
+
 describe("응답 계약(쓰기): 주문 취소·종결·취소 물량 처분·반품", () => {
   it("취소 요청·결정·적용·종결 요청과 재고 편입·반품 요청·회신·출고·예외·해소·재협의·완료 응답이 선언한 스키마를 만족한다", async () => {
     const checked: Checked[] = [];
