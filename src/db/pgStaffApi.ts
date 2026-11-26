@@ -24,13 +24,27 @@ const iso = (value: Date) => value.toISOString();
 export type InviteStaffBody = Omit<InviteStaffRequest, "actorRole" | "invitedBy">;
 /** 클라이언트에 나가는 초대: 서버 내부 값인 토큰 해시는 뺀다(토큰 원문은 처음 응답에만 있다) */
 export type InviteStaffResult = { invitation: Omit<StaffInvitation, "tokenHash">; token: string };
+/** 직원 목록의 한 줄(S-02). 이름·이메일은 인증 제공자에만 있어 사용자 ID로 식별한다 */
+export type MemberView = { userId: string; role: "OWNER" | "STAFF"; status: "ACTIVE" | "INACTIVE"; joinedAt: string };
+/** 초대 목록의 한 줄. 토큰 원문·해시는 없다 */
+export type InvitationView = {
+  id: string;
+  email: string;
+  role: "STAFF";
+  invitedBy: string;
+  invitedAt: string;
+  expiresAt: string;
+  status: "PENDING" | "ACCEPTED" | "REVOKED" | "EXPIRED";
+  resolvedAt?: string;
+  resolvedBy?: string;
+};
 export type RevokeInvitationBody = Omit<RevokeInvitationRequest, "actorRole" | "revokedBy">;
 export type SetMembershipStatusBody = Omit<SetMembershipStatusRequest, "actorRole" | "changedBy">;
 
 /** 직원 초대·철회와 직원 비활성화·복구를 Postgres 영속화 위에서 실행한다 (E7 권고안 a).
  * 초대 토큰은 해시만 저장하고, 멱등 기록에도 원문을 남기지 않는다(같은 키의 재시도는 같은 초대를 돌려주되 토큰은 다시 주지 않는다).
  * 멤버십 변경은 서점의 멤버 행을 `FOR UPDATE`로 잡아 직렬화하고, 마지막 활성 Owner 보호는 DB 트리거도 한 번 더 막는다. */
-export function createPgStaffApi(deps: { pool: PoolLike }) {
+export function createPgStaffApi(deps: { pool: PoolLike; now?: () => Date }) {
   const withRetry = async <T>(runOnce: () => Promise<T>): Promise<T> => {
     for (let attempt = 0; ; attempt++) {
       try {
@@ -195,7 +209,41 @@ export function createPgStaffApi(deps: { pool: PoolLike }) {
       return membership;
     });
 
+  /** 직원 관리(S-02)는 Owner만 본다. 활성 Owner가 아니면 FORBIDDEN */
+  const asOwner = <T>(actor: Actor, tenantId: string, run: (client: PoolClient) => Promise<T>): Promise<T> =>
+    inTransaction(deps.pool, "service_role", actor.userId, async (client) => {
+      const principal = principalFor(await loadMembership(client, actor.userId, tenantId), actor.userId, tenantId);
+      if (principal.role !== "OWNER") throw new AppError("FORBIDDEN");
+      return run(client);
+    });
+
   return {
+    /** 서점의 모든 구성원(비활성 포함). Owner 먼저, 합류 순 */
+    listMembers: (actor: Actor, request: { tenantId: string }): Promise<MemberView[]> =>
+      asOwner(actor, request.tenantId, async (client) => {
+        const rows = (
+          await client.query("select user_id, role, active, created_at from public.ordering_members where tenant_id = $1 order by (role = 'OWNER') desc, created_at, user_id", [request.tenantId])
+        ).rows;
+        return rows.map((r): MemberView => ({ userId: r.user_id, role: r.role, status: r.active ? "ACTIVE" : "INACTIVE", joinedAt: iso(r.created_at) }));
+      }),
+
+    /** 서점의 초대(최신 초대 순)와 상태. 토큰 원문·해시는 포함하지 않는다 */
+    listInvitations: (actor: Actor, request: { tenantId: string }): Promise<InvitationView[]> =>
+      asOwner(actor, request.tenantId, async (client) => {
+        const { invitations, events } = await loadInvitations(client, request.tenantId);
+        const now = (deps.now ?? (() => new Date()))().getTime();
+        return invitations
+          .map((i): InvitationView => {
+            const event = events.find((e) => e.invitationId === i.id);
+            const status: InvitationView["status"] = event ? event.kind : Date.parse(i.expiresAt) <= now ? "EXPIRED" : "PENDING";
+            return {
+              id: i.id, email: i.email, role: i.role, invitedBy: i.invitedBy, invitedAt: i.invitedAt, expiresAt: i.expiresAt, status,
+              ...(event ? { resolvedAt: event.at, resolvedBy: event.actorId } : {}),
+            };
+          })
+          .sort((a, b) => (a.invitedAt === b.invitedAt ? (a.id < b.id ? 1 : -1) : a.invitedAt < b.invitedAt ? 1 : -1));
+      }),
+
     acceptInvitation: (actor: Actor & { email: string }, request: { token: string; idempotencyKey: string }) => withRetry(() => acceptOnce(actor, request)),
     inviteStaff: async (actor: Actor, request: InviteStaffBody): Promise<InviteStaffResult> => {
       const { invitation, token } = await withRetry(() => inviteOnce(actor, request));

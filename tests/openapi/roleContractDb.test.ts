@@ -37,6 +37,8 @@ const OWNER_ONLY_ROUTES: Record<string, string> = {
   revokeInvitation: "POST /v1/tenants/{tenantId}/staff-invitations/{invitationId}/revocation",
   setMembershipStatus: "POST /v1/tenants/{tenantId}/members/{targetUserId}/status",
 };
+/** Owner만 읽는 조회 경로(권한 규칙이 명령 모음이 아니라 어댑터에 있다) */
+const OWNER_ONLY_READS = ["GET /v1/tenants/{tenantId}/audit-log", "GET /v1/tenants/{tenantId}/members", "GET /v1/tenants/{tenantId}/staff-invitations"];
 /** Owner 전용이지만 HTTP 경로가 없는 명령(다른 명령 안에서만 실행된다) */
 const OWNER_ONLY_WITHOUT_ROUTE = ["confirmRefund"];
 
@@ -159,10 +161,9 @@ describe("역할별 403: 직원에게 일부만 허용되는 명령", () => {
     expect(problems).toEqual([]);
   });
 
-  it("GET /audit-log는 Owner만 읽는다: 직원은 403이고 Owner는 200이다", async () => {
+  it.each(OWNER_ONLY_READS)("%s는 Owner만 읽는다: 직원은 403이고 Owner는 200이다", async (route) => {
     const ops = await loadOperations();
     const ajv = new Ajv2020({ strict: false, allErrors: true });
-    const route = "GET /v1/tenants/{tenantId}/audit-log";
     const r = app.routes.find((x) => specKey(x) === route)!;
     const get = (sub: string) => app({ ...request(r, sub, ""), rawBody: undefined });
 
@@ -170,7 +171,8 @@ describe("역할별 403: 직원에게 일부만 허용되는 명령", () => {
     expect(denied.status).toBe(403);
     expect(ajv.validate(ops.get(route)!.responses["403"].content["application/json"].schema, JSON.parse(JSON.stringify(denied.body))), ajv.errorsText()).toBe(true);
     expect((await get(OWNER)).status).toBe(200);
-    expect((await get(DELEGATE)).status).toBe(403); // 위임은 감사 로그 조회와 무관하다
+    expect((await get(DELEGATE)).status).toBe(403); // 위임은 Owner 전용 조회와 무관하다
+    expect((await get(EX_OWNER)).status).toBe(403); // 비활성 Owner도 못 읽는다
   });
 });
 
@@ -180,7 +182,7 @@ describe("역할별 403: 직원에게 허용된 나머지 경로 (역방향)", (
     const classified = new Set([
       ...Object.values(OWNER_ONLY_ROUTES),
       ...PARTIAL.map((c) => c.route),
-      "GET /v1/tenants/{tenantId}/audit-log",
+      ...OWNER_ONLY_READS,
     ]);
     const ops = await loadOperations();
     const rest = app.routes.filter((r) => r.scope === "tenant" && !classified.has(specKey(r)));

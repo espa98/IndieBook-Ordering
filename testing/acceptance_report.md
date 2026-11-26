@@ -1945,3 +1945,20 @@ vitest는 타입을 검사하지 않아 §73에서 제가 만든 테스트의 �
 - **비활성 멤버십은 목록에서 숨긴다.** UI가 "접근 거부(A-10)" 화면에서 어느 서점이 비활성인지 알려 주려면 별도 표시가 필요하다(지금은 서점 범위 API가 403으로만 알린다).
 - 목록에 페이지네이션이 없다(한 계정이 속한 서점 수가 적다고 가정).
 - 마지막으로 선택한 서점 기억·기본 서점은 클라이언트 몫이다.
+
+## 100. 직원 목록·초대 목록 `GET /members`, `GET /staff-invitations` (S-02 직원 관리, UI 범위 결정서 보강 2번)
+
+테스트 약 10개 추가(`tests/db/pgStaffLists` 4, `staffListsHttp` 2, `roleContractDb` 보강, `responseContract` 보강, `ordering-http.yaml` 선언). 직원을 초대·비활성화하는 명령은 있었지만 **누가 직원이고 어떤 초대가 남았는지 볼 방법이 없어** S-02 화면을 만들 수 없었다.
+
+**동작(둘 다 활성 Owner만, 직원·비활성·비멤버는 403):**
+- `GET /members`: 서점의 모든 구성원을 비활성 포함해 Owner 먼저, 합류 순으로. 항목은 `userId`·`role`·`status(ACTIVE/INACTIVE)`·`joinedAt`.
+- `GET /staff-invitations`: 최신 초대 순. 항목은 `id`·`email`·`invitedBy`·`invitedAt`·`expiresAt`·`status`와, 수락·철회된 초대는 `resolvedAt`·`resolvedBy`. 상태는 `PENDING`(쓸 수 있음)·`ACCEPTED`·`REVOKED`·`EXPIRED`(시간이 지나면 대기 초대가 만료로 바뀜). **토큰 원문·해시는 절대 나가지 않는다**(토큰은 초대 생성 응답에만 있고 시험이 응답 전체에 `token` 문자열이 없음을 확인한다).
+- 다른 서점의 구성원·초대는 나오지 않는다.
+
+**TDD:** RED(어댑터 `listMembers`·`listInvitations` 없음 → 라우트 404) → GREEN(`pgStaffApi`, 라우트, 명세 `MemberView`·`InvitationView`). 이어서 `roleContractDb`의 "직원에게 허용된 나머지 경로" 역방향 검사가 새 Owner 전용 GET을 직원 허용으로 오분류해 실패했다(**의도한 안전장치**: 새 경로의 권한 분류를 강제). Owner 전용 조회 목록(`OWNER_ONLY_READS`: 감사 로그·직원·초대)으로 일반화해 직원 403(ErrorBody 선언), Owner 200, 위임 직원 403, **비활성 Owner 403**을 함께 확인한다.
+
+**한계**
+- 직원은 **이름·이메일이 없다**(사용자 ID만). 이름·이메일은 인증 제공자(Supabase Auth)에만 있다. 직원 목록에서 사람을 알아보려면 초대한 이메일과 수락한 사용자 ID를 `ACCEPTED` 초대에서 이어 보거나, 인증 제공자 조회를 서버에 추가해야 한다.
+- 목록에 페이지네이션이 없다(직원·초대 수가 적다고 가정). 초대는 만료·철회된 것도 계속 쌓이므로 많아지면 한도가 필요하다.
+- `EXPIRED`는 조회 시각 기준 계산이다(저장된 상태가 아니다).
+- 역할 변경(직원→Owner)과 위임 부여는 여전히 서버 명령이 없다(보강 7번).

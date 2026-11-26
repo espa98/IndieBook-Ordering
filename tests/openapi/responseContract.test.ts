@@ -406,6 +406,19 @@ describe("응답 계약(쓰기): 직원 초대·계정", () => {
     for (const { template } of checked) expect(declared(template, "post"), `${template} data 스키마`).toBe(true);
     for (const { template, body } of checked) expect(conforms(template, body, "post"), template).toMatchObject({ ok: true });
 
+    // 직원·초대 목록(S-02): Owner만. 수락·철회·대기 초대가 모두 있다
+    const members = await callAs(ownerId, undefined, "GET", `${base}/members`);
+    expect(members.status).toBe(200);
+    expect(members.body.data.map((m: { userId: string; status: string }) => [m.userId, m.status])).toEqual([[ownerId, "ACTIVE"], [staffId, "INACTIVE"]]);
+    const invitationList = await callAs(ownerId, undefined, "GET", `${base}/staff-invitations`);
+    expect(invitationList.status).toBe(200);
+    expect(invitationList.body.data.map((i: { status: string }) => i.status).sort()).toEqual(["ACCEPTED", "REVOKED"]);
+    expect(JSON.stringify(invitationList.body)).not.toMatch(/token/i);
+    for (const [template, res] of [["/members", members], ["/staff-invitations", invitationList]] as const) {
+      expect(declared(template, "get"), `${template} data 스키마`).toBe(true);
+      expect(conforms(template, res.body, "get"), template).toMatchObject({ ok: true });
+    }
+
     // 내 서점 목록(A-05): 방금 연 서점이 Owner로 나온다
     const mine = await callAs(ownerId, undefined, "GET", "/v1/me/memberships");
     expect(mine.status).toBe(200);

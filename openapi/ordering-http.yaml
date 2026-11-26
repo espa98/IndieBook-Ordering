@@ -2397,9 +2397,70 @@ paths:
           $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/members:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+    get:
+      tags: [staffAdmin]
+      operationId: listMembers
+      summary: 직원 목록 (S-02)
+      description: |
+        서점의 모든 구성원(비활성 포함)을 Owner 먼저, 합류 순으로 돌려준다. **활성 Owner만** 볼 수 있다(직원·비활성·비멤버는 403).
+        이름·이메일은 인증 제공자에만 있어 사용자 ID로 식별한다.
+      responses:
+        "200":
+          description: 성공(`data`는 구성원 배열)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/MemberView" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/staff-invitations:
     parameters:
       - $ref: "ordering.yaml#/components/parameters/TenantId"
+    get:
+      tags: [staffAdmin]
+      operationId: listInvitations
+      summary: 초대 목록 (S-02)
+      description: |
+        서점의 직원 초대를 최신 초대 순으로 돌려준다. `status`: `PENDING`(쓸 수 있음), `ACCEPTED`, `REVOKED`, `EXPIRED`(만료). **활성 Owner만** 볼 수 있다.
+        초대 토큰 원문과 해시는 포함하지 않는다(토큰은 초대 생성 응답에만 있다).
+      responses:
+        "200":
+          description: 성공(`data`는 초대 배열)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/InvitationView" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
     post:
       tags: [staffAdmin]
       operationId: inviteStaff
@@ -4346,6 +4407,29 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    MemberView:
+      type: object
+      additionalProperties: false
+      required: [userId, role, status, joinedAt]
+      properties:
+        userId: { type: string, format: uuid }
+        role: { type: string, enum: [OWNER, STAFF] }
+        status: { type: string, enum: [ACTIVE, INACTIVE] }
+        joinedAt: { type: string, format: date-time }
+    InvitationView:
+      type: object
+      additionalProperties: false
+      required: [id, email, role, invitedBy, invitedAt, expiresAt, status]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string }
+        role: { type: string, enum: [STAFF] }
+        invitedBy: { type: string }
+        invitedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        status: { type: string, enum: [PENDING, ACCEPTED, REVOKED, EXPIRED] }
+        resolvedAt: { type: string, format: date-time, description: 수락·철회된 초대만 }
+        resolvedBy: { type: string, description: 수락·철회한 사용자 ID }
     MyMembership:
       type: object
       additionalProperties: false

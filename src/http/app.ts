@@ -419,6 +419,14 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       fields: ["expectedVersion", "changes", "reason", "acknowledgeDuplicateOf", "changedAt"],
       run: (c) => catalog.updateBook(actor(c), merge(c, { tenantId: t(c), bookId: c.params.bookId!, idempotencyKey: c.idempotencyKey })),
     }),
+    route("GET", "/members", {
+      success: 200,
+      run: (c) => staffAdmin.listMembers(actor(c), { tenantId: t(c) }),
+    }),
+    route("GET", "/staff-invitations", {
+      success: 200,
+      run: (c) => staffAdmin.listInvitations(actor(c), { tenantId: t(c) }),
+    }),
     route("POST", "/staff-invitations", {
       success: 201,
       fields: ["email", "expiresAt"],
