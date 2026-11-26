@@ -45,7 +45,7 @@ describe("GET /dashboard", () => {
       purchaseOrders: { draft: 0, ready: 0, sent: 0, acknowledged: 0 },
       refunds: { required: 0, partial: 0, remainingKrw: "0" },
       dispositions: { openCancellations: 0, pendingQuantity: 0, heldQuantity: 0, dispatchedQuantity: 0 },
-      procurement: { notReceivedLines: 0, partiallyReceivedLines: 0, remainingQuantity: 0 },
+      procurement: { notReceivedLines: 0, partiallyReceivedLines: 0, remainingQuantity: 0, delayedLines: 0, delayedQuantity: 0 },
       receipts: { unallocatedReceipts: 0, unallocatedQuantity: 0 },
       payments: { unpaidOrders: 0, balanceKrw: "0", unconfirmedPayments: 0 },
       notifications: { pending: 0, attempted: 0, failed: 0 },
@@ -66,7 +66,8 @@ describe("GET /dashboard", () => {
   it("비멤버·비활성은 403, 인증 없음은 401, 알 수 없는 쿼리·잘못된 since·thresholdDays는 400, POST는 405", async () => {
     for (const sub of [STRANGER, EX_STAFF]) expect((await call("GET", "/dashboard", sub)).status, sub).toBe(403);
     expect((await call("GET", "/dashboard", undefined)).status).toBe(401);
-    for (const query of ["x=1", "since=어제", "since=2026-03-04", "since=2999-01-01T00:00:00.000Z", "thresholdDays=0", "thresholdDays=abc"]) {
+    expect((await call("GET", "/dashboard", OWNER, "delayDays=3")).status).toBe(200); // 발주 지연 기준일
+    for (const query of ["x=1", "delayDays=0", "delayDays=366", "delayDays=abc", "since=어제", "since=2026-03-04", "since=2999-01-01T00:00:00.000Z", "thresholdDays=0", "thresholdDays=abc"]) {
       expect((await call("GET", "/dashboard", OWNER, query)).status, query).toBe(400);
     }
     expect((await call("POST", "/dashboard", OWNER, "", {})).status).toBe(405);

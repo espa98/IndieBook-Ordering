@@ -311,7 +311,7 @@ GET /v1/me/memberships
 
 **F. 직원·설정(Owner)** — 초대 `POST …/staff-invitations {"email":"…","expiresAt":"…"}`(**응답의 `token`은 이때만** 한 번 보인다, 목록에는 없다) → 직원 목록 `GET …/members`·초대 목록 → 비활성화 `POST …/members/{id}/status {"status":"INACTIVE"}` → 위임 `POST …/members/{id}/delegations {"kind":"MANAGEMENT|STOCK_ADJUSTMENT","delegated":true}` → 서점 설정 `POST …/store/settings {"name":"…","longUnreceivedWarningDays":7}`.
 
-**G. 대시보드(O-01)** — `GET …/dashboard[?since=<UTC 시각>&thresholdDays=]`: 주문·발주·환급·안내·미결제·미배분 입고·부분입고 잔량·취소 후속·장기 미수령 **건수**(숫자 카드). 카드를 누르면 해당 목록(§6)으로 이동한다. "오늘 접수 주문"은 서점 시간대를 아는 UI가 정한 자정을 `since`로 보낸다. 예외 큐는 `GET …/exceptions`, 장기 미수령 목록은 `GET …/long-unreceived-warnings`(경고일은 서점 설정이 기본값).
+**G. 대시보드(O-01)** — `GET …/dashboard[?since=<UTC 시각>&thresholdDays=&delayDays=]`: 주문·발주·환급·안내·미결제·미배분 입고·부분입고 잔량·**발주 지연**(전달 후 `delayDays`일, 기본 7)·취소 후속·장기 미수령 **건수**(숫자 카드). 카드를 누르면 해당 목록(§6)으로 이동한다. "오늘 접수 주문"은 서점 시간대를 아는 UI가 정한 자정을 `since`로 보낸다. 예외 큐는 `GET …/exceptions`, 장기 미수령 목록은 `GET …/long-unreceived-warnings`(경고일은 서점 설정이 기본값).
 
 ---
 
@@ -337,7 +337,7 @@ GET /v1/me/memberships
 | 확정 후 가격/품목 변경(ST-O04, DEC-08) | **정책 미승인 — 서버가 막는다**(경로 없음, DB 거부). "승인 필요"로 비활성 표시. |
 | 예외 임의 종결(DEC-16)·타 고객 재배분 세부(DEC-15)·개인정보 보존(DEC-12)·고객 동의(DEC-01) | 미승인 — 활성화하지 않는다. |
 | 직원 역할 변경(직원→Owner), 서점 중지·해지·소유자 이전 | 서버 명령 없음. 위임(`delegations`)만 있다. |
-| 발주 지연·공급처별 현황·기간별 통계 카드 | 정의·서버 없음 → 데모 값. |
+| 공급처별 현황·기간별 통계 카드 | 서버 없음 → 데모 값. (발주 지연 카드는 `procurement.delayedLines`로 있으나 **전달 후 경과일 기준**이다 — 공급처 회신 ETA는 반영하지 않는다.) |
 | 고객 공개 주문(P1)·택배(D23)·PG/VAN(P2)·모바일 M1~M3 | 범위 밖. |
 | 로그인·회원가입·비밀번호·이메일 인증 | Supabase Auth가 담당(이 서버 API 없음). |
 

@@ -329,7 +329,8 @@ export type Dashboard = {
   /** 취소 후속 처리(DASH-008): 처분이 끝나지 않은 취소 물량 수와 처분 대기·반품 보관·반품 출고 수량 합계 */
   dispositions: { openCancellations: number; pendingQuantity: number; heldQuantity: number; dispatchedQuantity: number };
   /** 부분입고·미입고 잔량(DASH-003): 전달된 발주 품목 중 아직 다 들어오지 않은 것. 잔량 = 유효 수량(발주 − 품절 − 수락된 취소) − 순입고 */
-  procurement: { notReceivedLines: number; partiallyReceivedLines: number; remainingQuantity: number };
+  procurement: { notReceivedLines: number; partiallyReceivedLines: number; remainingQuantity: number; delayedLines: number; delayedQuantity: number };
+  // delayedLines·delayedQuantity: 전달한 지 delayDays(기본 7)일이 지나도 잔량이 남은 품목 수와 잔량 합계(DASH-002 발주 지연)
   /** 미결제(DASH-005): 잔액이 남은 확정 주문 수, 잔액 합계(정수 문자열), 확인도 무효도 아닌 거래 수 */
   payments: { unpaidOrders: number; balanceKrw: string; unconfirmedPayments: number };
   /** 안내 대상(재안내로 대체된 것·완료된 것 제외): 대기(시도 없음)·시도만(결과 없음)·실패(재안내 필요) */
@@ -835,9 +836,12 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
      * 장기 미수령 경고 수. 숫자는 테이블·원장에서 직접 센다. `since`(RFC3339 UTC, 미래 불가)를 주면 그 시각 이후 접수된 주문 수(폐기 제외)도 돌려준다.
      * 장기 미수령 경고는 목록 API와 같은 계산을 별도 트랜잭션으로 한 번 더 실행한다.
      */
-    getDashboard: (actor: Actor, request: { tenantId: string; since?: string; thresholdDays?: number }): Promise<Dashboard> =>
+    getDashboard: (actor: Actor, request: { tenantId: string; since?: string; thresholdDays?: number; delayDays?: number }): Promise<Dashboard> =>
       asMember(actor, request.tenantId, async (client) => {
         const now = (deps.now ?? (() => new Date()))();
+        // 발주 지연 기준일(전달 후 경과일, 기본 7일). 예상 입고일 정책이 없어 전달 시각에서 센다
+        const delayDays = request.delayDays ?? 7;
+        if (!Number.isInteger(delayDays) || delayDays < 1 || delayDays > 365) throw validation("delayDays must be an integer 1..365");
         if (request.since !== undefined) parseUtcTimestamp("since", request.since, now);
         const t = request.tenantId;
         const orders = (
@@ -876,18 +880,21 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
           await client.query(
             `select count(*) filter (where remaining > 0 and net_received <= 0)::int as not_received,
                     count(*) filter (where remaining > 0 and net_received > 0)::int as partial,
-                    coalesce(sum(remaining) filter (where remaining > 0), 0)::int as quantity
+                    coalesce(sum(remaining) filter (where remaining > 0), 0)::int as quantity,
+                    count(*) filter (where remaining > 0 and delivered_at <= $2::timestamptz)::int as delayed,
+                    coalesce(sum(remaining) filter (where remaining > 0 and delivered_at <= $2::timestamptz), 0)::int as delayed_quantity
                from (select greatest(l.quantity
                                      - coalesce((select sum(y.quantity) from public.ordering_po_replies y where y.tenant_id = l.tenant_id and y.po_line_id = l.id and y.kind = 'OUT_OF_STOCK'), 0)
                                      - coalesce((select sum(s.accepted_quantity) from public.ordering_po_cancellation_responses s where s.tenant_id = l.tenant_id and s.po_line_id = l.id), 0)
                                      - (coalesce((select sum(g.normal_quantity) from public.ordering_goods_receipts g where g.tenant_id = l.tenant_id and g.po_line_id = l.id), 0)
                                         - coalesce((select sum(c.quantity) from public.ordering_receipt_corrections c join public.ordering_goods_receipts g on g.tenant_id = c.tenant_id and g.id = c.receipt_id where g.tenant_id = l.tenant_id and g.po_line_id = l.id), 0)), 0) as remaining,
                             coalesce((select sum(g.normal_quantity) from public.ordering_goods_receipts g where g.tenant_id = l.tenant_id and g.po_line_id = l.id), 0)
-                            - coalesce((select sum(c.quantity) from public.ordering_receipt_corrections c join public.ordering_goods_receipts g on g.tenant_id = c.tenant_id and g.id = c.receipt_id where g.tenant_id = l.tenant_id and g.po_line_id = l.id), 0) as net_received
+                            - coalesce((select sum(c.quantity) from public.ordering_receipt_corrections c join public.ordering_goods_receipts g on g.tenant_id = c.tenant_id and g.id = c.receipt_id where g.tenant_id = l.tenant_id and g.po_line_id = l.id), 0) as net_received,
+                            (p.delivery->>'deliveredAt')::timestamptz as delivered_at
                        from public.ordering_po_lines l
                        join public.ordering_purchase_orders p on p.tenant_id = l.tenant_id and p.id = l.purchase_order_id
                       where l.tenant_id = $1 and p.status in ('SENT', 'ACKNOWLEDGED')) x`,
-            [t],
+            [t, new Date(now.getTime() - delayDays * 86_400_000).toISOString()],
           )
         ).rows[0];
         // 취소 후속 처리(DASH-008): 처분이 끝나지 않은(대기·보관·출고가 남은) 취소 물량의 수와 수량 합계. 처분 현황 목록과 같은 파생 규칙이다
@@ -956,7 +963,7 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
           purchaseOrders: { draft: po.draft, ready: po.ready, sent: po.sent, acknowledged: po.acknowledged },
           refunds: { required: refunds.required, partial: refunds.partial, remainingKrw: refunds.remaining },
           dispositions: { openCancellations: dispositions.open_cancellations, pendingQuantity: dispositions.pending, heldQuantity: dispositions.held, dispatchedQuantity: dispositions.dispatched },
-          procurement: { notReceivedLines: procurement.not_received, partiallyReceivedLines: procurement.partial, remainingQuantity: procurement.quantity },
+          procurement: { notReceivedLines: procurement.not_received, partiallyReceivedLines: procurement.partial, remainingQuantity: procurement.quantity, delayedLines: procurement.delayed, delayedQuantity: procurement.delayed_quantity },
           receipts: { unallocatedReceipts: receipts.receipts, unallocatedQuantity: receipts.quantity },
           payments: { unpaidOrders: payments.unpaid, balanceKrw: payments.balance, unconfirmedPayments: unconfirmed.n },
           notifications: { pending: notifications.pending, attempted: notifications.attempted, failed: notifications.failed },

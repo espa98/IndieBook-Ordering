@@ -470,8 +470,8 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
     }),
     route("GET", "/dashboard", {
       success: 200,
-      queryFields: ["since", "thresholdDays"],
-      run: (c) => reads.getDashboard(actor(c), { tenantId: t(c), ...text(c, "since"), ...int(c, "thresholdDays") }),
+      queryFields: ["since", "thresholdDays", "delayDays"],
+      run: (c) => reads.getDashboard(actor(c), { tenantId: t(c), ...text(c, "since"), ...int(c, "thresholdDays"), ...int(c, "delayDays") }),
     }),
     route("GET", "/long-unreceived-warnings", {
       success: 200,

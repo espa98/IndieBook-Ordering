@@ -2669,9 +2669,9 @@ paths:
       description: |
         활성 멤버(Owner·직원)가 서점의 운영 현황 숫자를 한 번에 읽는다. 숫자는 테이블·원장에서 직접 센다.
         `orders`(초안·보류·폐기·확정, 초안은 보류·폐기를 뺀 건수), `purchaseOrders`(활성 발주 초안·준비·전달·회신),
-        `refunds`(미환급 업무·일부 환급 업무·남은 환급액 합계), `dispositions`(처분이 끝나지 않은 취소 물량 수와 대기·보관·출고 수량, `GET /allocation-cancellations`와 같은 파생 규칙), `procurement`(전달된 발주 품목의 미입고·부분입고 건수와 잔량, 입고 가드와 같은 규칙), `receipts`(미배분 입고 수·수량: 정상 − 정정 − 배분 + 해제), `payments`(미결제 주문 수·잔액 합계·미확인 거래 수, 주문별 결제 요약과 같은 규칙), `notifications`(안내 대기·시도만·실패 대상, 재안내로 대체된 대상과 완료 대상 제외), `longUnreceivedWarnings`(장기 미수령 경고 수, `GET /long-unreceived-warnings`와 같은 계산).
+        `refunds`(미환급 업무·일부 환급 업무·남은 환급액 합계), `dispositions`(처분이 끝나지 않은 취소 물량 수와 대기·보관·출고 수량, `GET /allocation-cancellations`와 같은 파생 규칙), `procurement`(전달된 발주 품목의 미입고·부분입고 건수와 잔량, 입고 가드와 같은 규칙, 그리고 전달 후 `delayDays`일이 지나도 잔량이 남은 **지연** 품목 수·잔량), `receipts`(미배분 입고 수·수량: 정상 − 정정 − 배분 + 해제), `payments`(미결제 주문 수·잔액 합계·미확인 거래 수, 주문별 결제 요약과 같은 규칙), `notifications`(안내 대기·시도만·실패 대상, 재안내로 대체된 대상과 완료 대상 제외), `longUnreceivedWarnings`(장기 미수령 경고 수, `GET /long-unreceived-warnings`와 같은 계산).
         `since`(RFC3339 UTC, 미래 불가)를 주면 그 시각 이후 접수된 주문 수(`receivedSince`, 폐기 제외)도 돌려준다. "오늘"의 기준 시각은 서점 시간대를 아는 클라이언트가 정한다.
-        발주 지연·공급처별 현황·기간 통계 등 나머지 DASH 항목은 아직 집계하지 않는다.
+        공급처별 현황·기간 통계 등 나머지 DASH 항목은 아직 집계하지 않는다.
       parameters:
         - name: since
           in: query
@@ -2680,7 +2680,12 @@ paths:
         - name: thresholdDays
           in: query
           required: false
-          description: 장기 미수령 기준일(1~365, 기본 7)
+          description: 장기 미수령 기준일(1~365). 생략하면 서점 설정(`GET /store`의 `longUnreceivedWarningDays`, 기본 7)
+          schema: { type: string }
+        - name: delayDays
+          in: query
+          required: false
+          description: 발주 지연 기준일(1~365, 기본 7). 전달한 지 이 일수가 지나도 잔량이 남은 발주 품목을 지연으로 센다
           schema: { type: string }
       responses:
         "200":
@@ -5243,11 +5248,13 @@ components:
         procurement:
           type: object
           additionalProperties: false
-          required: [notReceivedLines, partiallyReceivedLines, remainingQuantity]
+          required: [notReceivedLines, partiallyReceivedLines, remainingQuantity, delayedLines, delayedQuantity]
           properties:
             notReceivedLines: { type: integer, minimum: 0, description: 전달된 발주 품목 중 순입고가 0이고 잔량이 남은 것 }
             partiallyReceivedLines: { type: integer, minimum: 0, description: 일부만 입고되고 잔량이 남은 것 }
             remainingQuantity: { type: integer, minimum: 0, description: 잔량 합계(권). 잔량 = 유효 수량(발주 − 품절 회신 − 수락된 취소) − 순입고(검수 − 정정) }
+            delayedLines: { type: integer, minimum: 0, description: 전달한 지 delayDays일이 지나도 잔량이 남은 발주 품목 수(발주 지연) }
+            delayedQuantity: { type: integer, minimum: 0, description: 지연 품목의 잔량 합계(권) }
         receipts:
           type: object
           additionalProperties: false
