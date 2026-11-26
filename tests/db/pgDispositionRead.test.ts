@@ -150,3 +150,20 @@ describe("취소 물량 처분 현황 (R-01·R-03)", () => {
     expect((await reads().listAllocationCancellations({ userId: OTHER_OWNER }, { tenantId: OTHER_T })).items).toEqual([]);
   });
 });
+
+describe("대시보드 취소 후속 처리 카드 (DASH-008)", () => {
+  it("처분이 끝나지 않은 취소 물량 수와 대기·보관·출고 수량 합계가 처분 현황 목록과 같다(오라클)", async () => {
+    const dashboard = await reads().getDashboard({ userId: OWNER }, { tenantId: T });
+    // C1 대기 3, C2 대기 2·보관 1, C3 대기 2, C4 완료(제외)
+    expect(dashboard.dispositions).toEqual({ openCancellations: 3, pendingQuantity: 7, heldQuantity: 1, dispatchedQuantity: 0 });
+
+    const open = (await reads().listAllocationCancellations({ userId: OWNER }, { tenantId: T, open: true })).items;
+    expect({
+      openCancellations: open.length,
+      pendingQuantity: open.reduce((n, i) => n + i.pendingDispositionQuantity, 0),
+      heldQuantity: open.reduce((n, i) => n + i.returnHeldQuantity, 0),
+      dispatchedQuantity: open.reduce((n, i) => n + i.returnDispatchedQuantity, 0),
+    }).toEqual(dashboard.dispositions);
+    expect((await reads().getDashboard({ userId: OTHER_OWNER }, { tenantId: OTHER_T })).dispositions).toEqual({ openCancellations: 0, pendingQuantity: 0, heldQuantity: 0, dispatchedQuantity: 0 });
+  });
+});

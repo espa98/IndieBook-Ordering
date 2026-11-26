@@ -1277,6 +1277,58 @@ paths:
           $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/exceptions:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+    get:
+      tags: [reads]
+      operationId: listExceptions
+      summary: 예외 업무 큐 (O-01-01)
+      description: |
+        활성 멤버(Owner·직원)가 아직 해결되지 않은 예외를 최신 발생 순으로 한 목록에서 읽는다. 유형:
+        `EXCESS_RECEIPT`(초과 입고, `quantity` = 결정되지 않은 수량), `UNCONFIRMED_PAYMENT`(확인도 무효도 아닌 결제, `amountKrw` = 결제 금액),
+        `REFUND_REQUIRED`(환급 업무, `amountKrw` = 남은 환급액), `FAILED_NOTIFICATION`(마지막 결과가 실패이고 재안내가 없는 안내 대상),
+        `PO_CANCELLATION_UNANSWERED`(공급처가 아직 다 응답하지 않은 발주 취소 요청, `quantity` = 미응답 수량).
+        `refId`는 원인 대상(입고·결제·환급 업무·안내 대상·발주 취소 요청)의 ID이고 `type`으로 거를 수 있다. 대시보드의 같은 건수와 같은 규칙이다.
+        **읽기 전용이다. 예외를 임의로 종결하는 경로는 없다**(DEC-16 미승인). 장기 미수령은 `GET /long-unreceived-warnings`가 따로 다룬다. 커서 페이지네이션(기본 20, 최대 100).
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: string }
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string }
+        - name: type
+          in: query
+          required: false
+          schema: { type: string, enum: [EXCESS_RECEIPT, UNCONFIRMED_PAYMENT, REFUND_REQUIRED, FAILED_NOTIFICATION, PO_CANCELLATION_UNANSWERED] }
+      responses:
+        "200":
+          description: 성공(`data`는 예외 페이지)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/ExceptionItem" } }
+                      nextCursor: { type: string }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/allocation-cancellations:
     parameters:
       - $ref: "ordering.yaml#/components/parameters/TenantId"
@@ -2617,9 +2669,9 @@ paths:
       description: |
         활성 멤버(Owner·직원)가 서점의 운영 현황 숫자를 한 번에 읽는다. 숫자는 테이블·원장에서 직접 센다.
         `orders`(초안·보류·폐기·확정, 초안은 보류·폐기를 뺀 건수), `purchaseOrders`(활성 발주 초안·준비·전달·회신),
-        `refunds`(미환급 업무·일부 환급 업무·남은 환급액 합계), `receipts`(미배분 입고 수·수량: 정상 − 정정 − 배분 + 해제), `payments`(미결제 주문 수·잔액 합계·미확인 거래 수, 주문별 결제 요약과 같은 규칙), `notifications`(안내 대기·시도만·실패 대상, 재안내로 대체된 대상과 완료 대상 제외), `longUnreceivedWarnings`(장기 미수령 경고 수, `GET /long-unreceived-warnings`와 같은 계산).
+        `refunds`(미환급 업무·일부 환급 업무·남은 환급액 합계), `dispositions`(처분이 끝나지 않은 취소 물량 수와 대기·보관·출고 수량, `GET /allocation-cancellations`와 같은 파생 규칙), `procurement`(전달된 발주 품목의 미입고·부분입고 건수와 잔량, 입고 가드와 같은 규칙), `receipts`(미배분 입고 수·수량: 정상 − 정정 − 배분 + 해제), `payments`(미결제 주문 수·잔액 합계·미확인 거래 수, 주문별 결제 요약과 같은 규칙), `notifications`(안내 대기·시도만·실패 대상, 재안내로 대체된 대상과 완료 대상 제외), `longUnreceivedWarnings`(장기 미수령 경고 수, `GET /long-unreceived-warnings`와 같은 계산).
         `since`(RFC3339 UTC, 미래 불가)를 주면 그 시각 이후 접수된 주문 수(`receivedSince`, 폐기 제외)도 돌려준다. "오늘"의 기준 시각은 서점 시간대를 아는 클라이언트가 정한다.
-        부분입고 잔량·취소 후속 처리(처분 대기)·발주 지연 등 나머지 DASH 항목은 아직 집계하지 않는다.
+        발주 지연·공급처별 현황·기간 통계 등 나머지 DASH 항목은 아직 집계하지 않는다.
       parameters:
         - name: since
           in: query
@@ -4850,6 +4902,18 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    ExceptionItem:
+      type: object
+      additionalProperties: false
+      required: [type, refId, occurredAt]
+      properties:
+        type: { type: string, enum: [EXCESS_RECEIPT, UNCONFIRMED_PAYMENT, REFUND_REQUIRED, FAILED_NOTIFICATION, PO_CANCELLATION_UNANSWERED] }
+        refId: { type: string, format: uuid }
+        occurredAt: { type: string, format: date-time }
+        orderId: { type: string, format: uuid }
+        orderDisplayNumber: { type: integer }
+        quantity: { type: integer, minimum: 0 }
+        amountKrw: { type: string, pattern: "^(0|[1-9][0-9]*)$" }
     DelegationChange:
       type: object
       additionalProperties: false
@@ -5017,7 +5081,7 @@ components:
     Dashboard:
       type: object
       additionalProperties: false
-      required: [orders, purchaseOrders, refunds, receipts, payments, notifications, longUnreceivedWarnings]
+      required: [orders, purchaseOrders, refunds, dispositions, procurement, receipts, payments, notifications, longUnreceivedWarnings]
       properties:
         orders:
           type: object
@@ -5045,6 +5109,23 @@ components:
             required: { type: integer, minimum: 0 }
             partial: { type: integer, minimum: 0 }
             remainingKrw: { type: string, pattern: "^(0|[1-9][0-9]*)$" }
+        dispositions:
+          type: object
+          additionalProperties: false
+          required: [openCancellations, pendingQuantity, heldQuantity, dispatchedQuantity]
+          properties:
+            openCancellations: { type: integer, minimum: 0, description: 처분이 끝나지 않은(대기·보관·출고가 남은) 취소 물량 수 }
+            pendingQuantity: { type: integer, minimum: 0, description: 처분 대기 수량 합계(권) }
+            heldQuantity: { type: integer, minimum: 0, description: 반품 보관 수량 합계 }
+            dispatchedQuantity: { type: integer, minimum: 0, description: 반품 출고 중 수량 합계 }
+        procurement:
+          type: object
+          additionalProperties: false
+          required: [notReceivedLines, partiallyReceivedLines, remainingQuantity]
+          properties:
+            notReceivedLines: { type: integer, minimum: 0, description: 전달된 발주 품목 중 순입고가 0이고 잔량이 남은 것 }
+            partiallyReceivedLines: { type: integer, minimum: 0, description: 일부만 입고되고 잔량이 남은 것 }
+            remainingQuantity: { type: integer, minimum: 0, description: 잔량 합계(권). 잔량 = 유효 수량(발주 − 품절 회신 − 수락된 취소) − 순입고(검수 − 정정) }
         receipts:
           type: object
           additionalProperties: false

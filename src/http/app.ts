@@ -405,6 +405,11 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       success: 200,
       run: (c) => reads.listNotificationTargets(actor(c), { tenantId: t(c), orderId: c.params.orderId! }),
     }),
+    route("GET", "/exceptions", {
+      success: 200,
+      queryFields: ["limit", "cursor", "type"],
+      run: (c) => reads.listExceptions(actor(c), { tenantId: t(c), ...int(c, "limit"), ...text(c, "cursor"), ...(c.query.has("type") ? { type: c.query.get("type") as never } : {}) }),
+    }),
     route("GET", "/allocation-cancellations", {
       success: 200,
       queryFields: ["limit", "cursor", "open"],

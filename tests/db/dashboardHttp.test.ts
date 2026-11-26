@@ -44,6 +44,8 @@ describe("GET /dashboard", () => {
       orders: { draft: 0, held: 0, discarded: 0, confirmed: 0 },
       purchaseOrders: { draft: 0, ready: 0, sent: 0, acknowledged: 0 },
       refunds: { required: 0, partial: 0, remainingKrw: "0" },
+      dispositions: { openCancellations: 0, pendingQuantity: 0, heldQuantity: 0, dispatchedQuantity: 0 },
+      procurement: { notReceivedLines: 0, partiallyReceivedLines: 0, remainingQuantity: 0 },
       receipts: { unallocatedReceipts: 0, unallocatedQuantity: 0 },
       payments: { unpaidOrders: 0, balanceKrw: "0", unconfirmedPayments: 0 },
       notifications: { pending: 0, attempted: 0, failed: 0 },

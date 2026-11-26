@@ -378,6 +378,7 @@ describe("응답 계약(읽기): 대시보드", () => {
     expect(declared("/dashboard", "get"), "data 스키마").toBe(true);
     expect(conforms("/dashboard", plain.body)).toMatchObject({ ok: true });
     expect(conforms("/dashboard", withSince.body)).toMatchObject({ ok: true });
+
   });
 });
 
@@ -626,3 +627,19 @@ describe("응답 계약(쓰기): 발주 회신·취소, 배정 해제, 중복 �
   });
 });
 
+describe("응답 계약(읽기): 예외 업무 큐", () => {
+  it("앞선 시험이 남긴 실제 상태(미확인·환급·안내 등)의 예외 큐가 선언한 스키마를 만족하고 대시보드 건수와 일치한다", async () => {
+    const dashboard = await call("GET", "/dashboard");
+    const queue = await call("GET", "/exceptions", undefined, "limit=100");
+    expect(queue.status).toBe(200);
+    expect(queue.body.data.items.length).toBeGreaterThan(0);
+    expect(declared("/exceptions", "get"), "예외 data 스키마").toBe(true);
+    expect(conforms("/exceptions", queue.body)).toMatchObject({ ok: true });
+    const items = queue.body.data.items as { type: string }[];
+    expect(queue.body.data.nextCursor).toBeUndefined(); // 100건 안에 다 들어온다
+    const d = dashboard.body.data;
+    expect(items.filter((i) => i.type === "REFUND_REQUIRED").length).toBe(d.refunds.required + d.refunds.partial);
+    expect(items.filter((i) => i.type === "UNCONFIRMED_PAYMENT").length).toBe(d.payments.unconfirmedPayments);
+    expect(items.filter((i) => i.type === "FAILED_NOTIFICATION").length).toBe(d.notifications.failed);
+  });
+});

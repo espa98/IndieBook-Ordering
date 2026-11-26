@@ -260,6 +260,30 @@ export type RefundTaskItem = {
 export type ListRefundTasksRequest = { tenantId: string; limit?: number; cursor?: string; status?: RefundTaskItem["status"]; open?: boolean };
 const REFUND_TASK_STATUSES: readonly RefundTaskItem["status"][] = ["REFUND_REQUIRED", "PARTIAL", "REFUNDED"];
 
+/**
+ * 취소 물량(배분 취소)별 처분 상태 SELECT(서점 조건은 호출부가 where로 붙인다). 처분 현황 목록과 대시보드 카드가 같이 쓴다.
+ * pending = 취소 − 편입 − 반품 요청 + 거절 + 회수, held = 요청 − 거절 − 출고, dispatched = 출고 − 완료 − 예외 해소, final = 완료 + 최종 반송
+ */
+const ALLOCATION_CANCELLATION_SQL = `
+               select c.id, c.receipt_id, c.order_id, c.order_line_id, l.book_key, c.quantity, c.cancelled_at, c.cancelled_at::text as cancelled_at_text,
+                      c.quantity - v.intake - v.requested + v.rejected + v.recovered as pending,
+                      v.intake as transferred,
+                      v.requested - v.rejected - v.dispatched as held,
+                      v.dispatched - v.completed - v.recovered - v.returned_final as dispatched,
+                      v.completed + v.returned_final as final
+                 from public.ordering_allocation_cancellations c
+                 join public.ordering_goods_receipts g on g.tenant_id = c.tenant_id and g.id = c.receipt_id
+                 join public.ordering_po_lines l on l.tenant_id = g.tenant_id and l.id = g.po_line_id
+                 cross join lateral (
+                   select coalesce((select sum(i.quantity) from public.ordering_stock_intakes i where i.tenant_id = c.tenant_id and i.cancellation_id = c.id), 0)::int as intake,
+                          coalesce((select sum(r.quantity) from public.ordering_return_requests r where r.tenant_id = c.tenant_id and r.cancellation_id = c.id), 0)::int as requested,
+                          coalesce((select sum(p.rejected_quantity) from public.ordering_return_replies p join public.ordering_return_requests r on r.tenant_id = p.tenant_id and r.id = p.return_request_id where r.tenant_id = c.tenant_id and r.cancellation_id = c.id), 0)::int as rejected,
+                          coalesce((select sum(d.quantity) from public.ordering_return_dispatches d join public.ordering_return_requests r on r.tenant_id = d.tenant_id and r.id = d.return_request_id where r.tenant_id = c.tenant_id and r.cancellation_id = c.id), 0)::int as dispatched,
+                          coalesce((select sum(m.quantity) from public.ordering_return_completions m join public.ordering_return_requests r on r.tenant_id = m.tenant_id and r.id = m.return_request_id where r.tenant_id = c.tenant_id and r.cancellation_id = c.id), 0)::int as completed,
+                          coalesce((select sum(s.quantity) from public.ordering_return_exception_resolutions s join public.ordering_return_exceptions e on e.tenant_id = s.tenant_id and e.id = s.return_exception_id join public.ordering_return_requests r on r.tenant_id = e.tenant_id and r.id = e.return_request_id where r.tenant_id = c.tenant_id and r.cancellation_id = c.id and s.outcome = 'RECOVERED'), 0)::int as recovered,
+                          coalesce((select sum(s.quantity) from public.ordering_return_exception_resolutions s join public.ordering_return_exceptions e on e.tenant_id = s.tenant_id and e.id = s.return_exception_id join public.ordering_return_requests r on r.tenant_id = e.tenant_id and r.id = e.return_request_id where r.tenant_id = c.tenant_id and r.cancellation_id = c.id and s.outcome = 'RETURNED'), 0)::int as returned_final
+                 ) v`;
+
 /** 취소 물량 처분 현황(R-01·R-03)의 한 줄. 다섯 수량의 합은 취소 수량과 같다 */
 export type AllocationCancellationItem = {
   id: string;
@@ -278,6 +302,23 @@ export type AllocationCancellationItem = {
 };
 export type ListAllocationCancellationsRequest = { tenantId: string; limit?: number; cursor?: string; open?: boolean };
 
+/** 예외 업무 큐(O-01-01)의 유형 */
+export const EXCEPTION_TYPES = ["EXCESS_RECEIPT", "UNCONFIRMED_PAYMENT", "REFUND_REQUIRED", "FAILED_NOTIFICATION", "PO_CANCELLATION_UNANSWERED"] as const;
+export type ExceptionType = (typeof EXCEPTION_TYPES)[number];
+/** 예외 업무 큐의 한 줄: 해결되지 않은 예외 하나. `refId`는 원인 대상(입고·결제·환급 업무·안내 대상·발주 취소 요청)의 ID다 */
+export type ExceptionItem = {
+  type: ExceptionType;
+  refId: string;
+  occurredAt: string;
+  orderId?: string;
+  orderDisplayNumber?: number;
+  /** 초과 입고는 결정되지 않은 수량, 발주 취소 요청 미응답은 미응답 수량 */
+  quantity?: number;
+  /** 미확인 결제는 결제 금액, 환급 필요는 남은 환급액(정수 문자열) */
+  amountKrw?: string;
+};
+export type ListExceptionsRequest = { tenantId: string; limit?: number; cursor?: string; type?: ExceptionType };
+
 /** 대시보드(O-01) 서버 집계 */
 export type Dashboard = {
   orders: { draft: number; held: number; discarded: number; confirmed: number };
@@ -285,6 +326,10 @@ export type Dashboard = {
   refunds: { required: number; partial: number; remainingKrw: string };
   /** 미배분 입고(DASH-008): 미배분량이 남은 입고 수와 그 합계(권). 취소 후속 처리(처분 대기)는 아직 집계하지 않는다 */
   receipts: { unallocatedReceipts: number; unallocatedQuantity: number };
+  /** 취소 후속 처리(DASH-008): 처분이 끝나지 않은 취소 물량 수와 처분 대기·반품 보관·반품 출고 수량 합계 */
+  dispositions: { openCancellations: number; pendingQuantity: number; heldQuantity: number; dispatchedQuantity: number };
+  /** 부분입고·미입고 잔량(DASH-003): 전달된 발주 품목 중 아직 다 들어오지 않은 것. 잔량 = 유효 수량(발주 − 품절 − 수락된 취소) − 순입고 */
+  procurement: { notReceivedLines: number; partiallyReceivedLines: number; remainingQuantity: number };
   /** 미결제(DASH-005): 잔액이 남은 확정 주문 수, 잔액 합계(정수 문자열), 확인도 무효도 아닌 거래 수 */
   payments: { unpaidOrders: number; balanceKrw: string; unconfirmedPayments: number };
   /** 안내 대상(재안내로 대체된 것·완료된 것 제외): 대기(시도 없음)·시도만(결과 없음)·실패(재안내 필요) */
@@ -459,6 +504,69 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
       }),
 
     /**
+     * 예외 업무 큐(O-01-01): 아직 해결되지 않은 예외를 최신 발생 순으로 한 목록에. 유형 — 초과 입고(결정되지 않은 수량), 미확인 결제(확인도 무효도 아님),
+     * 환급 필요(환급 업무의 남은 금액), 안내 실패(마지막 결과가 실패이고 재안내 없음), 공급처 취소 요청 미응답(미응답 수량).
+     * 대시보드의 같은 건수와 같은 규칙이다. 읽기 전용이며 임의 종결 경로는 없다(DEC-16). 장기 미수령은 `longUnreceivedWarnings`가 따로 다룬다.
+     */
+    listExceptions: (actor: Actor, request: ListExceptionsRequest): Promise<{ items: ExceptionItem[]; nextCursor?: string }> =>
+      asMember(actor, request.tenantId, async (client) => {
+        const limit = pageSize(request.limit);
+        if (request.type !== undefined && !EXCEPTION_TYPES.includes(request.type)) throw validation("invalid type");
+        const after = request.cursor === undefined ? undefined : decodeCursor(request.cursor, 2);
+        if (after && (Number.isNaN(Date.parse(after[0]!)) || !isUuid(after[1]!))) throw validation("invalid cursor");
+        const rows = (
+          await client.query(
+            `select s.*, s.occurred_at::text as occurred_at_text from (
+               select 'EXCESS_RECEIPT' as type, g.id as ref_id, g.received_at as occurred_at, null::uuid as order_id, null::bigint as display_number,
+                      (g.excess_quantity - x.decided)::int as quantity, null::bigint as amount
+                 from public.ordering_goods_receipts g
+                 cross join lateral (select coalesce(sum(d.quantity), 0) as decided from public.ordering_excess_decisions d where d.tenant_id = g.tenant_id and d.receipt_id = g.id) x
+                where g.tenant_id = $1 and g.excess_quantity > x.decided
+               union all
+               select 'UNCONFIRMED_PAYMENT', p.id, p.paid_at, p.order_id, o.display_number, null::int, p.amount_krw
+                 from public.ordering_payments p join public.ordering_orders o on o.tenant_id = p.tenant_id and o.id = p.order_id
+                where p.tenant_id = $1
+                  and not exists (select 1 from public.ordering_payment_confirmations c where c.tenant_id = p.tenant_id and c.payment_id = p.id)
+                  and not exists (select 1 from public.ordering_payment_voids v where v.tenant_id = p.tenant_id and v.payment_id = p.id)
+               union all
+               select 'REFUND_REQUIRED', k.id, k.opened_at, k.order_id, o.display_number, null::int, k.required_krw - x.refunded
+                 from public.ordering_refund_tasks k join public.ordering_orders o on o.tenant_id = k.tenant_id and o.id = k.order_id
+                 cross join lateral (select coalesce(sum(c.amount_krw), 0) as refunded from public.ordering_refund_confirmations c where c.tenant_id = k.tenant_id and c.refund_task_id = k.id) x
+                where k.tenant_id = $1 and x.refunded < k.required_krw
+               union all
+               select 'FAILED_NOTIFICATION', t.id, r.result_at, t.order_id, o.display_number, null::int, null::bigint
+                 from public.ordering_notification_targets t
+                 join public.ordering_orders o on o.tenant_id = t.tenant_id and o.id = t.order_id
+                 join lateral (select x.outcome, x.result_at from public.ordering_notification_results x where x.tenant_id = t.tenant_id and x.target_id = t.id order by x.recorded_at desc, x.id desc limit 1) r on true
+                where t.tenant_id = $1 and r.outcome = 'FAILED'
+                  and not exists (select 1 from public.ordering_notification_targets n where n.tenant_id = t.tenant_id and n.renotice_of_target_id = t.id)
+               union all
+               select 'PO_CANCELLATION_UNANSWERED', q.id, q.requested_at, null::uuid, null::bigint, (q.quantity - x.answered)::int, null::bigint
+                 from public.ordering_po_cancellation_requests q
+                 cross join lateral (select coalesce(sum(s.accepted_quantity + s.rejected_quantity), 0) as answered from public.ordering_po_cancellation_responses s where s.tenant_id = q.tenant_id and s.request_id = q.id) x
+                where q.tenant_id = $1 and x.answered < q.quantity) s
+              where ($2::text is null or s.type = $2)
+                and ($3::text is null or (s.occurred_at, s.ref_id) < ($3::timestamptz, $4::uuid))
+              order by s.occurred_at desc, s.ref_id desc
+              limit $5`,
+            [request.tenantId, request.type ?? null, after?.[0] ?? null, after?.[1] ?? null, limit + 1],
+          )
+        ).rows;
+        const page = rows.slice(0, limit);
+        const last = page[page.length - 1];
+        const items = page.map((r): ExceptionItem => ({
+          type: r.type,
+          refId: r.ref_id,
+          occurredAt: (r.occurred_at as Date).toISOString(),
+          ...(r.order_id === null ? {} : { orderId: r.order_id }),
+          ...(r.display_number === null ? {} : { orderDisplayNumber: Number(r.display_number) }),
+          ...(r.quantity === null ? {} : { quantity: r.quantity }),
+          ...(r.amount === null ? {} : { amountKrw: BigInt(String(r.amount)).toString() }),
+        }));
+        return { items, ...(rows.length > limit && last ? { nextCursor: encodeCursor([last.occurred_at_text, last.ref_id]) } : {}) };
+      }),
+
+    /**
      * 취소 물량 처분 현황(R-01·R-03): 취소로 풀린 배분 물량을 최근 취소 순으로. 취소 물량마다 8버킷 중 처분 대기·재고 편입·반품 보관·반품 출고·반품 완료를
      * 원장에서 파생한다(`receiptBuckets`의 이동 규칙): 대기 = 취소 − 편입 − 반품 요청 + 거절 + 회수, 보관 = 요청 − 거절 − 출고,
      * 출고 = 출고 − 완료 − 예외 해소(회수·최종 반송), 완료 = 완료 + 최종 반송. `open=true`는 처분이 끝나지 않은(대기·보관·출고가 남은) 물량만.
@@ -472,24 +580,7 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
         const rows = (
           await client.query(
             `select * from (
-               select c.id, c.receipt_id, c.order_id, c.order_line_id, l.book_key, c.quantity, c.cancelled_at, c.cancelled_at::text as cancelled_at_text,
-                      c.quantity - v.intake - v.requested + v.rejected + v.recovered as pending,
-                      v.intake as transferred,
-                      v.requested - v.rejected - v.dispatched as held,
-                      v.dispatched - v.completed - v.recovered - v.returned_final as dispatched,
-                      v.completed + v.returned_final as final
-                 from public.ordering_allocation_cancellations c
-                 join public.ordering_goods_receipts g on g.tenant_id = c.tenant_id and g.id = c.receipt_id
-                 join public.ordering_po_lines l on l.tenant_id = g.tenant_id and l.id = g.po_line_id
-                 cross join lateral (
-                   select coalesce((select sum(i.quantity) from public.ordering_stock_intakes i where i.tenant_id = c.tenant_id and i.cancellation_id = c.id), 0)::int as intake,
-                          coalesce((select sum(r.quantity) from public.ordering_return_requests r where r.tenant_id = c.tenant_id and r.cancellation_id = c.id), 0)::int as requested,
-                          coalesce((select sum(p.rejected_quantity) from public.ordering_return_replies p join public.ordering_return_requests r on r.tenant_id = p.tenant_id and r.id = p.return_request_id where r.tenant_id = c.tenant_id and r.cancellation_id = c.id), 0)::int as rejected,
-                          coalesce((select sum(d.quantity) from public.ordering_return_dispatches d join public.ordering_return_requests r on r.tenant_id = d.tenant_id and r.id = d.return_request_id where r.tenant_id = c.tenant_id and r.cancellation_id = c.id), 0)::int as dispatched,
-                          coalesce((select sum(m.quantity) from public.ordering_return_completions m join public.ordering_return_requests r on r.tenant_id = m.tenant_id and r.id = m.return_request_id where r.tenant_id = c.tenant_id and r.cancellation_id = c.id), 0)::int as completed,
-                          coalesce((select sum(s.quantity) from public.ordering_return_exception_resolutions s join public.ordering_return_exceptions e on e.tenant_id = s.tenant_id and e.id = s.return_exception_id join public.ordering_return_requests r on r.tenant_id = e.tenant_id and r.id = e.return_request_id where r.tenant_id = c.tenant_id and r.cancellation_id = c.id and s.outcome = 'RECOVERED'), 0)::int as recovered,
-                          coalesce((select sum(s.quantity) from public.ordering_return_exception_resolutions s join public.ordering_return_exceptions e on e.tenant_id = s.tenant_id and e.id = s.return_exception_id join public.ordering_return_requests r on r.tenant_id = e.tenant_id and r.id = e.return_request_id where r.tenant_id = c.tenant_id and r.cancellation_id = c.id and s.outcome = 'RETURNED'), 0)::int as returned_final
-                 ) v
+               ${ALLOCATION_CANCELLATION_SQL}
                 where c.tenant_id = $1) s
               where ($2::boolean is not true or s.pending + s.held + s.dispatched > 0)
                 and ($3::text is null or (s.cancelled_at, s.id) < ($3::timestamptz, $4::uuid))
@@ -777,6 +868,35 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
             [t],
           )
         ).rows[0];
+        // 부분입고·미입고 잔량(DASH-003): 전달된(SENT·ACKNOWLEDGED) 발주 품목마다 유효 수량 = 발주 − 품절 회신 − 수락된 취소, 순입고 = 검수 정상 − 정정,
+        // 잔량 = max(0, 유효 − 순입고). 입고 가드(007)와 같은 규칙이다. 순입고가 0이면 미입고, 0보다 크면 부분입고
+        const procurement = (
+          await client.query(
+            `select count(*) filter (where remaining > 0 and net_received <= 0)::int as not_received,
+                    count(*) filter (where remaining > 0 and net_received > 0)::int as partial,
+                    coalesce(sum(remaining) filter (where remaining > 0), 0)::int as quantity
+               from (select greatest(l.quantity
+                                     - coalesce((select sum(y.quantity) from public.ordering_po_replies y where y.tenant_id = l.tenant_id and y.po_line_id = l.id and y.kind = 'OUT_OF_STOCK'), 0)
+                                     - coalesce((select sum(s.accepted_quantity) from public.ordering_po_cancellation_responses s where s.tenant_id = l.tenant_id and s.po_line_id = l.id), 0)
+                                     - (coalesce((select sum(g.normal_quantity) from public.ordering_goods_receipts g where g.tenant_id = l.tenant_id and g.po_line_id = l.id), 0)
+                                        - coalesce((select sum(c.quantity) from public.ordering_receipt_corrections c join public.ordering_goods_receipts g on g.tenant_id = c.tenant_id and g.id = c.receipt_id where g.tenant_id = l.tenant_id and g.po_line_id = l.id), 0)), 0) as remaining,
+                            coalesce((select sum(g.normal_quantity) from public.ordering_goods_receipts g where g.tenant_id = l.tenant_id and g.po_line_id = l.id), 0)
+                            - coalesce((select sum(c.quantity) from public.ordering_receipt_corrections c join public.ordering_goods_receipts g on g.tenant_id = c.tenant_id and g.id = c.receipt_id where g.tenant_id = l.tenant_id and g.po_line_id = l.id), 0) as net_received
+                       from public.ordering_po_lines l
+                       join public.ordering_purchase_orders p on p.tenant_id = l.tenant_id and p.id = l.purchase_order_id
+                      where l.tenant_id = $1 and p.status in ('SENT', 'ACKNOWLEDGED')) x`,
+            [t],
+          )
+        ).rows[0];
+        // 취소 후속 처리(DASH-008): 처분이 끝나지 않은(대기·보관·출고가 남은) 취소 물량의 수와 수량 합계. 처분 현황 목록과 같은 파생 규칙이다
+        const dispositions = (
+          await client.query(
+            `select count(*)::int as open_cancellations, coalesce(sum(pending), 0)::int as pending, coalesce(sum(held), 0)::int as held, coalesce(sum(dispatched), 0)::int as dispatched
+               from (${ALLOCATION_CANCELLATION_SQL} where c.tenant_id = $1) s
+              where s.pending + s.held + s.dispatched > 0`,
+            [t],
+          )
+        ).rows[0];
         // 미결제(DASH-005): 확정 주문별 결제 요약과 같은 규칙 — 확인된 거래(무효 제외) − 확인된 환급 − 보정, 잔액 = max(총액 − 확인 금액, 0)
         const payments = (
           await client.query(
@@ -833,6 +953,8 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
           orders: { draft: orders.draft, held: orders.held, discarded: orders.discarded, confirmed: orders.confirmed },
           purchaseOrders: { draft: po.draft, ready: po.ready, sent: po.sent, acknowledged: po.acknowledged },
           refunds: { required: refunds.required, partial: refunds.partial, remainingKrw: refunds.remaining },
+          dispositions: { openCancellations: dispositions.open_cancellations, pendingQuantity: dispositions.pending, heldQuantity: dispositions.held, dispatchedQuantity: dispositions.dispatched },
+          procurement: { notReceivedLines: procurement.not_received, partiallyReceivedLines: procurement.partial, remainingQuantity: procurement.quantity },
           receipts: { unallocatedReceipts: receipts.receipts, unallocatedQuantity: receipts.quantity },
           payments: { unpaidOrders: payments.unpaid, balanceKrw: payments.balance, unconfirmedPayments: unconfirmed.n },
           notifications: { pending: notifications.pending, attempted: notifications.attempted, failed: notifications.failed },
