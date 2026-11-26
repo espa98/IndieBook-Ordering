@@ -111,13 +111,14 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
   const routes: Route[] = [
     route("GET", "/orders", {
       success: 200,
-      queryFields: ["limit", "cursor", "status", "includeDiscarded"],
+      queryFields: ["limit", "cursor", "status", "includeDiscarded", "search"],
       run: (c) =>
         orders.listOrders(actor(c), {
           tenantId: t(c),
           ...(c.query.has("limit") ? { limit: Number(c.query.get("limit")) } : {}),
           ...(c.query.has("cursor") ? { cursor: c.query.get("cursor") as string } : {}),
           ...(c.query.has("status") ? { status: c.query.get("status") as never } : {}),
+          ...text(c, "search"),
           // "true"/"false"만 불리언으로 바꾼다. 그 밖의 값은 문자열 그대로 두어 도메인이 400으로 거부한다
           ...(c.query.has("includeDiscarded") ? { includeDiscarded: ({ true: true, false: false } as Record<string, boolean>)[c.query.get("includeDiscarded") as string] ?? (c.query.get("includeDiscarded") as never) } : {}),
         }),

@@ -236,6 +236,8 @@ export type OrderPage = {
   status?: Order["status"];
   /** 폐기된 초안도 읽는다. 기본은 제외(폐기분이 페이지를 채우지 않게 SQL에서 거른다) */
   includeDiscarded?: boolean;
+  /** 표시번호(정확히 일치)·품목의 도서명(부분 일치, 대소문자 무시)·ISBN(정확히 일치)으로 거른다. 와일드카드는 문자 그대로 찾는다 */
+  search?: { text: string; displayNumber?: number; isbn?: string };
   /** 이 키보다 뒤(더 오래된)의 주문만. (createdAt, id) 내림차순 */
   after?: { createdAt: string; id: string };
 };
@@ -264,6 +266,17 @@ export async function loadOrders(
       where.push(`status = $${params.length}`);
     }
     if (page.includeDiscarded !== true) where.push("discarded_at is null");
+    if (page.search) {
+      // LIKE 와일드카드(%, _)와 역슬래시를 이스케이프해 검색어를 문자 그대로 찾는다
+      params.push(`%${page.search.text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+      const pattern = `$${params.length}`;
+      params.push(page.search.displayNumber ?? null, page.search.isbn ?? null);
+      const number = `$${params.length - 1}::bigint`;
+      const isbn = `$${params.length}::text`;
+      where.push(
+        `(display_number = ${number} or exists (select 1 from public.ordering_order_lines sl where sl.tenant_id = ordering_orders.tenant_id and sl.order_id = ordering_orders.id and (sl.book_title ilike ${pattern} escape '\\' or (${isbn} is not null and sl.book_isbn = ${isbn}))))`,
+      );
+    }
     if (page.after) {
       params.push(page.after.createdAt, page.after.id);
       where.push(`(created_at, id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`);

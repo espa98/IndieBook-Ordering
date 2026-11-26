@@ -19,6 +19,38 @@ function orderAt(id: string, createdAt: string) {
 }
 
 describe("listOrders", () => {
+  it("search는 표시번호(숫자면 정확히 일치)나 품목의 도서명(부분 일치, 대소문자 무시)·ISBN(하이픈 무시, 정확히 일치)으로 주문을 찾고, 페이지네이션과 함께 동작한다", () => {
+    const withLine = (id: string, createdAt: string, extra: Record<string, unknown>, bookTitle: string, bookIsbn?: string) => ({
+      ...orderAt(id, createdAt),
+      lines: [{ lineId: `l-${id}`, bookId: "book-1", quantity: 1, unitPriceKrw: "15000", bookTitle, ...(bookIsbn ? { bookIsbn } : {}) }],
+      ...extra,
+    });
+    const a = withLine("id-a", "2026-01-01T00:00:00.000Z", { status: "CONFIRMED", displayNumber: 12, totalKrw: "15000" }, "독립서점 운영기", "9788960901234");
+    const b = withLine("id-b", "2026-01-02T00:00:00.000Z", { status: "CONFIRMED", displayNumber: 123, totalKrw: "15000" }, "Zen and the Art", undefined);
+    const c = withLine("id-c", "2026-01-03T00:00:00.000Z", {}, "책방의 오후 3시");
+    const orders = createInMemoryOrderRepository([a, b, c]);
+    const ids = (search: string, extra: Record<string, unknown> = {}) => listOrders({ orders }, { tenantId: "tenant-a", search, ...extra } as never).items.map((i) => i.id);
+
+    expect(ids("12")).toEqual(["id-a"]); // 표시번호는 정확히 일치(123은 12가 아니다)
+    expect(ids("123")).toEqual(["id-b"]);
+    expect(ids("운영")).toEqual(["id-a"]); // 도서명 부분 일치
+    expect(ids("ZEN and")).toEqual(["id-b"]); // 대소문자 무시
+    expect(ids("오후")).toEqual(["id-c"]);
+    expect(ids("978-8960-901234")).toEqual(["id-a"]); // ISBN은 하이픈을 무시하고 정확히 일치
+    expect(ids("9788960")).toEqual([]); // ISBN 일부는 일치하지 않는다
+    expect(ids("없는책")).toEqual([]);
+    expect(ids("책", { status: "DRAFT" })).toEqual(["id-c"]); // 다른 필터와 함께
+    expect(ids("서점")).toEqual(["id-a"]); // 도서명에 "서점"이 든 주문은 a뿐
+    expect(ids("책", { limit: 1 })).toEqual(["id-c"]); // 페이지 크기와 함께
+  });
+
+  it("search가 비었거나 문자열이 아니거나 60자를 넘으면 VALIDATION_ERROR이다", () => {
+    const orders = createInMemoryOrderRepository([orderAt("id-a", "2026-01-01T00:00:00.000Z")]);
+    for (const bad of ["", "   ", 5, "가".repeat(61)]) {
+      expect(thrown(() => listOrders({ orders }, { tenantId: "tenant-a", search: bad as never })), JSON.stringify(bad)).toMatchObject({ code: "VALIDATION_ERROR" });
+    }
+  });
+
   it("폐기된 초안은 기본적으로 목록에서 빠지고, includeDiscarded를 켜면 나온다(페이지네이션도 폐기분을 건너뛴다)", () => {
     const keep1 = orderAt("id-a", "2026-01-01T00:00:00.000Z");
     const gone = { ...orderAt("id-b", "2026-01-02T00:00:00.000Z"), discardedAt: "2026-01-02T01:00:00.000Z", discardReason: "철회", discardedBy: "u" };

@@ -54,3 +54,20 @@ describe("GET /orders includeDiscarded", () => {
     }
   });
 });
+
+describe("GET /orders search", () => {
+  it("표시번호·도서명·ISBN으로 찾고, 한 글자 이상 60자 이하만 받으며, 다른 필터와 함께 쓸 수 있다", async () => {
+    const book = (await call("POST", "/books", "", { source: "MANUAL", title: "검색용 시집", listPriceKrw: "9000", reason: "수기 등록", registeredAt: PAST })).body.data;
+    const make = async () => (await call("POST", "/orders", "", { lines: [{ bookId: book.id, quantity: 1, unitPriceKrw: "9000" }] })).body.data;
+    const confirmed = await make();
+    const confirmedOrder = (await call("POST", `/orders/${confirmed.id}/confirm`, "", { expectedVersion: 1 })).body.data;
+    const draft = await make();
+
+    const ids = async (query: string) => ((await call("GET", "/orders", query)).body.data?.items ?? []).map((i: { id: string }) => i.id) as string[];
+    expect(await ids("search=시집")).toEqual([draft.id, confirmed.id]); // 도서명 부분 일치(최신순)
+    expect(await ids(`search=${confirmedOrder.displayNumber}`)).toContain(confirmed.id); // 표시번호
+    expect(await ids("search=시집&status=CONFIRMED")).toEqual([confirmed.id]);
+    expect(await ids("search=없는제목")).toEqual([]);
+    for (const query of ["search=", "search=%20%20", `search=${"가".repeat(61)}`]) expect((await call("GET", "/orders", query)).status, query).toBe(400);
+  });
+});

@@ -71,6 +71,16 @@ paths:
           required: false
           schema:
             $ref: "#/components/schemas/OrderStatus"
+        - name: search
+          in: query
+          required: false
+          description: |
+            표시번호(숫자면 정확히 일치)나 품목의 도서명(부분 일치, 대소문자 무시)·ISBN(하이픈 무시, 정확히 일치)으로 찾는다. 1~60자, 앞뒤 공백은 무시한다. 비었거나 60자를 넘으면 400.
+            `%`·`_`·`\`는 문자 그대로 찾는다. 다른 필터·페이지네이션과 함께 쓸 수 있다.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 60
         - name: includeDiscarded
           in: query
           required: false

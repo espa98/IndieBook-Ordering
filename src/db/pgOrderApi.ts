@@ -2,7 +2,7 @@ import type { PoolClient } from "pg";
 import type { Book } from "../catalog/registerBook";
 import { AppError } from "../errors/AppError";
 import type { Order } from "../order/createDraftOrder";
-import { DEFAULT_LIMIT, MAX_LIMIT, ORDER_STATUSES, decodeCursor } from "../order/listOrders";
+import { DEFAULT_LIMIT, MAX_LIMIT, ORDER_STATUSES, decodeCursor, parseSearch } from "../order/listOrders";
 import { createOrderApi } from "../order/orderApi";
 import {
   inTransaction,
@@ -74,11 +74,19 @@ type Actor = { userId: string };
  * 목록 요청을 SQL 페이지로 바꾼다. 형식이 틀린 요청(한도·상태·커서)과 DB에 있을 수 없는 커서는 "none"이다:
  * 도메인이 인증을 확인한 뒤 같은 검증 오류로 거부하므로 순서가 전과 같고, 전체 적재를 강제할 수도 없다.
  */
-function pageOf(request: { limit?: number; cursor?: string; status?: Order["status"]; includeDiscarded?: boolean }): OrderPage | "none" {
+function pageOf(request: { limit?: number; cursor?: string; status?: Order["status"]; includeDiscarded?: boolean; search?: string }): OrderPage | "none" {
   const limit = request.limit ?? DEFAULT_LIMIT;
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) return "none";
   if (request.status !== undefined && !ORDER_STATUSES.includes(request.status)) return "none";
   if (request.includeDiscarded !== undefined && typeof request.includeDiscarded !== "boolean") return "none";
+  let search: OrderPage["search"];
+  if (request.search !== undefined) {
+    try {
+      search = parseSearch(request.search);
+    } catch {
+      return "none";
+    }
+  }
   let after: OrderPage["after"];
   if (request.cursor !== undefined) {
     try {
@@ -90,7 +98,7 @@ function pageOf(request: { limit?: number; cursor?: string; status?: Order["stat
       return "none";
     }
   }
-  return { limit, ...(request.status !== undefined ? { status: request.status } : {}), ...(request.includeDiscarded === true ? { includeDiscarded: true } : {}), ...(after ? { after } : {}) };
+  return { limit, ...(request.status !== undefined ? { status: request.status } : {}), ...(request.includeDiscarded === true ? { includeDiscarded: true } : {}), ...(search ? { search } : {}), ...(after ? { after } : {}) };
 }
 
 /**

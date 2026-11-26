@@ -12,7 +12,7 @@
 
 ## 2. UI 1차 범위: 실제 API에 연결할 수 있는 화면
 
-서버 근거는 `tests/db`·`tests/openapi`(격리 Postgres, 실제 서명 JWT, 전 경로 계약·권한·롤백 검증, 전체 187개 파일 1545개 테스트 통과)다. 계약은 `openapi/ordering.yaml`(주문 4)과 `openapi/ordering-http.yaml`(나머지, 총 83개 연산)이며 **미검증 엔드포인트는 호출하지 않는다**.
+서버 근거는 `tests/db`·`tests/openapi`(격리 Postgres, 실제 서명 JWT, 전 경로 계약·권한·롤백 검증, 전체 188개 파일 1552개 테스트 통과)다. 계약은 `openapi/ordering.yaml`(주문 4)과 `openapi/ordering-http.yaml`(나머지, 총 83개 연산)이며 **미검증 엔드포인트는 호출하지 않는다**.
 
 | Bolt 단계 | 화면 | 실제 API 연결 | 비고 |
 |---|---|---|---|
@@ -49,7 +49,7 @@ UI 단계 순서에 맞춰 서버가 먼저 만들 조회 API다. 모두 같은 
 | 5 | O-08 안내 대기, O-09 수령·결제 현황 | ✅ **완료(2026-11-26)** `GET /notification-targets`(서점 전체 큐, 파생 상태·필터), `GET /order-settlements`(결제 요약·수령 수량, `unpaid`/`undelivered` 필터). 보고서 §103 | 중 |
 | 6 | O-09-04 환급, R-01·R-03·R-04 | ✅ **완료(2026-11-26)** `GET /refund-tasks`(파생 상태·남은 금액·미결 요청·미해소 시도), `GET /allocation-cancellations`(취소 물량의 처분 대기·편입·반품 보관·출고·완료 수량). 보고서 §104 | 중 |
 | 7 | S-03 권한 | ✅ **완료(2026-11-26)** `POST /members/{id}/delegations`(MANAGEMENT·STOCK_ADJUSTMENT 부여·회수, Owner만), `GET /delegations`. 변경 이력 테이블(추가 전용). 역할 변경(직원→Owner)은 서버 없음. 보고서 §105 | 중 |
-| 8 | O-02 검색 | 주문 목록의 표시번호·도서명 검색 필터(지금은 상태만) | 소 |
+| 8 | O-02 검색 | ✅ **완료(2026-11-26)** `GET /orders?search=`(표시번호 정확 일치·도서명 부분 일치·ISBN 정확 일치, SQL 한 페이지분만 읽음). 고객 검색은 고객 모듈 없음. 보고서 §106 | 소 |
 
 고객 모듈(C-01~04)과 YES24 연동은 PRD 결정이 필요해 이 목록에 넣지 않았다.
 
