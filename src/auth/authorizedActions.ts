@@ -65,6 +65,7 @@ import { respondToCancellationRequest } from "../procurement/respondToCancellati
 import { publishTemplateVersion } from "../catalog/publishTemplateVersion";
 import { registerBook } from "../catalog/registerBook";
 import { anonymizeCustomer } from "../customer/anonymizeCustomer";
+import { linkOrderCustomer } from "../customer/linkOrderCustomer";
 import { registerCustomer } from "../customer/registerCustomer";
 import { updateCustomer } from "../customer/updateCustomer";
 import { registerSupplier } from "../catalog/registerSupplier";
@@ -152,6 +153,7 @@ export const authorizedActions = {
   updateBook: bindActor(updateBook, { nameField: "changedBy", allow: BOTH }),
   // 공급처 관리(ST-B04): Owner 또는 점주가 위임한 직원(도메인 함수가 위임을 검사한다)
   registerCustomer: bindActor(registerCustomer, { roleField: "actorRole", nameField: "registeredBy", allow: BOTH }),
+  linkOrderCustomer: bindActor(linkOrderCustomer, { roleField: "actorRole", nameField: "linkedBy", allow: BOTH }),
   updateCustomer: bindActor(updateCustomer, { roleField: "actorRole", nameField: "changedBy", allow: BOTH }),
   registerSupplier: bindActor(registerSupplier, { roleField: "actorRole", nameField: "registeredBy", allow: BOTH }),
   updateSupplier: bindActor(updateSupplier, { roleField: "actorRole", nameField: "changedBy", allow: BOTH }),

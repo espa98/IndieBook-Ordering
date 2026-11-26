@@ -142,3 +142,29 @@ describe("고객 상세·변경 이력 (C-03, C-04, Postgres)", () => {
     expect(JSON.stringify(asStaff)).not.toContain("0444");
   });
 });
+
+describe("주문-고객 연결 (고객 결정 #4, Postgres)", () => {
+  const ORDER = "b0000000-0000-4000-8000-0000000000f1";
+  const ORDER_2 = "b0000000-0000-4000-8000-0000000000f2";
+
+  it("직원이 주문에 고객을 연결하고 현재 고객을 읽는다(연결 전 null, 바꾸면 최신 연결, 같은 고객 재연결은 기록 없음, 다른 서점 주문 NOT_FOUND, 폐기된 주문 거부)", async () => {
+    await q(`insert into public.ordering_orders (id, tenant_id) values ($1, $2), ($3, $2)`, [ORDER, T, ORDER_2]);
+    const a = (await register(staff, { name: "연결고객A", phone: "010-3030-0001" })).customer;
+    const b = (await register(staff, { name: "연결고객B", phone: "010-3030-0002" })).customer;
+    const link = (actor: { userId: string }, orderId: string, customerId: string, tenantId = T) => api().linkOrderCustomer(actor, { tenantId, orderId, customerId, linkedAt: AT, idempotencyKey: key() } as never);
+
+    expect(await api().getOrderCustomer(staff, { tenantId: T, orderId: ORDER })).toEqual({ customer: null });
+    const first = await link(staff, ORDER, a.id);
+    expect(first).toMatchObject({ orderId: ORDER, customerId: a.id, linkedBy: STAFF, linkedAt: AT });
+    await link(staff, ORDER, a.id);
+    expect(await q(`select 1 from public.ordering_order_customer_links where order_id = $1`, [ORDER])).toHaveLength(1);
+    await link(owner, ORDER, b.id);
+    expect(await api().getOrderCustomer(staff, { tenantId: T, orderId: ORDER })).toEqual({ customer: { id: b.id, name: "연결고객B", phone: "01030300002" }, linkedBy: OWNER, linkedAt: AT });
+
+    expect(await codeOf(() => link({ userId: STRANGER }, ORDER, a.id))).toBe("FORBIDDEN");
+    expect(await codeOf(() => link({ userId: STRANGER }, ORDER, a.id, T2))).toBe("NOT_FOUND");
+    expect(await codeOf(() => link(staff, "not-a-uuid", a.id))).toBe("NOT_FOUND");
+    await q(`update public.ordering_orders set version = version + 1, discarded_at = now(), discard_reason = '시험', discarded_by = 'x' where id = $1`, [ORDER_2]);
+    expect(await codeOf(() => link(staff, ORDER_2, a.id))).toBe("BUSINESS_INVARIANT");
+  });
+});

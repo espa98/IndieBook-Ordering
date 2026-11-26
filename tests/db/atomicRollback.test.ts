@@ -139,6 +139,8 @@ describe("저장 도중 실패 주입: 모든 쓰기 뒤 실패해도 아무것�
     await write("문구 템플릿 게시", "/message-templates", { key: "ATOMIC_READY", body: "{{storeName}}입니다", expectedVersion: 0, publishedAt: PAST }, 201);
 
     const order = await write("주문 생성", "/orders", { lines: [{ bookId: book.id, quantity: 2, unitPriceKrw: "10000" }] }, 201);
+    const linkable = await write("고객 등록(연결용)", "/customers", { name: "연결 고객", phone: "010-0000-5678", registeredAt: PAST }, 201);
+    await write("주문-고객 연결", `/orders/${order.id}/customer`, { customerId: linkable.customer.id, linkedAt: PAST }, 201);
     const confirmed = await write("주문 확정", `/orders/${order.id}/confirm`, { expectedVersion: 1 }, 200);
     const lineId = confirmed.lines[0].lineId as string;
     const payment = await write("결제 입력", `/orders/${order.id}/payments`, { method: "BANK_TRANSFER", amountKrw: "20000", externalReference: "ATOMIC-1", paidAt: PAST }, 201);

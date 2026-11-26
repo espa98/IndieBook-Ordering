@@ -83,3 +83,38 @@ describe("고객 HTTP (C-03, C-04, 익명화)", () => {
     expect((await call("POST", `/customers/${id}/updates`, OWNER, { body: { expectedVersion: 3, changes: { name: "복구" }, changedAt: PAST } })).status).toBe(422);
   });
 });
+
+describe("주문-고객 연결 HTTP (고객 결정 #4)", () => {
+  it("직원이 주문에 고객을 연결(201)하고 GET으로 현재 고객(번호 전체)을 읽는다", async () => {
+    const c = await db.connect();
+    const ORDER = "b0000000-0000-4000-8000-0000000000c1";
+    await c.query(`insert into public.ordering_orders (id, tenant_id) values ($1, $2)`, [ORDER, T]);
+    await c.end();
+    const { body } = await call("POST", "/customers", STAFF, { body: { name: "주문고객", phone: "010-8000-9999", registeredAt: PAST } });
+    const customerId = body.data.customer.id as string;
+
+    expect((await call("GET", `/orders/${ORDER}/customer`, STAFF)).body.data).toEqual({ customer: null });
+    const linked = await call("POST", `/orders/${ORDER}/customer`, STAFF, { body: { customerId, linkedAt: PAST } });
+    expect(linked.status).toBe(201);
+    expect(linked.body.data).toMatchObject({ orderId: ORDER, customerId, linkedBy: STAFF });
+    expect((await call("GET", `/orders/${ORDER}/customer`, STAFF)).body.data).toEqual({ customer: { id: customerId, name: "주문고객", phone: "01080009999" }, linkedBy: STAFF, linkedAt: PAST });
+    expect((await call("POST", `/orders/${ORDER}/customer`, STRANGER, { body: { customerId, linkedAt: PAST } })).status).toBe(403);
+    expect((await call("GET", `/orders/00000000-0000-4000-8000-000000000000/customer`, STAFF)).status).toBe(404);
+  });
+
+  it("안내 대기열(GET /notification-targets) 항목에 주문에 연결된 고객의 이름·번호가 실리고, 연결이 없으면 customer 필드가 없다", async () => {
+    const c = await db.connect();
+    const linkedOrder = "b0000000-0000-4000-8000-0000000000c2";
+    const plainOrder = "b0000000-0000-4000-8000-0000000000c3";
+    await c.query(`insert into public.ordering_orders (id, tenant_id) values ($1, $3), ($2, $3)`, [linkedOrder, plainOrder, T]);
+    await c.query(`insert into public.ordering_notification_targets (id, tenant_id, order_id, mode, lines, secured_total, created_by, created_at) values ('e0000000-0000-4000-8000-0000000000c2', $1, $2, 'FULL', '[]', 1, 'x', now()), ('e0000000-0000-4000-8000-0000000000c3', $1, $3, 'FULL', '[]', 1, 'x', now() + interval '1 second')`, [T, linkedOrder, plainOrder]);
+    await c.end();
+    const { body } = await call("POST", "/customers", STAFF, { body: { name: "안내고객", phone: "010-7000-1234", registeredAt: PAST } });
+    await call("POST", `/orders/${linkedOrder}/customer`, STAFF, { body: { customerId: body.data.customer.id, linkedAt: PAST } });
+
+    const queue = await call("GET", "/notification-targets", STAFF);
+    const byOrder = (id: string) => queue.body.data.items.find((i: { orderId: string }) => i.orderId === id);
+    expect(byOrder(linkedOrder).customer).toEqual({ id: body.data.customer.id, name: "안내고객", phone: "01070001234" });
+    expect(byOrder(plainOrder)).not.toHaveProperty("customer");
+  });
+});

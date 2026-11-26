@@ -58,4 +58,17 @@ describe("고객 스키마 (031)", () => {
     expect(await as(STAFF, "select 1 from public.ordering_customer_changes")).toBe(0);
     expect(await sqlState(() => as(OWNER, `insert into public.ordering_customers (tenant_id, name, phone) values ('${T}', 'x', '01000000000')`))).toBe("42501");
   });
+
+  it("주문-고객 연결(032)은 추가 전용이고 같은 서점의 주문·고객만 연결한다", async () => {
+    const O1 = "b0000000-0000-4000-8000-0000000000e1";
+    const T2 = "aaaaaaaa-0000-4000-8000-0000000000e2";
+    await q(`insert into public.ordering_orders (id, tenant_id) values ($1, $2)`, [O1, T]);
+    await q(`insert into public.ordering_tenants (id, name, owner_user_id) values ($1, '다른', $2)`, [T2, STRANGER]);
+    const link = (tenant: string) => q(`insert into public.ordering_order_customer_links (tenant_id, order_id, customer_id, linked_by, linked_at) values ($1, $2, $3, 'staff-1', now())`, [tenant, O1, C1]);
+
+    await link(T);
+    expect(await sqlState(() => link(T2))).toBe("23503");
+    expect(await sqlState(() => q(`update public.ordering_order_customer_links set linked_by = 'x'`))).toBe("P0001");
+    expect(await sqlState(() => q(`delete from public.ordering_order_customer_links`))).toBe("P0001");
+  });
 });

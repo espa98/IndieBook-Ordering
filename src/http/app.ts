@@ -363,6 +363,15 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       fields: ["name", "phone", "registeredAt"],
       run: (c) => customers.registerCustomer(actor(c), merge(c, { tenantId: t(c), idempotencyKey: c.idempotencyKey })),
     }),
+    route("POST", "/orders/(?<orderId>[^/]+)/customer", {
+      success: 201,
+      fields: ["customerId", "linkedAt"],
+      run: (c) => customers.linkOrderCustomer(actor(c), merge(c, { tenantId: t(c), orderId: c.params.orderId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("GET", "/orders/(?<orderId>[^/]+)/customer", {
+      success: 200,
+      run: (c) => customers.getOrderCustomer(actor(c), { tenantId: t(c), orderId: c.params.orderId! }),
+    }),
     route("GET", "/customers/(?<customerId>[^/]+)", {
       success: 200,
       run: (c) => customers.getCustomer(actor(c), { tenantId: t(c), customerId: c.params.customerId! }),

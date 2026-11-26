@@ -5386,6 +5386,87 @@ paths:
           $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/orders/{orderId}/customer:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: orderId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [customers]
+      operationId: getOrderCustomer
+      summary: getOrderCustomer
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/OrderCustomer" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+    post:
+      tags: [customers]
+      operationId: linkOrderCustomer
+      summary: linkOrderCustomer
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [customerId, linkedAt]
+              properties:
+                customerId: { type: string, format: uuid }
+                linkedAt: { type: string, format: date-time }
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/OrderCustomerLink" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "413":
+          $ref: "ordering.yaml#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/customers/{customerId}/changes:
     parameters:
       - $ref: "ordering.yaml#/components/parameters/TenantId"
@@ -5674,6 +5755,7 @@ components:
         channel: { type: string, enum: [PHONE, SMS, MESSENGER, VISIT, OTHER] }
         resultAt: { type: string, format: date-time }
         resultOutcome: { type: string, enum: [MANUAL_RECORDED, FAILED] }
+        customer: { $ref: "#/components/schemas/CustomerSummary", description: 주문에 연결된 고객(선택). 연결이 없으면 없다 }
     ReceiptCore:
       type: object
       required: [id, purchaseOrderId, poLineId, bookKey, receivedAt, normalQuantity, correctedQuantity, damagedQuantity, misdeliveredQuantity, excessQuantity, allocatedQuantity, unallocatedQuantity]
@@ -6758,3 +6840,27 @@ components:
         after: { type: object, description: "Owner에게만 보인다" }
         by: { type: string }
         at: { type: string, format: date-time }
+    CustomerSummary:
+      type: object
+      required: [id, name, phone]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        phone: { type: [string, "null"], description: "안내 연락용 번호 전체. 익명화되면 null" }
+    OrderCustomer:
+      type: object
+      required: [customer]
+      properties:
+        customer: { oneOf: [{ $ref: "#/components/schemas/CustomerSummary" }, { type: "null" }] }
+        linkedBy: { type: string }
+        linkedAt: { type: string, format: date-time }
+    OrderCustomerLink:
+      type: object
+      required: [id, tenantId, orderId, customerId, linkedBy, linkedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        linkedBy: { type: string }
+        linkedAt: { type: string, format: date-time }

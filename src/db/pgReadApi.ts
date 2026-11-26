@@ -223,6 +223,8 @@ export type NotificationQueueItem = {
   channel?: string;
   resultAt?: string;
   resultOutcome?: "MANUAL_RECORDED" | "FAILED";
+  /** 주문에 연결된 고객(선택, 고객 결정 #4). 안내 연락에 필요해 번호 전체를 싣는다. 익명화되면 이름만 남고 번호는 null */
+  customer?: { id: string; name: string; phone: string | null };
 };
 export type ListNotificationQueueRequest = { tenantId: string; limit?: number; cursor?: string; status?: NotificationStatus };
 const NOTIFICATION_STATUSES: readonly NotificationStatus[] = ["PENDING", "ATTEMPTED", "MANUAL_RECORDED", "FAILED"];
@@ -919,11 +921,13 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
           await client.query(
             `select * from (
                select t.id, t.order_id, o.display_number, t.mode, t.secured_total, t.created_at, t.created_at::text as created_at_text, t.renotice_of_target_id,
-                      a.attempted_at, a.channel, r.result_at, r.outcome,
+                      a.attempted_at, a.channel, r.result_at, r.outcome, cu.id as customer_id, cu.name as customer_name, cu.phone as customer_phone,
                       case when a.id is null then 'PENDING' when r.outcome is null then 'ATTEMPTED' else r.outcome end as status
                  from public.ordering_notification_targets t
                  join public.ordering_orders o on o.tenant_id = t.tenant_id and o.id = t.order_id
                  left join public.ordering_notification_attempts a on a.tenant_id = t.tenant_id and a.target_id = t.id
+                 left join lateral (select l.customer_id from public.ordering_order_customer_links l where l.tenant_id = t.tenant_id and l.order_id = t.order_id order by l.recorded_at desc, l.id desc limit 1) lk on true
+                 left join public.ordering_customers cu on cu.tenant_id = t.tenant_id and cu.id = lk.customer_id
                  left join lateral (select x.outcome, x.result_at from public.ordering_notification_results x where x.tenant_id = t.tenant_id and x.target_id = t.id order by x.recorded_at desc, x.id desc limit 1) r on true
                 where t.tenant_id = $1
                   and not exists (select 1 from public.ordering_notification_targets n where n.tenant_id = t.tenant_id and n.renotice_of_target_id = t.id)) s
@@ -947,6 +951,7 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
           ...(r.renotice_of_target_id === null ? {} : { renoticeOfTargetId: r.renotice_of_target_id }),
           ...(r.attempted_at === null ? {} : { attemptedAt: (r.attempted_at as Date).toISOString(), channel: r.channel }),
           ...(r.outcome === null ? {} : { resultAt: (r.result_at as Date).toISOString(), resultOutcome: r.outcome }),
+          ...(r.customer_id === null ? {} : { customer: { id: r.customer_id, name: r.customer_name, phone: r.customer_phone } }),
         }));
         return { items, ...(rows.length > limit && last ? { nextCursor: encodeCursor([last.created_at_text, last.id]) } : {}) };
       }),

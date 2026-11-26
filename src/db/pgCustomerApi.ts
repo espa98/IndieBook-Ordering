@@ -1,6 +1,7 @@
 import type { PoolClient } from "pg";
 import { authorizedActions } from "../auth/authorizedActions";
 import type { Customer, CustomerChange, RegisterCustomerRequest } from "../customer/registerCustomer";
+import type { LinkOrderCustomerRequest, OrderCustomerLink } from "../customer/linkOrderCustomer";
 import type { AnonymizeCustomerRequest } from "../customer/anonymizeCustomer";
 import type { UpdateCustomerRequest } from "../customer/updateCustomer";
 import { normalizePhone } from "../customer/normalizePhone";
@@ -13,6 +14,7 @@ type Actor = { userId: string };
 export type RegisterCustomerBody = Omit<RegisterCustomerRequest, "actorRole" | "registeredBy">;
 
 export type UpdateCustomerBody = Omit<UpdateCustomerRequest, "actorRole" | "changedBy">;
+export type LinkOrderCustomerBody = Omit<LinkOrderCustomerRequest, "actorRole" | "linkedBy">;
 export type AnonymizeCustomerBody = Omit<AnonymizeCustomerRequest, "actorRole" | "anonymizedBy">;
 
 /** 목록 화면용: 번호는 끝 4자리만(고객 결정 #3) */
@@ -128,7 +130,54 @@ export function createPgCustomerApi(deps: { pool: PoolLike }) {
     return toCustomer(row);
   };
 
+  const linkOnce = (actor: Actor, body: LinkOrderCustomerBody) =>
+    inTransaction(deps.pool, "service_role", actor.userId, async (client) => {
+      const principal = principalFor(await loadMembership(client, actor.userId, body.tenantId), actor.userId, body.tenantId);
+      const okIds = isUuid(body.tenantId) && isUuid(body.orderId) && isUuid(body.customerId);
+      // 같은 주문의 동시 연결을 직렬화한다
+      if (okIds) await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`ocl:${body.tenantId}:${body.orderId}`]);
+      const orderRow = okIds ? (await client.query("select id, closed_at, cancelled_at, discarded_at from public.ordering_orders where tenant_id = $1 and id = $2", [body.tenantId, body.orderId])).rows[0] : undefined;
+      const customer = okIds ? (await client.query("select * from public.ordering_customers where tenant_id = $1 and id = $2", [body.tenantId, body.customerId])).rows.map(toCustomer)[0] : undefined;
+      const currentRow = orderRow ? (await client.query("select * from public.ordering_order_customer_links where tenant_id = $1 and order_id = $2 order by recorded_at desc, id desc limit 1", [body.tenantId, body.orderId])).rows[0] : undefined;
+      const idempotency = await loadCommands(client, body.tenantId, body.idempotencyKey);
+      const known = new Set(idempotency.keys());
+      const saved: OrderCustomerLink[] = [];
+      const iso = (v: Date | null) => (v === null ? {} : { v: v.toISOString() }).v;
+      const { tenantId: _t, ...rest } = body;
+      void _t;
+      const result = authorizedActions.linkOrderCustomer(
+        {
+          customers: { get: (_x, id) => (customer && customer.id === id ? customer : undefined) },
+          orders: { get: (_x, id) => (orderRow && orderRow.id === id ? { id, ...(iso(orderRow.closed_at) ? { closedAt: iso(orderRow.closed_at)! } : {}), ...(iso(orderRow.cancelled_at) ? { cancelledAt: iso(orderRow.cancelled_at)! } : {}), ...(iso(orderRow.discarded_at) ? { discardedAt: iso(orderRow.discarded_at)! } : {}) } : undefined) },
+          orderCustomerLinks: {
+            current: () => (currentRow ? { id: currentRow.id, tenantId: currentRow.tenant_id, orderId: currentRow.order_id, customerId: currentRow.customer_id, linkedBy: currentRow.linked_by, linkedAt: (currentRow.linked_at as Date).toISOString() } : undefined),
+            save: (l) => void saved.push(l),
+          },
+          idempotency,
+        },
+        principal,
+        rest,
+      );
+      for (const l of saved) {
+        await client.query("insert into public.ordering_order_customer_links (id, tenant_id, order_id, customer_id, linked_by, linked_at) values ($1, $2, $3, $4, $5, $6)", [l.id, l.tenantId, l.orderId, l.customerId, l.linkedBy, l.linkedAt]);
+      }
+      await saveNewCommands(client, idempotency, known);
+      return result;
+    });
+
   return {
+    /** 주문에 고객을 연결한다(선택). 같은 고객이면 기록을 늘리지 않고, 다른 고객이면 새 연결이 추가된다 */
+    linkOrderCustomer: (actor: Actor, body: LinkOrderCustomerBody) => withRetry(() => linkOnce(actor, body)),
+
+    /** 주문의 현재 고객(가장 최근 연결). 안내 업무를 위해 번호 전체를 보여 준다. 연결이 없으면 `{ customer: null }` */
+    getOrderCustomer: (actor: Actor, request: { tenantId: string; orderId: string }): Promise<{ customer: { id: string; name: string; phone: string | null } | null; linkedBy?: string; linkedAt?: string }> =>
+      asMember(actor, request.tenantId, async (client) => {
+        const order = isUuid(request.tenantId) && isUuid(request.orderId) ? (await client.query("select 1 from public.ordering_orders where tenant_id = $1 and id = $2", [request.tenantId, request.orderId])).rowCount : 0;
+        if (!order) throw new AppError("NOT_FOUND");
+        const row = (await client.query("select c.id, c.name, c.phone, l.linked_by, l.linked_at from public.ordering_order_customer_links l join public.ordering_customers c on c.tenant_id = l.tenant_id and c.id = l.customer_id where l.tenant_id = $1 and l.order_id = $2 order by l.recorded_at desc, l.id desc limit 1", [request.tenantId, request.orderId])).rows[0];
+        return row ? { customer: { id: row.id, name: row.name, phone: row.phone }, linkedBy: row.linked_by, linkedAt: (row.linked_at as Date).toISOString() } : { customer: null };
+      }),
+
     /** 상세: 번호 전체(안내 업무에 필요, 고객 결정 #3) */
     getCustomer: (actor: Actor, request: { tenantId: string; customerId: string }): Promise<Customer> => asMember(actor, request.tenantId, (client) => requireCustomer(client, request.tenantId, request.customerId)),
 
