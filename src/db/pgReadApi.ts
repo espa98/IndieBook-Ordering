@@ -353,6 +353,37 @@ export type SupplierOverviewItem = {
   lastDeliveredAt?: string;
 };
 
+/** 시간대별 통계(DASH-007)의 한 칸 묶음: 기초 단위(건수·수량(권)·금액(원, 정수 문자열))의 합 */
+export type HourlyMeasures = {
+  /** 작성된 주문(폐기된 초안 제외): 건수와 품목 수량(권) 합 */
+  orders: { count: number; quantity: number };
+  /** 확인된 결제(무효 제외)를 결제 시각으로: 건수와 금액(원) */
+  payments: { count: number; amountKrw: string };
+  /** 검수한 정상 입고 수량(권): 검수 시각에 더하고 검수 정정은 정정 시각에 뺀다 */
+  receipts: { quantity: number };
+  /** 고객 수령 수량(권): 수령 시각에 더하고 정정 역거래는 그 기록 시각에 뺀다 */
+  deliveries: { quantity: number };
+};
+export type HourlyStatistics = {
+  timezone: "Asia/Seoul";
+  from: string;
+  to: string;
+  /** 영업 시간 09:00~22:00을 1시간 간격으로 나눈 13칸(hour 9..21) */
+  hours: ({ hour: number; label: string } & HourlyMeasures)[];
+  /** 영업 시간 밖(09:00 전·22:00 이후)의 같은 기간 업무 합계 */
+  outsideBusinessHours: HourlyMeasures;
+};
+export const BUSINESS_FIRST_HOUR = 9;
+export const BUSINESS_END_HOUR = 22;
+const STATISTICS_TIMEZONE = "Asia/Seoul";
+const KST_OFFSET_MS = 9 * 3_600_000;
+const isoDate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+function parseDate(field: string, value: unknown): number {
+  const ms = typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? Date.parse(`${value}T00:00:00Z`) : Number.NaN;
+  if (Number.isNaN(ms) || isoDate(ms) !== value) throw validation(`${field} must be a calendar date YYYY-MM-DD`);
+  return ms;
+}
+
 /** 대시보드(O-01) 서버 집계 */
 export type Dashboard = {
   orders: { draft: number; held: number; discarded: number; confirmed: number };
@@ -538,6 +569,67 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
         const page = rows.slice(0, limit);
         const last = page[page.length - 1];
         return { items: page.map(toStockLevel), ...(rows.length > limit && last ? { nextCursor: encodeCursor([last.book_key]) } : {}) };
+      }),
+
+    /**
+     * 시간대별 기간 통계(DASH-007): 영업 시간 **09:00~22:00을 1시간 간격 13칸**으로, 서점 현지 시각(Asia/Seoul, UTC+9)의 `from`~`to`(날짜, 양 끝 포함) 기간 업무량을
+     * **기초 단위**(건수·수량(권)·금액(원))로 합산한다(여러 날을 시각 칸별로 합친다). 영업 시간 밖 업무는 `outsideBusinessHours`에 따로 합산해 기간 합계와 맞춘다.
+     * `from`·`to`를 생략하면 현지 오늘까지 최근 30일. 기간은 최대 366일. 기준 시각: 주문 작성, 결제 시각(확인된 결제), 검수·정정 시각, 수령·정정 시각.
+     */
+    getHourlyStatistics: (actor: Actor, request: { tenantId: string; from?: string; to?: string }): Promise<HourlyStatistics> =>
+      asMember(actor, request.tenantId, async (client) => {
+        const now = (deps.now ?? (() => new Date()))();
+        const today = isoDate(now.getTime() + KST_OFFSET_MS);
+        const toMs = request.to === undefined ? parseDate("to", today) : parseDate("to", request.to);
+        const fromMs = request.from === undefined ? toMs - 29 * 86_400_000 : parseDate("from", request.from);
+        if (fromMs > toMs) throw validation("from must not be after to");
+        if ((toMs - fromMs) / 86_400_000 > 365) throw validation("the period must be at most 366 days");
+        const from = isoDate(fromMs);
+        const to = isoDate(toMs);
+        const rows = (
+          await client.query(
+            `with b as (select ($2::date::timestamp at time zone '${STATISTICS_TIMEZONE}') as t0, (($3::date + 1)::timestamp at time zone '${STATISTICS_TIMEZONE}') as t1),
+                  ev as (
+                    select 'orders' as kind, extract(hour from o.created_at at time zone '${STATISTICS_TIMEZONE}')::int as hour, 1 as n,
+                           coalesce((select sum(l.quantity) from public.ordering_order_lines l where l.tenant_id = o.tenant_id and l.order_id = o.id), 0) as amount
+                      from public.ordering_orders o, b where o.tenant_id = $1 and o.discarded_at is null and o.created_at >= b.t0 and o.created_at < b.t1
+                    union all
+                    select 'payments', extract(hour from p.paid_at at time zone '${STATISTICS_TIMEZONE}')::int, 1, p.amount_krw
+                      from public.ordering_payments p, b
+                     where p.tenant_id = $1 and p.paid_at >= b.t0 and p.paid_at < b.t1
+                       and exists (select 1 from public.ordering_payment_confirmations c where c.tenant_id = p.tenant_id and c.payment_id = p.id)
+                       and not exists (select 1 from public.ordering_payment_voids v where v.tenant_id = p.tenant_id and v.payment_id = p.id)
+                    union all
+                    select 'receipts', extract(hour from g.received_at at time zone '${STATISTICS_TIMEZONE}')::int, 0, g.normal_quantity
+                      from public.ordering_goods_receipts g, b where g.tenant_id = $1 and g.received_at >= b.t0 and g.received_at < b.t1
+                    union all
+                    select 'receipts', extract(hour from c.corrected_at at time zone '${STATISTICS_TIMEZONE}')::int, 0, -c.quantity
+                      from public.ordering_receipt_corrections c, b where c.tenant_id = $1 and c.corrected_at >= b.t0 and c.corrected_at < b.t1
+                    union all
+                    select 'deliveries', extract(hour from f.received_at at time zone '${STATISTICS_TIMEZONE}')::int, 0, f.quantity
+                      from public.ordering_fulfillments f, b where f.tenant_id = $1 and f.received_at >= b.t0 and f.received_at < b.t1)
+             select kind, hour, sum(n)::int as n, sum(amount)::text as amount from ev group by kind, hour`,
+            [request.tenantId, from, to],
+          )
+        ).rows;
+        const empty = (): HourlyMeasures => ({ orders: { count: 0, quantity: 0 }, payments: { count: 0, amountKrw: "0" }, receipts: { quantity: 0 }, deliveries: { quantity: 0 } });
+        const add = (m: HourlyMeasures, kind: string, n: number, amount: bigint) => {
+          if (kind === "orders") m.orders = { count: m.orders.count + n, quantity: m.orders.quantity + Number(amount) };
+          else if (kind === "payments") m.payments = { count: m.payments.count + n, amountKrw: (BigInt(m.payments.amountKrw) + amount).toString() };
+          else if (kind === "receipts") m.receipts = { quantity: m.receipts.quantity + Number(amount) };
+          else m.deliveries = { quantity: m.deliveries.quantity + Number(amount) };
+        };
+        const hours = Array.from({ length: BUSINESS_END_HOUR - BUSINESS_FIRST_HOUR }, (_, i) => BUSINESS_FIRST_HOUR + i).map((hour) => ({
+          hour,
+          label: `${String(hour).padStart(2, "0")}:00-${String(hour + 1).padStart(2, "0")}:00`,
+          ...empty(),
+        }));
+        const outsideBusinessHours = empty();
+        for (const r of rows) {
+          const target = hours.find((h) => h.hour === r.hour) ?? outsideBusinessHours;
+          add(target, r.kind, r.n, BigInt(String(r.amount)));
+        }
+        return { timezone: STATISTICS_TIMEZONE, from, to, hours, outsideBusinessHours };
       }),
 
     /**

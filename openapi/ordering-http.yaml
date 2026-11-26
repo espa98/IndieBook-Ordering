@@ -1277,6 +1277,49 @@ paths:
           $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/statistics/hourly:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+    get:
+      tags: [reads]
+      operationId: getHourlyStatistics
+      summary: 시간대별 기간 통계 (DASH-007)
+      description: |
+        활성 멤버(Owner·직원)가 영업 시간 **09:00~22:00을 1시간 간격 13칸**(`hours[].hour` 9..21)으로, 서점 현지 시각(`Asia/Seoul`, UTC+9)의
+        `from`~`to`(날짜 `YYYY-MM-DD`, 양 끝 포함, 최대 366일) 기간 업무량을 **기초 단위**로 합산해 읽는다(여러 날을 시각 칸별로 합친다).
+        기초 단위: 건수, 수량(권), 금액(원, 정수 문자열). 영업 시간 밖의 같은 기간 업무는 `outsideBusinessHours`에 따로 합산한다.
+        측정값과 기준 시각 — `orders`: 작성된 주문(폐기된 초안 제외)의 건수와 품목 수량(작성 시각), `payments`: **확인된** 결제(무효 제외)의 건수와 금액(결제 시각),
+        `receipts`: 검수한 정상 입고 수량(검수 시각에 더하고 검수 정정은 정정 시각에 뺀다), `deliveries`: 고객 수령 수량(수령 시각에 더하고 정정 역거래는 그 기록 시각에 뺀다).
+        `from`·`to`를 생략하면 현지 오늘까지 최근 30일이다. 서점 시간대 설정은 없고 한국 표준시로 고정이다.
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: 성공(`data`는 시간대별 통계)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/HourlyStatistics" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/supplier-overview:
     parameters:
       - $ref: "ordering.yaml#/components/parameters/TenantId"
@@ -5035,6 +5078,57 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    HourlyMeasures:
+      type: object
+      required: [orders, payments, receipts, deliveries]
+      properties:
+        orders:
+          type: object
+          additionalProperties: false
+          required: [count, quantity]
+          properties:
+            count: { type: integer, minimum: 0 }
+            quantity: { type: integer, minimum: 0, description: 품목 수량 합(권) }
+        payments:
+          type: object
+          additionalProperties: false
+          required: [count, amountKrw]
+          properties:
+            count: { type: integer, minimum: 0 }
+            amountKrw: { type: string, pattern: "^(0|[1-9][0-9]*)$" }
+        receipts:
+          type: object
+          additionalProperties: false
+          required: [quantity]
+          properties:
+            quantity: { type: integer, description: 정상 입고 수량(권). 정정은 정정 시각에 빼므로 한 칸 값은 음수일 수 있다 }
+        deliveries:
+          type: object
+          additionalProperties: false
+          required: [quantity]
+          properties:
+            quantity: { type: integer, description: 고객 수령 수량(권). 정정 역거래는 기록 시각에 빼므로 한 칸 값은 음수일 수 있다 }
+    HourlyStatistics:
+      type: object
+      additionalProperties: false
+      required: [timezone, from, to, hours, outsideBusinessHours]
+      properties:
+        timezone: { type: string, enum: [Asia/Seoul] }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        hours:
+          type: array
+          minItems: 13
+          maxItems: 13
+          items:
+            allOf:
+              - $ref: "#/components/schemas/HourlyMeasures"
+              - type: object
+                required: [hour, label]
+                properties:
+                  hour: { type: integer, minimum: 9, maximum: 21 }
+                  label: { type: string, pattern: "^[0-2][0-9]:00-[0-2][0-9]:00$" }
+        outsideBusinessHours: { $ref: "#/components/schemas/HourlyMeasures" }
     SupplierOverviewItem:
       type: object
       additionalProperties: false

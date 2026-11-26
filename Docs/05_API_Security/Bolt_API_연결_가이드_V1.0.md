@@ -1,6 +1,6 @@
 # BookFlow Ordering — Bolt.new용 API 연결 가이드 V1.0
 
-작성일: 2026-11-26 · 기준: `openapi/ordering.yaml`(주문 4개)·`openapi/ordering-http.yaml`(나머지 96개), 격리 DB 시험 195개 파일·1574개 테스트 통과
+작성일: 2026-11-26 · 기준: `openapi/ordering.yaml`(주문 4개)·`openapi/ordering-http.yaml`(나머지 97개), 격리 DB 시험 195개 파일·1574개 테스트 통과
 
 **누구를 위한 문서인가:** `BookFlow_Ordering_BoltNew_단계별프롬프트_V1.0`으로 웹 UI를 만드는 프런트엔드 작업자(Bolt.new). 책임 분리는 그대로다 — *백엔드(이 저장소) = DB·RLS·업무 API·검증, Bolt.new = 반응형 웹 UI·업무 흐름·검증된 API 연결.* 이 문서는 **"서버가 UI에 무엇을 약속하는가"** 를 한곳에 모은 것이고, 필드 단위의 정확한 계약은 항상 `openapi/*.yaml`이 기준이다(이 문서의 예시와 어긋나면 명세가 맞다).
 
@@ -12,7 +12,7 @@
 
 | 원칙 | 이 서버에서의 의미 |
 |---|---|
-| 승인된 API만 호출 | 아래 §6의 100개 연산과 `GET /healthz`뿐이다. 문서에 없는 경로를 가정하지 않는다. |
+| 승인된 API만 호출 | 아래 §6의 101개 연산과 `GET /healthz`뿐이다. 문서에 없는 경로를 가정하지 않는다. |
 | `service_role` 키 브라우저 노출 금지 | 브라우저는 **사용자 access token(JWT)** 만 보낸다. DB 키·서버 비밀은 서버 환경에만 있다. |
 | 권한 판정은 서버가 한다 | 서버가 **매 요청** DB에서 활성 멤버십·역할을 다시 읽는다. 토큰의 역할·서점 claim은 무시한다. UI는 버튼을 숨기는 용도일 뿐, 숨겼다고 안전하지 않다. |
 | 미구현·미승인 기능은 성공 처리하지 않는다 | §10의 "서버 없음" 목록은 `DEMO MODE`/비활성으로 표시한다. |
@@ -106,7 +106,7 @@ GET /v1/me/memberships
 
 ---
 
-## 6. 엔드포인트 목록 (명세에서 생성 — 100개)
+## 6. 엔드포인트 목록 (명세에서 생성 — 101개)
 
 권한 열: **Owner만** = 직원은 403 / Owner·위임 직원 = 점주가 위임을 준 직원만 / Owner·직원 = 활성 멤버 / "일부 동작은 Owner" = 예) 취소·환급 요청 승인·거절·폐기 처분은 Owner, 철회·그 외는 직원도 가능. 같은 경로라도 **본문 값에 따라** 갈리는 규칙이 있으니(재배분은 다른 고객 주문으로 옮길 때 Owner) 403은 항상 처리한다.
 
@@ -131,12 +131,13 @@ GET /v1/me/memberships
 | POST | `…/books/{bookId}/stock-adjustments` | adjustStock | Owner·위임 직원 | 201 |
 | POST | `…/stock-reservations/{reservationId}/releases` | releaseStockReservation | Owner·직원 | 201 |
 
-#### reads (24)
+#### reads (25)
 
 | 메서드 | 경로(`/v1/tenants/{tenantId}` 접두 생략: …) | operationId | 권한 | 성공 |
 |---|---|---|---|---|
 | GET | `…/stock` | listStockLevels | Owner·직원 | 200 |
 | GET | `…/stock/{bookId}` | getStockLevel | Owner·직원 | 200 |
+| GET | `…/statistics/hourly` | getHourlyStatistics | Owner·직원 | 200 |
 | GET | `…/supplier-overview` | listSupplierOverview | Owner·직원 | 200 |
 | GET | `…/exceptions` | listExceptions | Owner·직원 | 200 |
 | GET | `…/allocation-cancellations` | listAllocationCancellations | Owner·직원 | 200 |

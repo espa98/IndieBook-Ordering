@@ -407,6 +407,11 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       success: 200,
       run: (c) => reads.listNotificationTargets(actor(c), { tenantId: t(c), orderId: c.params.orderId! }),
     }),
+    route("GET", "/statistics/hourly", {
+      success: 200,
+      queryFields: ["from", "to"],
+      run: (c) => reads.getHourlyStatistics(actor(c), { tenantId: t(c), ...text(c, "from"), ...text(c, "to") }),
+    }),
     route("GET", "/supplier-overview", {
       success: 200,
       queryFields: ["delayDays"],

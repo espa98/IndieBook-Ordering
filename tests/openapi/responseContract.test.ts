@@ -668,3 +668,19 @@ describe("응답 계약(읽기): 공급처별 현황", () => {
     expect(sent).toBeLessThanOrEqual(dashboard.purchaseOrders.sent); // 등록된 공급처의 발주만 센다
   });
 });
+
+describe("응답 계약(읽기): 시간대별 통계", () => {
+  it("앞선 시험이 만든 주문·결제·입고·수령의 시간대별 통계가 선언한 스키마를 만족하고, 주문 건수 합이 대시보드의 폐기 제외 주문 수와 같다", async () => {
+    const stats = await call("GET", "/statistics/hourly"); // 기본: 현지 오늘까지 최근 30일(시험 데이터는 모두 방금 만들어졌다)
+    expect(stats.status).toBe(200);
+    expect(declared("/statistics/hourly", "get"), "시간대별 통계 data 스키마").toBe(true);
+    expect(conforms("/statistics/hourly", stats.body)).toMatchObject({ ok: true });
+    const s = stats.body.data;
+    expect(s.hours.map((h: { hour: number }) => h.hour)).toEqual([9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
+    const d = (await call("GET", "/dashboard")).body.data;
+    const totalOrders = s.hours.reduce((n: number, h: { orders: { count: number } }) => n + h.orders.count, 0) + s.outsideBusinessHours.orders.count;
+    expect(totalOrders).toBe(d.orders.draft + d.orders.held + d.orders.confirmed); // 폐기 제외
+    expect(totalOrders).toBeGreaterThan(0);
+    expect((await call("GET", "/statistics/hourly", undefined, "from=2026-3-4")).status).toBe(400);
+  });
+});
