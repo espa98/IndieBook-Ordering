@@ -125,6 +125,31 @@ describe("correctFulfillment: 수령 오기록 정정 역거래 (ST-F02, D21, BR
     expect(level()).toEqual(before);
   });
 
+  it("복원 출처(restorations[])의 원소가 형식이 틀리면(kind 없는 값·sourceId 빈 문자열·숫자·null·quantity 0·소수·문자열·null) 업무 규칙(422)이 아니라 VALIDATION_ERROR 400이고 아무것도 기록되지 않는다", () => {
+    const { deps, correctRequest, netDelivered, fulfillmentCorrections, reservation } = correctionScene();
+    const before = netDelivered();
+    const good = { kind: "STOCK_RESERVATION" as const, sourceId: reservation.id, quantity: 1 };
+    const codeOf = (restorations: unknown) => {
+      try {
+        correctFulfillment(deps, correctRequest({ quantity: 1, restorations } as never));
+      } catch (error) {
+        return (error as AppError).code;
+      }
+    };
+
+    for (const bad of [
+      { ...good, kind: "WAREHOUSE" }, { ...good, kind: "" }, { ...good, kind: 123 }, { ...good, kind: null },
+      { ...good, sourceId: "" }, { ...good, sourceId: " " }, { ...good, sourceId: 123 }, { ...good, sourceId: null },
+      { ...good, quantity: 0 }, { ...good, quantity: -1 }, { ...good, quantity: 1.5 }, { ...good, quantity: "1" }, { ...good, quantity: null },
+      null, "x", 5,
+    ]) {
+      expect(codeOf([bad]), JSON.stringify(bad)).toBe("VALIDATION_ERROR");
+      expect(codeOf([good, bad]), JSON.stringify(bad)).toBe("VALIDATION_ERROR"); // 한 원소만 틀려도 거부한다
+    }
+    expect(fulfillmentCorrections).toEqual([]);
+    expect(netDelivered()).toBe(before);
+  });
+
   it("실물 복귀 확인이 불리언이 아니면(문자열·숫자·null·누락) 업무 규칙(422)이 아니라 VALIDATION_ERROR 400이고, false는 여전히 BUSINESS_INVARIANT 422이다", () => {
     const { deps, correctRequest, netDelivered, fulfillmentCorrections } = correctionScene();
     const before = netDelivered();

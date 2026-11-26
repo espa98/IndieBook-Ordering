@@ -10,7 +10,7 @@ import type { StockMovementRepository } from "../inventory/registerInitialStock"
 import type { StockReservationRepository } from "../inventory/stockReservation";
 import type { OrderRepository } from "../order/confirmOrderService";
 import { invalid, isNonEmptyString, parseUtcTimestamp } from "../procurement/validation";
-import type { FulfillmentRepository, FulfillmentSource } from "./postFulfillment";
+import { validateFulfillmentSources, type FulfillmentRepository, type FulfillmentSource } from "./postFulfillment";
 
 /**
  * 수령 오기록 정정 기록 (추가 전용, ST-F02, D21). 원 수령은 보존하고 음수 보정 행을 수령·인도 원장에 추가한다.
@@ -81,6 +81,7 @@ export function correctFulfillment(
   if (!Array.isArray(request.restorations) || request.restorations.length === 0) {
     invalid("restorations", "must be a non-empty array");
   }
+  validateFulfillmentSources("restorations", request.restorations);
   for (const field of ["reason", "evidence", "correctedBy"] as const) {
     if (!isNonEmptyString(request[field])) {
       invalid(field, "must be a non-empty string");

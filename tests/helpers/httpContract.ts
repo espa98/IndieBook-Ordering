@@ -41,3 +41,36 @@ export async function loadOperations() {
   }
   return ops;
 }
+
+export const OMIT = Symbol("omit");
+/** 필드의 스키마에서 경계값을 만든다 */
+export function mutations(name: string, schema: Json): { label: string; value: unknown }[] {
+  const out: { label: string; value: unknown }[] = [];
+  const add = (label: string, value: unknown) => out.push({ label, value });
+  if (schema.enum) add("없는 enum 값", "BOGUS");
+  switch (schema.type) {
+    case "integer":
+      for (const v of [0, -1, 1.5, "1", null]) add(`정수 자리에 ${JSON.stringify(v)}`, v);
+      break;
+    case "boolean":
+      for (const v of ["true", 1, null]) add(`불리언 자리에 ${JSON.stringify(v)}`, v);
+      break;
+    case "array":
+      add("배열 자리에 문자열", "x");
+      add("빈 배열", []);
+      break;
+    case "object":
+      add("객체 자리에 문자열", "x");
+      break;
+    case "string":
+      add("빈 문자열", "");
+      add("문자열 자리에 숫자", 123);
+      add("문자열 자리에 null", null);
+      if (/Krw$/.test(name)) for (const v of ["0", "-5", "1.5", "abc", "012", "1".repeat(16)]) add(`금액 ${JSON.stringify(v).slice(0, 12)}`, v);
+      if (schema.format === "date-time") for (const v of ["not-a-date", "2026-03-04", "2999-01-01T00:00:00.000Z"]) add(`시각 ${JSON.stringify(v)}`, v);
+      if (schema.format === "date") for (const v of ["2026-13-45", "not-a-date"]) add(`날짜 ${JSON.stringify(v)}`, v);
+      if (schema.format === "uuid") add("uuid 아님", "not-a-uuid");
+      break;
+  }
+  return out;
+}

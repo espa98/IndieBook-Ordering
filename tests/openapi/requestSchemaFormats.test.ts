@@ -91,4 +91,15 @@ describe("요청 스키마의 형식 제약이 서버의 입력 검증과 같다
       book("가격 문자", { source: "MANUAL", reason: "r" }, "abc"),
     ])).toEqual([]);
   });
+
+  it("도서 등록 isbn: 하이픈·공백을 제거한 값이 13자리 숫자 또는 9자리 숫자 + 숫자/X (경계 입력 비교)", async () => {
+    const withIsbn = (isbn: unknown): Case => ({ label: `isbn=${JSON.stringify(isbn)}`, body: { source: "MANUAL", title: "ISBN 책", listPriceKrw: "12000", reason: "수기 등록", registeredAt: PAST, isbn } });
+    expect(await agree("/books", "/books", [
+      withIsbn("9788960901234"), withIsbn("978-89-6090-123-4"), withIsbn("978 89 6090 123 4"), withIsbn(" 9788960901235 "),
+      withIsbn("089601234X"), withIsbn("0-8960-1234-X"), withIsbn("0896012345"),
+      withIsbn("X089601234"), withIsbn("97889609012X4"), withIsbn("123"), withIsbn("97889609012345"), withIsbn("08960123"),
+      withIsbn("---"), withIsbn(" "), withIsbn("abcdefghij"), withIsbn("089601234x"),
+    ])).toEqual([]);
+  });
 });
+

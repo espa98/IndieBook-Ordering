@@ -110,6 +110,23 @@ describe("updateBook: 도서 정보 수정 (ST-B03, BOOK-003/007)", () => {
     expect(deps.books.get("tenant-a", book.id)!.version).toBe(2);
   });
 
+  it("changes에 제공된 필드(title·authors·isbn·listPriceKrw)가 null이거나 형식이 틀리면 기존 값으로 바뀌어 통과하거나 버전 충돌(409)로 흐르지 않고 먼저 VALIDATION_ERROR 400이며 아무것도 바뀌지 않는다", () => {
+    const { deps, revisions, updateRequest, book } = updateScene();
+
+    for (const changes of [
+      { title: null }, { title: 123 }, { title: "" },
+      { authors: "x" }, { authors: [123] }, { authors: [null] }, { authors: [""] },
+      { isbn: null }, { isbn: 123 }, { isbn: "" },
+      { listPriceKrw: null }, { listPriceKrw: 15000 }, { listPriceKrw: "0" },
+    ]) {
+      // 버전이 틀린 요청이어도 형식 오류가 먼저 보고된다(조회·버전 확인보다 앞선 입력 검증)
+      expect(codeOf(() => updateBook(deps, updateRequest({ changes: changes as never, expectedVersion: 9 }))), JSON.stringify(changes)).toBe("VALIDATION_ERROR");
+      expect(codeOf(() => updateBook(deps, updateRequest({ changes: changes as never }))), JSON.stringify(changes)).toBe("VALIDATION_ERROR");
+    }
+    expect(revisions).toEqual([]);
+    expect(deps.books.get("tenant-a", book.id)!.version).toBe(1);
+  });
+
   it("ISBN을 다른 도서와 같게 바꾸면 중복 후보로 거부하고 확인 표시가 있으면 허용하며, 자기 자신의 ISBN을 그대로 두는 수정은 중복이 아니다", () => {
     const { deps, book, manualRequest, updateRequest } = updateScene();
     const other = registerBook(deps, manualRequest({ isbn: "9780000000002" }));

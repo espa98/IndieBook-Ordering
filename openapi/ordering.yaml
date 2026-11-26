@@ -272,11 +272,15 @@ components:
       properties:
         bookId:
           type: string
+          minLength: 1
         quantity:
           type: integer
           minimum: 1
         unitPriceKrw:
-          $ref: "#/components/schemas/KrwAmount"
+          type: string
+          description: 요청의 금액은 `KrwAmount` 형식이되 서버가 15자리(`INPUT_LIMITS.maxMoneyDigits`)를 넘으면 400으로 거부한다. 응답의 금액(합계 등)은 이 상한과 무관해 `KrwAmount`를 그대로 쓴다.
+          pattern: "^(0|[1-9][0-9]{0,14})$"
+          examples: ["15000"]
 
     OrderLine:
       type: object

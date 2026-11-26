@@ -60,6 +60,20 @@ export function updateBook(deps: UpdateBookDeps, request: UpdateBookRequest): Bo
   if (!["title", "authors", "isbn", "listPriceKrw"].some((k) => k in changes)) {
     invalid("changes", "at least one field must change");
   }
+  // 제공된 필드는 병합하기 전에 형식을 검증한다. 병합은 `changes.x ?? book.x`라서 null이 기존 값으로 바뀌어 검증을 우회하고,
+  // 조회·버전 확인 뒤에 검증하면 형식 오류가 409로 흐른다. `undefined`만 "생략"이고 null은 제공된 것으로 본다
+  const provided = changes as Record<string, unknown>;
+  if ("title" in provided && !isNonEmptyString(provided.title)) invalid("title", "must be a non-empty string");
+  if ("listPriceKrw" in provided && (typeof provided.listPriceKrw !== "string" || !/^[1-9]\d*$/.test(provided.listPriceKrw))) {
+    invalid("listPriceKrw", "must be a positive integer string in KRW");
+  }
+  if ("authors" in provided && (!Array.isArray(provided.authors) || !provided.authors.every(isNonEmptyString))) {
+    invalid("authors", "must be an array of non-empty strings");
+  }
+  if ("isbn" in provided) {
+    if (typeof provided.isbn !== "string") invalid("isbn", "must be a 10 or 13 digit ISBN");
+    else normalizeIsbn(provided.isbn);
+  }
   // 중복 확인 표시는 생략할 수 있지만, 제공했다면 확인한 도서의 ID(비어 있지 않은 문자열)여야 한다
   if (request.acknowledgeDuplicateOf !== undefined && !isNonEmptyString(request.acknowledgeDuplicateOf)) {
     invalid("acknowledgeDuplicateOf", "must be a non-empty string when provided");

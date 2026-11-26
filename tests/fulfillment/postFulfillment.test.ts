@@ -148,6 +148,26 @@ describe("postFulfillment: 수령(인도) 등록 (ST-F01, UC-13, FUL-001/002, DE
     expect(deps.stockReservationDeliveries.list("tenant-a", reservation.id)).toEqual([]);
   });
 
+  it("출처(sources[])의 원소가 객체가 아니면(null·문자열·숫자) 내부 오류(TypeError)가 아니라 VALIDATION_ERROR 400이고 아무것도 기록되지 않는다", () => {
+    const { deps, orderD, reservation, pay, fulfillRequest, fulfillments } = fulfillmentScene();
+    pay(orderD.id, "30000");
+    const good = { kind: "STOCK_RESERVATION" as const, sourceId: reservation.id, quantity: 1 };
+
+    for (const bad of [null, "x", 5, true, undefined]) {
+      for (const sources of [[bad], [good, bad]]) {
+        let thrown: unknown;
+        try {
+          postFulfillment(deps, fulfillRequest({ sources } as never));
+        } catch (error) {
+          thrown = error;
+        }
+        expect(thrown, JSON.stringify(sources)).toBeInstanceOf(AppError);
+        expect((thrown as AppError).code, JSON.stringify(sources)).toBe("VALIDATION_ERROR");
+      }
+    }
+    expect(fulfillments.list("tenant-a", orderD.id)).toEqual([]);
+  });
+
   it("수령 품목 ID(orderLineId)가 비어 있지 않은 문자열이 아니면(빈 문자열·숫자·null·누락) 품목 조회(404)보다 먼저 VALIDATION_ERROR 400이고 아무것도 기록되지 않는다", () => {
     const { deps, orderD, pay, fulfillRequest, fulfillments } = fulfillmentScene();
     pay(orderD.id, "30000");

@@ -237,5 +237,52 @@ describe("판단 불가였던 거부 입력을 대상이 존재하는 요청으�
     // 거부된 요청이 배정을 소모하지 않았다: 유효한 입력은 만들어진다
     expect((await call("POST", "/purchase-orders", { supplierCode: supplier, allocationIds: [allocation.id] })).status).toBe(201);
   });
+
+  it("중첩 필드(수령 정정의 restorations[], 도서 수정의 changes): 스키마가 거부하는 입력을 실제 수령·도서에 보내면 서버가 모두 400이다", async () => {
+    const world = await buildWorld();
+    const ops = await loadOperations();
+    const ajv = new Ajv2020({ strict: false, allErrors: true });
+    ajv.addFormat("date-time", (v) => /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z$/.test(v) && !Number.isNaN(Date.parse(v)));
+    const cases: { route: string; path: string; base: Record<string, unknown>; mutate: [string, (b: any, v: unknown) => void, unknown[]][] }[] = [
+      {
+        route: "/orders/{orderId}/fulfillments/{fulfillmentId}/corrections",
+        path: `/orders/${world.orderId}/fulfillments/${world.fulfillmentId}/corrections`,
+        base: { quantity: 1, restorations: [{ kind: "STOCK_RESERVATION", sourceId: MISSING, quantity: 1 }], reason: "정정", evidence: "증빙", physicalReturnConfirmed: true, correctedAt: PAST },
+        mutate: [
+          ["restorations[].kind", (b, v) => (b.restorations[0].kind = v), ["BOGUS", "", 123, null]],
+          ["restorations[].sourceId", (b, v) => (b.restorations[0].sourceId = v), ["", 123, null]],
+          ["restorations[].quantity", (b, v) => (b.restorations[0].quantity = v), [0, -1, 1.5, "1", null]],
+        ],
+      },
+      {
+        route: "/books/{bookId}/updates",
+        path: `/books/${world.bookId}/updates`,
+        base: { expectedVersion: 1, changes: { title: "새 제목" }, reason: "r", changedAt: PAST },
+        mutate: [
+          ["changes.title", (b, v) => (b.changes = { title: v }), ["", 123, null]],
+          ["changes.authors", (b, v) => (b.changes = { authors: v }), ["x", [""], [123], [null]]],
+          ["changes.isbn", (b, v) => (b.changes = { isbn: v }), ["", 123, null, "abc"]],
+          ["changes.listPriceKrw", (b, v) => (b.changes = { listPriceKrw: v }), ["0", "-5", "1.5", "abc", "012", "1".repeat(16), 123, null]],
+        ],
+      },
+    ];
+    const problems: string[] = [];
+    let checked = 0;
+    for (const c of cases) {
+      const schema = ops.get(`POST /v1/tenants/{tenantId}${c.route}`)!.requestBody.content["application/json"].schema as Json;
+      for (const [field, apply, values] of c.mutate) {
+        for (const value of values) {
+          const body = JSON.parse(JSON.stringify(c.base));
+          apply(body, value);
+          if (ajv.validate(schema, body)) continue; // 스키마가 받아들이는 입력은 이 테스트의 대상이 아니다
+          checked++;
+          const { status, body: res } = await call("POST", c.path, body);
+          if (status !== 400) problems.push(`${c.route} ${field}=${JSON.stringify(value)} -> ${status} ${JSON.stringify(res)}`);
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(25);
+    expect(problems).toEqual([]);
+  });
 });
 

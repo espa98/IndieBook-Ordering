@@ -34,6 +34,28 @@ export type FulfillmentSource = {
   quantity: number;
 };
 
+/**
+ * 수령(`sources`)과 수령 정정(`restorations`)이 같은 모양의 출처 목록을 받는다. 원소가 객체가 아니면(null·문자열·숫자) 속성 접근이
+ * TypeError로 샐 수 있으므로 먼저 거른다. `field`는 오류 메시지에 쓸 목록 이름이다.
+ */
+export function validateFulfillmentSources(field: string, sources: readonly unknown[]): void {
+  for (const source of sources) {
+    if (source === null || typeof source !== "object" || Array.isArray(source)) {
+      invalid(field, "each element must be an object");
+    }
+    const s = source as Record<string, unknown>;
+    if (s.kind !== "STOCK_RESERVATION" && s.kind !== "RECEIPT_ALLOCATION") {
+      invalid(`${field}.kind`, "must be STOCK_RESERVATION or RECEIPT_ALLOCATION");
+    }
+    if (!isNonEmptyString(s.sourceId)) {
+      invalid(`${field}.sourceId`, "must be a non-empty string");
+    }
+    if (!Number.isInteger(s.quantity) || (s.quantity as number) < 1) {
+      invalid(`${field}.quantity`, "must be an integer >= 1");
+    }
+  }
+}
+
 /** 수령(인도) 거래 (추가 전용, ST-F01). 인도한 출처와 당시 단가 스냅샷을 보존한다. */
 export type Fulfillment = {
   id: string;
@@ -88,17 +110,7 @@ export function postFulfillment(
   if (!Array.isArray(request.sources) || request.sources.length === 0) {
     invalid("sources", "must be a non-empty array");
   }
-  for (const source of request.sources) {
-    if (source.kind !== "STOCK_RESERVATION" && source.kind !== "RECEIPT_ALLOCATION") {
-      invalid("sources.kind", "must be STOCK_RESERVATION or RECEIPT_ALLOCATION");
-    }
-    if (!isNonEmptyString(source.sourceId)) {
-      invalid("sources.sourceId", "must be a non-empty string");
-    }
-    if (!Number.isInteger(source.quantity) || source.quantity < 1) {
-      invalid("sources.quantity", "must be an integer >= 1");
-    }
-  }
+  validateFulfillmentSources("sources", request.sources);
   if (!isNonEmptyString(request.receivedBy)) {
     invalid("receivedBy", "must be a non-empty string");
   }

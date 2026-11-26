@@ -2087,10 +2087,10 @@ paths:
                   then: { required: [externalId, fetchedAt] }
               properties:
                 source: { type: string, enum: [MANUAL, YES24] }
-                title: { type: string }
+                title: { type: string, minLength: 1 }
                 authors: { type: array, items: { type: string } }
-                isbn: { type: string }
-                listPriceKrw: { type: string, pattern: '^[1-9][0-9]*$' }
+                isbn: { type: string, pattern: '^[-\s]*(?:(?:[0-9][-\s]*){13}|(?:[0-9][-\s]*){9}[0-9X][-\s]*)$' }
+                listPriceKrw: { type: string, pattern: '^[1-9][0-9]{0,14}$' }
                 externalId: { type: string, minLength: 1 }
                 fetchedAt: { type: string, format: date-time }
                 reason: { type: string, minLength: 1 }
@@ -2254,10 +2254,10 @@ paths:
                   type: object
                   minProperties: 1
                   properties:
-                    title: { type: string }
+                    title: { type: string, minLength: 1 }
                     authors: { type: array, items: { type: string } }
-                    isbn: { type: string }
-                    listPriceKrw: { type: string, pattern: '^[1-9][0-9]*$' }
+                    isbn: { type: string, pattern: '^[-\s]*(?:(?:[0-9][-\s]*){13}|(?:[0-9][-\s]*){9}[0-9X][-\s]*)$' }
+                    listPriceKrw: { type: string, pattern: '^[1-9][0-9]{0,14}$' }
                 reason: { type: string, minLength: 1 }
                 acknowledgeDuplicateOf: { type: string, format: uuid }
                 changedAt: { type: string, format: date-time }
@@ -2663,7 +2663,7 @@ paths:
                   type: object
                   minProperties: 1
                   properties:
-                    name: { type: string }
+                    name: { type: string, minLength: 1 }
                     orderChannel: { type: string, enum: [API, EMAIL, FILE, MESSENGER, PHONE, WEB] }
                 reason: { type: string, minLength: 1 }
                 changedAt: { type: string, format: date-time }

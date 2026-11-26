@@ -4,7 +4,7 @@ import { createApp } from "../../src/http/app";
 import type { IsolatedPostgres } from "../helpers/isolatedPostgres";
 import { signHs256 } from "../helpers/jwtSign";
 import { startMigratedPostgres } from "../helpers/migratedPostgres";
-import { loadOperations, MISSING, sampleBody, specKey, type Json } from "../helpers/httpContract";
+import { loadOperations, MISSING, mutations, OMIT, sampleBody, specKey, type Json } from "../helpers/httpContract";
 
 /**
  * 요청 스키마와 서버 입력 검증의 일치를 모든 서점 범위 POST 경로의 모든 최상위 필드에서 확인한다.
@@ -37,39 +37,6 @@ const send = async (template: string, body: Record<string, unknown>) => {
   const response = await app({ method: "POST", path, query: new URLSearchParams(), headers: { authorization: `Bearer ${token}`, "idempotency-key": `agree-${++seq}`, "content-type": "application/json" }, rawBody: JSON.stringify(body) });
   return { status: response.status, message: (response.body as any)?.error?.message as string | undefined };
 };
-
-const OMIT = Symbol("omit");
-/** 필드의 스키마에서 경계값을 만든다 */
-function mutations(name: string, schema: Json): { label: string; value: unknown }[] {
-  const out: { label: string; value: unknown }[] = [];
-  const add = (label: string, value: unknown) => out.push({ label, value });
-  if (schema.enum) add("없는 enum 값", "BOGUS");
-  switch (schema.type) {
-    case "integer":
-      for (const v of [0, -1, 1.5, "1", null]) add(`정수 자리에 ${JSON.stringify(v)}`, v);
-      break;
-    case "boolean":
-      for (const v of ["true", 1, null]) add(`불리언 자리에 ${JSON.stringify(v)}`, v);
-      break;
-    case "array":
-      add("배열 자리에 문자열", "x");
-      add("빈 배열", []);
-      break;
-    case "object":
-      add("객체 자리에 문자열", "x");
-      break;
-    case "string":
-      add("빈 문자열", "");
-      add("문자열 자리에 숫자", 123);
-      add("문자열 자리에 null", null);
-      if (/Krw$/.test(name)) for (const v of ["0", "-5", "1.5", "abc", "012", "1".repeat(16)]) add(`금액 ${JSON.stringify(v).slice(0, 12)}`, v);
-      if (schema.format === "date-time") for (const v of ["not-a-date", "2026-03-04", "2999-01-01T00:00:00.000Z"]) add(`시각 ${JSON.stringify(v)}`, v);
-      if (schema.format === "date") for (const v of ["2026-13-45", "not-a-date"]) add(`날짜 ${JSON.stringify(v)}`, v);
-      if (schema.format === "uuid") add("uuid 아님", "not-a-uuid");
-      break;
-  }
-  return out;
-}
 
 describe("요청 스키마와 서버 입력 검증의 일치 (모든 경로·모든 최상위 필드)", () => {
   it("스키마가 거부하는 입력은 서버도 400이고, 스키마가 받아들이는 입력은 서버가 400이 아니며, 서버는 5xx를 내지 않는다", async () => {
