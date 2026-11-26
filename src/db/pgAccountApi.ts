@@ -2,7 +2,7 @@ import type { AccountPrincipal } from "../auth/accountPrincipal";
 import type { Membership } from "../auth/authorizeTenantAccess";
 import { openStore, type OpenStoreRequest, type Tenant } from "../auth/openStore";
 import type { IdempotencyStore } from "../idempotency/executeIdempotent";
-import { inTransaction, type PoolLike } from "./pgSupport";
+import { deleteStaleCommands, inTransaction, RESULT_SCHEMA_VERSION, type PoolLike } from "./pgSupport";
 
 /** 인증 제공자가 확인한 계정: 사용자 ID와 토큰의 이메일 claim */
 type Account = { userId: string; email: string };
@@ -28,8 +28,11 @@ export function createPgAccountApi(deps: { pool: PoolLike }) {
       const idempotency: IdempotencyStore = new Map();
       const commandKey = `${account.userId}:${request.idempotencyKey}`;
       if (typeof request.idempotencyKey === "string" && request.idempotencyKey.trim() !== "") {
-        const prior = (await client.query("select payload_hash, result from public.ordering_commands where operation = $1 and command_key = $2", [OPEN_STORE, commandKey])).rows[0];
-        if (prior) idempotency.set(storeKey(commandKey), { payloadHash: prior.payload_hash, result: prior.result });
+        const prior = (await client.query("select payload_hash, result, result_version from public.ordering_commands where operation = $1 and command_key = $2", [OPEN_STORE, commandKey])).rows[0];
+        if (prior && prior.result_version < RESULT_SCHEMA_VERSION) {
+          // 옛 결과 형태의 기록은 삭제하고 없는 것으로 본다(호환 정책: 변환하지 않는다)
+          await deleteStaleCommands(client, null, [{ operation: OPEN_STORE, command_key: commandKey }]);
+        } else if (prior) idempotency.set(storeKey(commandKey), { payloadHash: prior.payload_hash, result: prior.result });
       }
       const known = new Set(idempotency.keys());
       const principal: AccountPrincipal = { kind: "ACCOUNT", userId: account.userId, email: account.email, verified: typeof account.email === "string" && account.email.trim() !== "" };
@@ -47,7 +50,7 @@ export function createPgAccountApi(deps: { pool: PoolLike }) {
       for (const [entryKey, entry] of idempotency) {
         if (known.has(entryKey)) continue;
         const [, , key] = JSON.parse(entryKey) as [string, string, string];
-        await client.query("insert into public.ordering_commands (tenant_id, operation, command_key, payload_hash, result) values ($1, $2, $3, $4, $5::jsonb)", [result.tenant.id, OPEN_STORE, key, entry.payloadHash, JSON.stringify(entry.result)]);
+        await client.query("insert into public.ordering_commands (tenant_id, operation, command_key, payload_hash, result, result_version) values ($1, $2, $3, $4, $5::jsonb, $6)", [result.tenant.id, OPEN_STORE, key, entry.payloadHash, JSON.stringify(entry.result), RESULT_SCHEMA_VERSION]);
       }
       return result;
     });

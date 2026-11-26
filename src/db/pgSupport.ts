@@ -130,16 +130,34 @@ export function principalFor(memberships: Membership[], userId: string, tenantId
 
 const commandKey = (tenantId: string, operation: string, key: string) => JSON.stringify([tenantId, operation, key]);
 
+/**
+ * 멱등 기록에 저장하는 결과의 형태 버전. 결과 JSON의 형태를 바꾸는 변경은 이 값을 올린다.
+ * 낮은 버전의 기록은 읽을 때 삭제하고 없는 것으로 본다(오래된 기록 호환 정책, 026 마이그레이션).
+ */
+export const RESULT_SCHEMA_VERSION = 1;
+
+export async function deleteStaleCommands(client: PoolClient, tenantId: string | null, stale: { operation: string; command_key: string }[]): Promise<void> {
+  for (const r of stale) {
+    await client.query(
+      "delete from public.ordering_commands where operation = $1 and command_key = $2 and result_version < $3 and ($4::uuid is null or tenant_id = $4::uuid)",
+      [r.operation, r.command_key, RESULT_SCHEMA_VERSION, tenantId],
+    );
+  }
+}
+
 export async function loadCommands(client: PoolClient, tenantId: string, key: unknown): Promise<IdempotencyStore> {
   const store: IdempotencyStore = new Map();
   if (!isUuid(tenantId) || typeof key !== "string" || key.trim() === "") return store;
   const rows = (
     await client.query(
-      "select operation, command_key, payload_hash, result from public.ordering_commands where tenant_id = $1 and command_key = $2",
+      "select operation, command_key, payload_hash, result, result_version from public.ordering_commands where tenant_id = $1 and command_key = $2",
       [tenantId, key],
     )
   ).rows;
+  // 옛 결과 형태의 기록은 삭제하고 없는 것으로 본다(호환 정책: 변환하지 않는다)
+  await deleteStaleCommands(client, tenantId, rows.filter((r) => r.result_version < RESULT_SCHEMA_VERSION));
   for (const r of rows) {
+    if (r.result_version < RESULT_SCHEMA_VERSION) continue;
     store.set(commandKey(tenantId, r.operation, r.command_key), { payloadHash: r.payload_hash, result: r.result });
   }
   return store;
@@ -151,8 +169,8 @@ export async function saveNewCommands(client: PoolClient, store: IdempotencyStor
     if (known.has(storeKey)) continue;
     const [tenantId, operation, key] = JSON.parse(storeKey) as [string, string, string];
     await client.query(
-      "insert into public.ordering_commands (tenant_id, operation, command_key, payload_hash, result) values ($1, $2, $3, $4, $5::jsonb)",
-      [tenantId, operation, key, entry.payloadHash, JSON.stringify(entry.result)],
+      "insert into public.ordering_commands (tenant_id, operation, command_key, payload_hash, result, result_version) values ($1, $2, $3, $4, $5::jsonb, $6)",
+      [tenantId, operation, key, entry.payloadHash, JSON.stringify(entry.result), RESULT_SCHEMA_VERSION],
     );
   }
 }
