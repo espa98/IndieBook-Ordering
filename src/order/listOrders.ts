@@ -2,9 +2,9 @@ import { AppError } from "../errors/AppError";
 import type { OrderRepository } from "./confirmOrderService";
 import type { Order } from "./createDraftOrder";
 
-const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 100;
-const ORDER_STATUSES: readonly Order["status"][] = ["DRAFT", "CONFIRMED"];
+export const DEFAULT_LIMIT = 20;
+export const MAX_LIMIT = 100;
+export const ORDER_STATUSES: readonly Order["status"][] = ["DRAFT", "CONFIRMED"];
 
 export type OrderSummary = Pick<
   Order,
@@ -24,7 +24,8 @@ function encodeCursor(key: SortKey): string {
   return btoa(JSON.stringify([key.createdAt, key.id]));
 }
 
-function decodeCursor(cursor: string): SortKey {
+/** 목록 커서를 (createdAt, id)로 해석한다. 형식이 틀리면 VALIDATION_ERROR. 영속화 계층이 SQL 페이지네이션에 같은 해석을 쓴다 */
+export function decodeCursor(cursor: string): SortKey {
   let parsed: unknown;
   try {
     parsed = JSON.parse(atob(cursor));

@@ -204,19 +204,50 @@ export function toOrder(row: OrderRow, lines: LineRow[]): Order {
   };
 }
 
-/** 주문과 품목을 적재한다. `lock`이 있으면 행을 잠근다(update: 변경 예정, share: 변경만 막음). */
+export type OrderPage = {
+  /** 한 페이지 크기. 다음 페이지 유무를 알려고 하나 더 읽는다 */
+  limit: number;
+  status?: Order["status"];
+  /** 이 키보다 뒤(더 오래된)의 주문만. (createdAt, id) 내림차순 */
+  after?: { createdAt: string; id: string };
+};
+
+/**
+ * 주문과 품목을 적재한다. `lock`이 있으면 행을 잠근다(update: 변경 예정, share: 변경만 막음).
+ * `page`가 있으면 최신순(created_at, id 내림차순) 한 페이지(+1건)만 읽는다.
+ */
 export async function loadOrders(
   client: PoolClient,
   tenantId: string,
-  options: { orderId?: string; lock?: "update" | "share" },
+  options: { orderId?: string; lock?: "update" | "share"; page?: OrderPage },
 ): Promise<Order[]> {
   if (!isUuid(tenantId) || (options.orderId !== undefined && !isUuid(options.orderId))) return [];
+  const params: unknown[] = [tenantId];
+  const where: string[] = ["tenant_id = $1"];
+  let tail = "";
+  if (options.orderId !== undefined) {
+    params.push(options.orderId);
+    where.push(`id = $${params.length}`);
+  }
+  if (options.page) {
+    const { page } = options;
+    if (page.status !== undefined) {
+      params.push(page.status);
+      where.push(`status = $${params.length}`);
+    }
+    if (page.after) {
+      params.push(page.after.createdAt, page.after.id);
+      where.push(`(created_at, id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`);
+    }
+    params.push(page.limit + 1);
+    tail = `order by created_at desc, id desc limit $${params.length}`;
+  }
   const orders = (
     await client.query<OrderRow>(
-      `select * from public.ordering_orders where tenant_id = $1 ${options.orderId === undefined ? "" : "and id = $2"} ${
+      `select * from public.ordering_orders where ${where.join(" and ")} ${tail} ${
         options.lock === "update" ? "for update" : options.lock === "share" ? "for share" : ""
       }`,
-      options.orderId === undefined ? [tenantId] : [tenantId, options.orderId],
+      params,
     )
   ).rows;
   if (orders.length === 0) return [];

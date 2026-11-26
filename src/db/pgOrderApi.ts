@@ -2,6 +2,7 @@ import type { PoolClient } from "pg";
 import type { Book } from "../catalog/registerBook";
 import { AppError } from "../errors/AppError";
 import type { Order } from "../order/createDraftOrder";
+import { DEFAULT_LIMIT, MAX_LIMIT, ORDER_STATUSES, decodeCursor } from "../order/listOrders";
 import { createOrderApi } from "../order/orderApi";
 import {
   inTransaction,
@@ -10,6 +11,7 @@ import {
   loadCommands,
   loadMembership,
   loadOrders,
+  type OrderPage,
   saveNewCommands,
   type PoolLike,
 } from "./pgSupport";
@@ -63,6 +65,28 @@ export async function saveOrder(client: PoolClient, order: Order, before: Order 
 }
 
 type Actor = { userId: string };
+
+/**
+ * 목록 요청을 SQL 페이지로 바꾼다. 형식이 틀린 요청(한도·상태·커서)과 DB에 있을 수 없는 커서는 "none"이다:
+ * 도메인이 인증을 확인한 뒤 같은 검증 오류로 거부하므로 순서가 전과 같고, 전체 적재를 강제할 수도 없다.
+ */
+function pageOf(request: { limit?: number; cursor?: string; status?: Order["status"] }): OrderPage | "none" {
+  const limit = request.limit ?? DEFAULT_LIMIT;
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) return "none";
+  if (request.status !== undefined && !ORDER_STATUSES.includes(request.status)) return "none";
+  let after: OrderPage["after"];
+  if (request.cursor !== undefined) {
+    try {
+      const key = decodeCursor(request.cursor);
+      const canonical = !Number.isNaN(Date.parse(key.createdAt)) && new Date(key.createdAt).toISOString() === key.createdAt;
+      if (!canonical || !isUuid(key.id)) return "none";
+      after = key;
+    } catch {
+      return "none";
+    }
+  }
+  return { limit, ...(request.status !== undefined ? { status: request.status } : {}), ...(after ? { after } : {}) };
+}
 
 /**
  * 기존 동기 `createOrderApi`를 Postgres 영속화 위에서 실행한다 (E7 권고안 a).
@@ -132,12 +156,14 @@ export function createPgOrderApi(deps: { pool: PoolLike }) {
     actor: Actor,
     request: { tenantId: string; orderId?: string },
     call: (api: ReturnType<typeof createOrderApi>) => T,
+    /** 목록 읽기: 한 페이지만 SQL로 적재한다. "none"이면 적재하지 않는다(요청이 잘못돼 도메인이 권한 확인 뒤 거부한다) */
+    page?: OrderPage | "none",
   ): Promise<T> {
     // 읽기는 authenticated 역할로 실행해 RLS가 서점·활성 멤버십을 한 번 더 걸러 준다
     const userId = isUuid(actor.userId) ? actor.userId : "";
     return inTransaction(deps.pool, userId === "" ? "service_role" : "authenticated", userId, async (client) => {
       const memberships = userId === "" ? [] : await loadMembership(client, userId, request.tenantId);
-      const loaded = userId === "" ? [] : await loadOrders(client, request.tenantId, { orderId: request.orderId });
+      const loaded = userId === "" || page === "none" ? [] : await loadOrders(client, request.tenantId, { orderId: request.orderId, ...(page ? { page } : {}) });
       const api = createOrderApi({
         orders: {
           get: (tenantId, orderId) => loaded.find((o) => o.id === orderId && o.tenantId === tenantId),
@@ -165,6 +191,6 @@ export function createPgOrderApi(deps: { pool: PoolLike }) {
     getOrder: (actor: Actor, request: { tenantId: string; orderId: string }) =>
       read(actor, request, (api) => api.getOrder(actor, request)),
     listOrders: (actor: Actor, request: Parameters<ReturnType<typeof createOrderApi>["listOrders"]>[1]) =>
-      read(actor, request, (api) => api.listOrders(actor, request)),
+      read(actor, request, (api) => api.listOrders(actor, request), pageOf(request)),
   };
 }
