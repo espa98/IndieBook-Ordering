@@ -12,11 +12,11 @@
 
 ## 2. UI 1차 범위: 실제 API에 연결할 수 있는 화면
 
-서버 근거는 `tests/db`·`tests/openapi`(격리 Postgres, 실제 서명 JWT, 전 경로 계약·권한·롤백 검증, 전체 166개 파일 1481개 테스트 통과)다. 계약은 `openapi/ordering.yaml`(주문 4)과 `openapi/ordering-http.yaml`(나머지, 총 83개 연산)이며 **미검증 엔드포인트는 호출하지 않는다**.
+서버 근거는 `tests/db`·`tests/openapi`(격리 Postgres, 실제 서명 JWT, 전 경로 계약·권한·롤백 검증, 전체 168개 파일 1486개 테스트 통과)다. 계약은 `openapi/ordering.yaml`(주문 4)과 `openapi/ordering-http.yaml`(나머지, 총 83개 연산)이며 **미검증 엔드포인트는 호출하지 않는다**.
 
 | Bolt 단계 | 화면 | 실제 API 연결 | 비고 |
 |---|---|---|---|
-| 02 인증 | A-04 서점 개설, A-06 초대 수락 | `POST /v1/stores`, `POST /v1/invitations/accept` | 로그인·회원가입·비밀번호·이메일 인증(A-01~03, 07)은 Supabase Auth가 담당(서버 API 없음) |
+| 02 인증 | A-04 서점 개설, A-05 서점 선택, A-06 초대 수락 | `POST /v1/stores`, `GET /v1/me/memberships`, `POST /v1/invitations/accept` | 로그인·회원가입·비밀번호·이메일 인증(A-01~03, 07)은 Supabase Auth가 담당(서버 API 없음) |
 | 04 도서 | B-02~05 도서 목록·상세·수기 등록·수정·이력 | `GET/POST /books`, `GET /books/{id}`, `/updates`, `GET /books/{id}/revisions` | YES24 검색(B-01)은 서버 없음 → 비활성 |
 | 05 주문 | O-02 목록, O-03 신규, O-04 상세, 확정, **보류·재개·폐기** | `GET/POST /orders`, `GET /orders/{id}`, `/confirm`, `/hold`, `/resume`, `/discard`, `GET /orders/{id}/history` | 목록은 폐기 초안 기본 제외(`includeDiscarded`), 커서 페이지네이션, 상태 `DRAFT`/`CONFIRMED` + 보류·폐기는 필드(`heldAt`·`discardedAt`)로 표시. 고객 선택은 서버 없음 |
 | 06 조달·발주 | O-04-02 조달 배정, O-05 공급처, O-06 발주 현황·작성·전달·회신 | `POST /orders/{id}/lines/{id}/sourcing-allocations`, `/sourcing-allocations/{id}/releases`, `/suppliers*`, `/purchase-orders*`, `/supplier-replies`, 취소 요청·응답·확정, 중복 위험 승인 | 공급처·발주 목록·상세 조회 있음 |
@@ -42,7 +42,7 @@ UI 단계 순서에 맞춰 서버가 먼저 만들 조회 API다. 모두 같은 
 
 | 순서 | 막히는 화면 | 보강 | 크기 |
 |---|---|---|---|
-| 1 | A-05 서점 선택, 앱 셸 | **내 서점 목록·내 역할 조회**(`GET /v1/me/memberships` 류). 지금은 서점 ID를 이미 알아야 한다 | 소 |
+| 1 | A-05 서점 선택, 앱 셸 | ✅ **완료(2026-11-26)** `GET /v1/me/memberships`: 내가 활성 멤버인 서점·이름·내 역할. 보고서 §99 | 소 |
 | 2 | S-02 직원 관리 | **직원·초대 목록 조회**(`GET /members`, `GET /staff-invitations`) | 소 |
 | 3 | O-01 대시보드, O-01-01 예외 큐 | **서버 집계**: 상태별 주문 수, 발주·입고·안내·미수령·미결제·환급 필요·차단 예외 건수와 큐 | 중 |
 | 4 | O-07 입고 현황, O-07-02 배분 | 입고·배분·미배분량 목록·상세 조회(`GET /receipts`, `/receipts/{id}`) | 중 |

@@ -2550,6 +2550,34 @@ paths:
           $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/me/memberships:
+    get:
+      tags: [staff]
+      operationId: listMyMemberships
+      summary: 내 서점 목록 (A-05 서점 선택)
+      description: |
+        로그인한 계정이 **활성** 멤버로 속한 서점과 자기 역할을 서점 이름 순으로 돌려준다. 비활성 멤버십은 나오지 않으며 서점이 없으면 빈 배열이다.
+        대상은 토큰의 사용자 본인뿐이다(서점 ID·역할 claim은 쓰지 않는다). 이메일 claim이 없어도 조회할 수 있다. 서점 범위 경로가 아니다(`/v1/tenants/{tenantId}` 접두어 없음).
+      responses:
+        "200":
+          description: 성공(`data`는 내 서점 배열)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/MyMembership" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/stores:
     post:
       tags: [staff]
@@ -4318,6 +4346,14 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    MyMembership:
+      type: object
+      additionalProperties: false
+      required: [tenantId, tenantName, role]
+      properties:
+        tenantId: { type: string, format: uuid }
+        tenantName: { type: string }
+        role: { type: string, enum: [OWNER, STAFF] }
     OrderEvent:
       type: object
       additionalProperties: false

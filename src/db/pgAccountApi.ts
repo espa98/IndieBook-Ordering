@@ -2,7 +2,10 @@ import type { AccountPrincipal } from "../auth/accountPrincipal";
 import type { Membership } from "../auth/authorizeTenantAccess";
 import { openStore, type OpenStoreRequest, type Tenant } from "../auth/openStore";
 import type { IdempotencyStore } from "../idempotency/executeIdempotent";
-import { deleteStaleCommands, inTransaction, RESULT_SCHEMA_VERSION, type PoolLike } from "./pgSupport";
+import { deleteStaleCommands, inTransaction, isUuid, RESULT_SCHEMA_VERSION, type PoolLike } from "./pgSupport";
+
+/** 서점 선택 목록의 한 줄: 내가 활성 멤버인 서점과 내 역할 */
+export type MyMembership = { tenantId: string; tenantName: string; role: "OWNER" | "STAFF" };
 
 /** 인증 제공자가 확인한 계정: 사용자 ID와 토큰의 이메일 claim */
 type Account = { userId: string; email: string };
@@ -55,5 +58,25 @@ export function createPgAccountApi(deps: { pool: PoolLike }) {
       return result;
     });
 
-  return { openStore: openStoreOnce };
+  /**
+   * 서점 선택(A-05): 로그인한 계정이 **활성** 멤버로 속한 서점과 자기 역할. 비활성 멤버십은 나오지 않는다.
+   * 대상은 요청이 아니라 인증된 사용자 본인뿐이다. 서점 이름 순(같으면 서점 ID).
+   */
+  const listMemberships = (actor: { userId: string }): Promise<MyMembership[]> => {
+    if (!isUuid(actor.userId)) return Promise.resolve([]);
+    return inTransaction(deps.pool, "service_role", actor.userId, async (client) => {
+      const rows = (
+        await client.query(
+          `select t.id as tenant_id, t.name as tenant_name, m.role
+             from public.ordering_members m join public.ordering_tenants t on t.id = m.tenant_id
+            where m.user_id = $1 and m.active
+            order by t.name, t.id`,
+          [actor.userId],
+        )
+      ).rows;
+      return rows.map((r): MyMembership => ({ tenantId: r.tenant_id, tenantName: r.tenant_name, role: r.role }));
+    });
+  };
+
+  return { openStore: openStoreOnce, listMemberships };
 }

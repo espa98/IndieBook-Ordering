@@ -405,6 +405,13 @@ describe("응답 계약(쓰기): 직원 초대·계정", () => {
 
     for (const { template } of checked) expect(declared(template, "post"), `${template} data 스키마`).toBe(true);
     for (const { template, body } of checked) expect(conforms(template, body, "post"), template).toMatchObject({ ok: true });
+
+    // 내 서점 목록(A-05): 방금 연 서점이 Owner로 나온다
+    const mine = await callAs(ownerId, undefined, "GET", "/v1/me/memberships");
+    expect(mine.status).toBe(200);
+    expect(mine.body.data).toEqual([{ tenantId: store.tenant.id, tenantName: "계약 서점", role: "OWNER" }]);
+    expect(declared("/v1/me/memberships", "get"), "내 서점 목록 data 스키마").toBe(true);
+    expect(conforms("/v1/me/memberships", mine.body, "get"), "내 서점 목록").toMatchObject({ ok: true });
   });
 });
 

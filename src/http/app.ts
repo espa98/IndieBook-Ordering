@@ -320,6 +320,11 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       fields: ["outcome", "note", "resultAt"],
       run: (c) => notifications.recordNotificationResult(actor(c), merge(c, { tenantId: t(c), attemptId: c.params.attemptId!, idempotencyKey: c.idempotencyKey })),
     }),
+    accountRoute("GET", "/me/memberships", {
+      success: 200,
+      // 서점 선택(A-05): 대상은 인증된 사용자 본인뿐이다. 이메일 claim은 필요 없다
+      run: (c) => accounts.listMemberships({ userId: c.userId }),
+    }),
     accountRoute("POST", "/stores", {
       success: 201,
       fields: ["storeName"],
