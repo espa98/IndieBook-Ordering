@@ -1277,6 +1277,98 @@ paths:
           $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/receipts:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+    get:
+      tags: [reads]
+      operationId: listReceipts
+      summary: 입고 목록 (O-07)
+      description: |
+        활성 멤버(Owner·직원)가 서점의 입고를 최신 입고 순(검수 시각·ID 내림차순)으로 읽는다. 커서 페이지네이션(기본 20, 최대 100).
+        수량은 입고 원장에서 파생한다: 순정상 = 검수 − 정정, `allocatedQuantity` = 배분 − 해제, `unallocatedQuantity` = 순정상 − 배분.
+        `unallocated=true`면 미배분이 남은 입고만, `purchaseOrderId`면 그 발주의 입고만 돌려준다. 다른 서점의 입고는 나오지 않는다.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: string }
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string }
+        - name: unallocated
+          in: query
+          required: false
+          description: "`true`·`false` 외의 값은 400"
+          schema: { type: string, enum: ["true", "false"] }
+        - name: purchaseOrderId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: 성공(`data`는 입고 요약 페이지)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/ReceiptSummary" } }
+                      nextCursor: { type: string }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/receipts/{receiptId}:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: receiptId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [reads]
+      operationId: getReceipt
+      summary: 입고 상세 (O-07-02)
+      description: |
+        입고 요약과 배분(해제 수량 포함)·검수 정정·불량 처리·초과 결정 이력을 돌려준다. 불량 처리의 증빙 원문은 싣지 않는다.
+        다른 서점의 입고와 없는 입고는 같은 404.
+      responses:
+        "200":
+          description: 성공(`data`는 입고 상세)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/ReceiptDetail" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/orders/{orderId}/history:
     parameters:
       - $ref: "ordering.yaml#/components/parameters/TenantId"
@@ -4450,6 +4542,85 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    ReceiptCore:
+      type: object
+      required: [id, purchaseOrderId, poLineId, bookKey, receivedAt, normalQuantity, correctedQuantity, damagedQuantity, misdeliveredQuantity, excessQuantity, allocatedQuantity, unallocatedQuantity]
+      properties:
+        id: { type: string, format: uuid }
+        purchaseOrderId: { type: string, format: uuid }
+        poLineId: { type: string, format: uuid }
+        bookKey: { type: string }
+        receivedAt: { type: string, format: date-time }
+        normalQuantity: { type: integer, minimum: 0, description: 검수 등록 정상 수량 }
+        correctedQuantity: { type: integer, minimum: 0, description: 검수 정정 합계 }
+        damagedQuantity: { type: integer, minimum: 0 }
+        misdeliveredQuantity: { type: integer, minimum: 0 }
+        excessQuantity: { type: integer, minimum: 0 }
+        allocatedQuantity: { type: integer, minimum: 0, description: 배분 − 해제 }
+        unallocatedQuantity: { type: integer, description: 순정상 − 배분 + 해제 }
+    ReceiptSummary:
+      allOf:
+        - $ref: "#/components/schemas/ReceiptCore"
+      unevaluatedProperties: false
+    ReceiptDetail:
+      unevaluatedProperties: false
+      allOf:
+        - $ref: "#/components/schemas/ReceiptCore"
+        - type: object
+          required: [allocations, corrections, defectResolutions, excessDecisions]
+          properties:
+            allocations:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [id, orderId, orderLineId, quantity, releasedQuantity, allocatedAt, allocatedBy]
+                properties:
+                  id: { type: string, format: uuid }
+                  orderId: { type: string, format: uuid }
+                  orderLineId: { type: string, format: uuid }
+                  quantity: { type: integer, minimum: 1 }
+                  releasedQuantity: { type: integer, minimum: 0 }
+                  allocatedAt: { type: string, format: date-time }
+                  allocatedBy: { type: string }
+            corrections:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [id, quantity, reason, correctedAt, correctedBy]
+                properties:
+                  id: { type: string, format: uuid }
+                  quantity: { type: integer, minimum: 1 }
+                  reason: { type: string }
+                  correctedAt: { type: string, format: date-time }
+                  correctedBy: { type: string }
+            defectResolutions:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [id, kind, quantity, outcome, resolvedAt, resolvedBy]
+                properties:
+                  id: { type: string, format: uuid }
+                  kind: { type: string, enum: [DAMAGED, MISDELIVERED] }
+                  quantity: { type: integer, minimum: 1 }
+                  outcome: { type: string, enum: [RETURNED_TO_SUPPLIER, SUPPLIER_CREDIT, DISCARDED] }
+                  resolvedAt: { type: string, format: date-time }
+                  resolvedBy: { type: string }
+            excessDecisions:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [id, decision, quantity, reason, decidedAt, decidedBy]
+                properties:
+                  id: { type: string, format: uuid }
+                  decision: { type: string, enum: [APPROVED, REJECTED] }
+                  quantity: { type: integer, minimum: 1 }
+                  reason: { type: string }
+                  decidedAt: { type: string, format: date-time }
+                  decidedBy: { type: string }
     Dashboard:
       type: object
       additionalProperties: false

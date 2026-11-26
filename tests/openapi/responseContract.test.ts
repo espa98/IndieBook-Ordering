@@ -263,6 +263,22 @@ describe("응답 계약(쓰기): 입고·배분", () => {
     await write("/allocations/{allocationId}/releases", `/allocations/${allocation.id}/releases`, { quantity: 1, reason: "배분 해제", releasedAt: "2026-03-05T07:50:00.000Z" }, 201);
     await write("/receipts/{receiptId}/corrections", `/receipts/${receipt.id}/corrections`, { quantity: 1, reason: "수량 오기록", correctedAt: "2026-03-05T08:00:00.000Z" }, 201);
 
+    // 입고 목록·상세(O-07): 배분·해제·정정·불량·초과 이력이 모두 있는 입고가 선언한 스키마를 만족한다
+    const detail = await call("GET", `/receipts/${receipt.id}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body.data.allocations.length).toBeGreaterThan(0);
+    expect(detail.body.data.corrections).toHaveLength(1);
+    expect(detail.body.data.defectResolutions).toHaveLength(1);
+    expect(detail.body.data.excessDecisions).toHaveLength(1);
+    const receiptList = await call("GET", "/receipts");
+    expect(receiptList.body.data.items.some((i: { id: string }) => i.id === receipt.id)).toBe(true);
+    for (const template of ["/receipts/{receiptId}", "/receipts"]) expect(declared(template, "get"), `${template} data 스키마`).toBe(true);
+    expect(conforms("/receipts/{receiptId}", detail.body), "입고 상세").toMatchObject({ ok: true });
+    expect(conforms("/receipts", receiptList.body), "입고 목록").toMatchObject({ ok: true });
+    // 스키마가 실제로 닫혀 있다(알 수 없는 필드가 새면 잡힌다)
+    expect(conforms("/receipts/{receiptId}", { data: { ...detail.body.data, leaked: "x" } }), "상세 알 수 없는 필드").toMatchObject({ ok: false });
+    expect(conforms("/receipts", { data: { items: [{ ...receiptList.body.data.items[0], leaked: "x" }] } }), "목록 알 수 없는 필드").toMatchObject({ ok: false });
+
     for (const { template } of checked) expect(declared(template, "post"), `${template} data 스키마`).toBe(true);
     for (const { template, body } of checked) expect(conforms(template, body, "post"), template).toMatchObject({ ok: true });
   });

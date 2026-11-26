@@ -404,6 +404,23 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       success: 200,
       run: (c) => reads.listNotificationTargets(actor(c), { tenantId: t(c), orderId: c.params.orderId! }),
     }),
+    route("GET", "/receipts", {
+      success: 200,
+      queryFields: ["limit", "cursor", "unallocated", "purchaseOrderId"],
+      run: (c) =>
+        reads.listReceipts(actor(c), {
+          tenantId: t(c),
+          ...int(c, "limit"),
+          ...text(c, "cursor"),
+          ...text(c, "purchaseOrderId"),
+          // "true"/"false"만 불리언으로 바꾼다. 그 밖의 값은 문자열 그대로 두어 어댑터가 400으로 거부한다
+          ...(c.query.has("unallocated") ? { unallocated: ({ true: true, false: false } as Record<string, boolean>)[c.query.get("unallocated") as string] ?? (c.query.get("unallocated") as never) } : {}),
+        }),
+    }),
+    route("GET", "/receipts/(?<receiptId>[^/]+)", {
+      success: 200,
+      run: (c) => reads.getReceipt(actor(c), { tenantId: t(c), receiptId: c.params.receiptId! }),
+    }),
     route("GET", "/dashboard", {
       success: 200,
       queryFields: ["since", "thresholdDays"],

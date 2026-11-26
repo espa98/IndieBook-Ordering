@@ -156,6 +156,59 @@ export type AuditLogEntry = {
   targets: Record<string, string>;
   recordedAt: string;
 };
+/** 입고 요약(O-07): 수량은 원장에서 파생한다. `normalQuantity`는 검수 등록 값, `correctedQuantity`는 검수 정정 합계 */
+export type ReceiptSummary = {
+  id: string;
+  purchaseOrderId: string;
+  poLineId: string;
+  bookKey: string;
+  receivedAt: string;
+  normalQuantity: number;
+  correctedQuantity: number;
+  damagedQuantity: number;
+  misdeliveredQuantity: number;
+  excessQuantity: number;
+  /** 배분 − 해제 */
+  allocatedQuantity: number;
+  /** (검수 − 정정) − 배분 + 해제 */
+  unallocatedQuantity: number;
+};
+export type ReceiptDetail = ReceiptSummary & {
+  allocations: { id: string; orderId: string; orderLineId: string; quantity: number; releasedQuantity: number; allocatedAt: string; allocatedBy: string }[];
+  corrections: { id: string; quantity: number; reason: string; correctedAt: string; correctedBy: string }[];
+  defectResolutions: { id: string; kind: "DAMAGED" | "MISDELIVERED"; quantity: number; outcome: "RETURNED_TO_SUPPLIER" | "SUPPLIER_CREDIT" | "DISCARDED"; resolvedAt: string; resolvedBy: string }[];
+  excessDecisions: { id: string; decision: "APPROVED" | "REJECTED"; quantity: number; reason: string; decidedAt: string; decidedBy: string }[];
+};
+export type ListReceiptsRequest = { tenantId: string; limit?: number; cursor?: string; unallocated?: boolean; purchaseOrderId?: string };
+
+/** 입고 요약 SELECT(서점 조건은 호출부가 where로 붙인다). 순서·미배분 필터는 바깥에서 건다 */
+const RECEIPT_SUMMARY_SQL = `
+  select g.id, g.purchase_order_id, g.po_line_id, l.book_key, g.received_at, g.received_at::text as received_at_text,
+         g.normal_quantity, g.damaged_quantity, g.misdelivered_quantity, g.excess_quantity,
+         c.corrected, a.allocated - a.released as allocated_quantity,
+         g.normal_quantity - c.corrected - (a.allocated - a.released) as unallocated_quantity
+    from public.ordering_goods_receipts g
+    join public.ordering_po_lines l on l.tenant_id = g.tenant_id and l.id = g.po_line_id
+    cross join lateral (select coalesce(sum(x.quantity), 0)::int as corrected from public.ordering_receipt_corrections x where x.tenant_id = g.tenant_id and x.receipt_id = g.id) c
+    cross join lateral (
+      select coalesce(sum(al.quantity), 0)::int as allocated,
+             coalesce(sum((select coalesce(sum(r.quantity), 0) from public.ordering_allocation_releases r where r.tenant_id = al.tenant_id and r.allocation_id = al.id)), 0)::int as released
+        from public.ordering_receipt_allocations al where al.tenant_id = g.tenant_id and al.receipt_id = g.id) a`;
+const toReceiptSummary = (r: any): ReceiptSummary => ({
+  id: r.id,
+  purchaseOrderId: r.purchase_order_id,
+  poLineId: r.po_line_id,
+  bookKey: r.book_key,
+  receivedAt: (r.received_at as Date).toISOString(),
+  normalQuantity: r.normal_quantity,
+  correctedQuantity: r.corrected,
+  damagedQuantity: r.damaged_quantity,
+  misdeliveredQuantity: r.misdelivered_quantity,
+  excessQuantity: r.excess_quantity,
+  allocatedQuantity: r.allocated_quantity,
+  unallocatedQuantity: r.unallocated_quantity,
+});
+
 /** 대시보드(O-01) 서버 집계 */
 export type Dashboard = {
   orders: { draft: number; held: number; discarded: number; confirmed: number };
@@ -334,6 +387,60 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
         const page = rows.slice(0, limit);
         const last = page[page.length - 1];
         return { items: page.map(toStockLevel), ...(rows.length > limit && last ? { nextCursor: encodeCursor([last.book_key]) } : {}) };
+      }),
+
+    /**
+     * 입고 목록(O-07): 최신 입고 순(검수 시각·ID 내림차순) 커서 페이지네이션. 수량은 입고 원장에서 파생한다 —
+     * 순정상 = 검수 − 정정, 배분 = 배분 − 해제, 미배분 = 순정상 − 배분(`receiptBalances`의 UNALLOCATED와 같은 규칙).
+     * `unallocated=true`면 미배분이 남은 입고만, `purchaseOrderId`면 그 발주의 입고만.
+     */
+    listReceipts: (actor: Actor, request: ListReceiptsRequest): Promise<{ items: ReceiptSummary[]; nextCursor?: string }> =>
+      asMember(actor, request.tenantId, async (client) => {
+        const limit = pageSize(request.limit);
+        if (request.unallocated !== undefined && typeof request.unallocated !== "boolean") throw validation("unallocated must be a boolean");
+        if (request.purchaseOrderId !== undefined && !isUuid(request.purchaseOrderId)) throw validation("invalid purchaseOrderId");
+        const after = request.cursor === undefined ? undefined : decodeCursor(request.cursor, 2);
+        if (after && (Number.isNaN(Date.parse(after[0]!)) || !isUuid(after[1]!))) throw validation("invalid cursor");
+        const rows = (
+          await client.query(
+            `select * from (${RECEIPT_SUMMARY_SQL} where g.tenant_id = $1 and ($2::uuid is null or g.purchase_order_id = $2::uuid)) s
+              where ($3::boolean is not true or s.unallocated_quantity > 0)
+                and ($4::text is null or (s.received_at, s.id) < ($4::timestamptz, $5::uuid))
+              order by s.received_at desc, s.id desc
+              limit $6`,
+            [request.tenantId, request.purchaseOrderId ?? null, request.unallocated === true ? true : null, after?.[0] ?? null, after?.[1] ?? null, limit + 1],
+          )
+        ).rows;
+        const page = rows.slice(0, limit);
+        const last = page[page.length - 1];
+        return { items: page.map(toReceiptSummary), ...(rows.length > limit && last ? { nextCursor: encodeCursor([last.received_at_text, last.id]) } : {}) };
+      }),
+
+    /** 입고 상세(O-07-02): 요약 + 배분(해제 수량 포함)·검수 정정·불량 처리·초과 결정 이력. 증빙 원문은 싣지 않는다 */
+    getReceipt: (actor: Actor, request: { tenantId: string; receiptId: string }): Promise<ReceiptDetail> =>
+      asMember(actor, request.tenantId, async (client) => {
+        const t = request.tenantId;
+        const row = isUuid(request.receiptId) ? (await client.query(`${RECEIPT_SUMMARY_SQL} where g.tenant_id = $1 and g.id = $2`, [t, request.receiptId])).rows[0] : undefined;
+        if (!row) throw new AppError("NOT_FOUND");
+        const iso = (d: Date) => d.toISOString();
+        const allocations = (
+          await client.query(
+            `select a.id, a.order_id, a.order_line_id, a.quantity, a.allocated_by, a.allocated_at,
+                    coalesce((select sum(r.quantity) from public.ordering_allocation_releases r where r.tenant_id = a.tenant_id and r.allocation_id = a.id), 0)::int as released
+               from public.ordering_receipt_allocations a where a.tenant_id = $1 and a.receipt_id = $2 order by a.allocated_at, a.id`,
+            [t, row.id],
+          )
+        ).rows;
+        const corrections = (await client.query("select id, quantity, reason, corrected_by, corrected_at from public.ordering_receipt_corrections where tenant_id = $1 and receipt_id = $2 order by corrected_at, id", [t, row.id])).rows;
+        const defects = (await client.query("select id, kind, quantity, outcome, resolved_by, resolved_at from public.ordering_receipt_defect_resolutions where tenant_id = $1 and receipt_id = $2 order by resolved_at, id", [t, row.id])).rows;
+        const excess = (await client.query("select id, decision, quantity, reason, decided_by, decided_at from public.ordering_excess_decisions where tenant_id = $1 and receipt_id = $2 order by decided_at, id", [t, row.id])).rows;
+        return {
+          ...toReceiptSummary(row),
+          allocations: allocations.map((a) => ({ id: a.id, orderId: a.order_id, orderLineId: a.order_line_id, quantity: a.quantity, releasedQuantity: a.released, allocatedAt: iso(a.allocated_at), allocatedBy: a.allocated_by })),
+          corrections: corrections.map((c) => ({ id: c.id, quantity: c.quantity, reason: c.reason, correctedAt: iso(c.corrected_at), correctedBy: c.corrected_by })),
+          defectResolutions: defects.map((d) => ({ id: d.id, kind: d.kind, quantity: d.quantity, outcome: d.outcome, resolvedAt: iso(d.resolved_at), resolvedBy: d.resolved_by })),
+          excessDecisions: excess.map((e) => ({ id: e.id, decision: e.decision, quantity: e.quantity, reason: e.reason, decidedAt: iso(e.decided_at), decidedBy: e.decided_by })),
+        };
       }),
 
     /**
