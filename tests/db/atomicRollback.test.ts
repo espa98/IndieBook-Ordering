@@ -60,6 +60,23 @@ async function injectFault(on: boolean) {
   }
 }
 
+/** 감사 로그를 뺀 모든 ordering_* 테이블의 쓰기 중 k번째에서 실패한다 (k=0이면 해제) */
+async function failOnKthWrite(k: number) {
+  const c = await db.connect();
+  try {
+    const tables = (await c.query("select tablename from pg_tables where schemaname = 'public' and tablename like 'ordering\_%' and tablename <> 'ordering_audit_log'")).rows.map((r) => r.tablename as string);
+    for (const t of tables) await c.query(`drop trigger if exists __kth_fault on public.${t}`);
+    await c.query(`drop table if exists public.__fault_state`);
+    if (k === 0) return;
+    await c.query(`create table public.__fault_state (n int not null, target int not null)`);
+    await c.query(`insert into public.__fault_state values (0, $1)`, [k]);
+    await c.query(`create or replace function public.__kth_fault() returns trigger language plpgsql security definer as $$ declare cur int; tgt int; begin update public.__fault_state set n = n + 1 returning n, target into cur, tgt; if cur = tgt then raise exception 'injected failure at write %', cur using errcode = 'XX000'; end if; return coalesce(new, old); end $$`);
+    for (const t of tables) await c.query(`create trigger __kth_fault before insert or update or delete on public.${t} for each row execute function public.__kth_fault()`);
+  } finally {
+    await c.end();
+  }
+}
+
 let seq = 0;
 async function call(method: "GET" | "POST", path: string, body?: unknown) {
   const now = Math.floor(Date.now() / 1000);
@@ -92,12 +109,23 @@ async function write(label: string, path: string, body: unknown, status: number)
   faulted.push(label);
   const template = templateOf(path);
   if (template) coveredTemplates.add(template);
-  const real = await call("POST", path, body);
-  expect(real.status, `${label}: 실제 실행 ${JSON.stringify(real.body)}`).toBe(status);
-  return real.body.data;
+  // 명령 중간의 k번째 쓰기(k=1…)에서도 실패시킨다. 쓰기 수를 넘겨 500이 아니게 된 실행이 곧 실제 실행이다.
+  // 실패 뒤 재시도가 성공해야 하므로 멱등 기록·버전 같은 흔적이 남았다면 여기서 어긋난다.
+  for (let k = 1; k <= 60; k++) {
+    await failOnKthWrite(k);
+    const r = await call("POST", path, body);
+    await failOnKthWrite(0);
+    if (r.status !== 500) {
+      expect(r.status, `${label}: 실제 실행 ${JSON.stringify(r.body)}`).toBe(status);
+      expect(k, `${label}: 쓰기가 한 번도 실패하지 않았다`).toBeGreaterThan(1);
+      return r.body.data;
+    }
+    expect(diff(before, await snapshot()), `${label}: ${k}번째 쓰기 실패 뒤 변경된 테이블`).toEqual([]);
+  }
+  throw new Error(`${label}: 쓰기가 60번을 넘는다`);
 }
 
-describe("저장 도중 실패 주입: 모든 쓰기 뒤 실패해도 아무것도 남지 않는다", () => {
+describe("저장 도중 실패 주입: 모든 쓰기 뒤 실패해도 아무것도 남지 않는다", { timeout: 900_000 }, () => {
   it("도서·공급처·템플릿·주문·결제·조달 쓰기 명령", async () => {
     const book = await write("도서 등록", "/books", { source: "MANUAL", title: "원자성 책", listPriceKrw: "10000", reason: "수기 등록", registeredAt: PAST }, 201);
     await write("도서 수정", `/books/${book.id}/updates`, { expectedVersion: 1, changes: { title: "원자성 책 2판" }, reason: "정정", changedAt: PAST }, 200);
