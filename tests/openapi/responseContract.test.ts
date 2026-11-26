@@ -192,6 +192,14 @@ describe("응답 계약: 템플릿·안내 대상·미수령 경고 조회", () 
     expect(conforms("/message-templates", templates.body)).toMatchObject({ ok: true });
     expect(conforms("/orders/{orderId}/notification-targets", targets.body)).toMatchObject({ ok: true });
     expect(conforms("/long-unreceived-warnings", warnings.body)).toMatchObject({ ok: true });
+
+    // 안내 대기 큐(O-08): 시도·결과가 기록된 대상이 선언한 스키마를 만족하고 문구·메모는 나오지 않는다
+    const queue = await call("GET", "/notification-targets");
+    expect(queue.status).toBe(200);
+    expect(queue.body.data.items.some((i: { id: string; status: string }) => i.id === target.body.data.id && i.status === "MANUAL_RECORDED")).toBe(true);
+    expect(declared("/notification-targets", "get"), "큐 data 스키마").toBe(true);
+    expect(conforms("/notification-targets", queue.body)).toMatchObject({ ok: true });
+    expect(JSON.stringify(queue.body)).not.toMatch(/도서가 준비되었습니다|통화 완료/);
   });
 });
 
@@ -312,6 +320,17 @@ describe("응답 계약(쓰기): 재고·수령·결제 정정", () => {
 
     const fulfillment = await write("/orders/{orderId}/fulfillments", `/orders/${orderId}/fulfillments`, { orderLineId: lineId, sources: [{ kind: "STOCK_RESERVATION", sourceId: reservation.id, quantity: 2 }], receivedAt: "2026-03-04T07:00:00.000Z" }, 201);
     await write("/orders/{orderId}/fulfillments/{fulfillmentId}/corrections", `/orders/${orderId}/fulfillments/${fulfillment.id}/corrections`, { quantity: 1, restorations: [{ kind: "STOCK_RESERVATION", sourceId: reservation.id, quantity: 1 }], reason: "반품 입고", evidence: "반입 확인서", physicalReturnConfirmed: true, correctedAt: "2026-03-04T07:30:00.000Z" }, 201);
+
+    // 수령·결제 현황(O-09): 결제·수령·정정이 있는 주문이 선언한 스키마를 만족하고, 결제 숫자는 주문별 결제 요약과 같다
+    const settlements = await call("GET", "/order-settlements", undefined, "includeClosed=true");
+    expect(settlements.status).toBe(200);
+    const mine = settlements.body.data.items.find((i: { orderId: string }) => i.orderId === orderId);
+    expect(mine).toBeDefined();
+    expect(mine.deliveredQuantity).toBe(1); // 수령 2 − 정정 1
+    const paymentsView = await call("GET", `/orders/${orderId}/payments`);
+    expect({ totalKrw: mine.totalKrw, confirmedKrw: mine.confirmedKrw, pendingKrw: mine.pendingKrw, balanceKrw: mine.balanceKrw, refundRequiredKrw: mine.refundRequiredKrw }).toEqual(paymentsView.body.data.summary);
+    expect(declared("/order-settlements", "get"), "현황 data 스키마").toBe(true);
+    expect(conforms("/order-settlements", settlements.body)).toMatchObject({ ok: true });
 
     for (const { template } of checked) expect(declared(template, "post"), `${template} data 스키마`).toBe(true);
     for (const { template, body } of checked) expect(conforms(template, body, "post"), template).toMatchObject({ ok: true });

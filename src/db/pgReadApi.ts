@@ -209,6 +209,39 @@ const toReceiptSummary = (r: any): ReceiptSummary => ({
   unallocatedQuantity: r.unallocated_quantity,
 });
 
+/** 서점 전체 안내 대기 큐(O-08)의 한 줄. 메시지 문구·결과 메모는 싣지 않는다 */
+export type NotificationQueueItem = {
+  id: string;
+  orderId: string;
+  orderDisplayNumber?: number;
+  mode: "FULL" | "PARTIAL";
+  securedTotal: number;
+  status: NotificationStatus;
+  createdAt: string;
+  renoticeOfTargetId?: string;
+  attemptedAt?: string;
+  channel?: string;
+  resultAt?: string;
+  resultOutcome?: "MANUAL_RECORDED" | "FAILED";
+};
+export type ListNotificationQueueRequest = { tenantId: string; limit?: number; cursor?: string; status?: NotificationStatus };
+const NOTIFICATION_STATUSES: readonly NotificationStatus[] = ["PENDING", "ATTEMPTED", "MANUAL_RECORDED", "FAILED"];
+
+/** 수령·결제 현황(O-09)의 한 줄: 확정 주문의 결제 요약과 수령 수량 */
+export type OrderSettlement = {
+  orderId: string;
+  displayNumber?: number;
+  totalKrw: string;
+  confirmedKrw: string;
+  pendingKrw: string;
+  balanceKrw: string;
+  refundRequiredKrw: string;
+  orderedQuantity: number;
+  deliveredQuantity: number;
+  remainingQuantity: number;
+};
+export type ListOrderSettlementsRequest = { tenantId: string; limit?: number; cursor?: string; unpaid?: boolean; undelivered?: boolean; includeClosed?: boolean };
+
 /** 대시보드(O-01) 서버 집계 */
 export type Dashboard = {
   orders: { draft: number; held: number; discarded: number; confirmed: number };
@@ -387,6 +420,116 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
         const page = rows.slice(0, limit);
         const last = page[page.length - 1];
         return { items: page.map(toStockLevel), ...(rows.length > limit && last ? { nextCursor: encodeCursor([last.book_key]) } : {}) };
+      }),
+
+    /**
+     * 수령·결제 현황(O-09): 확정 주문을 최신 접수 순으로, 결제 요약(`paymentSummary`와 같은 규칙: 확인된 거래 − 확인된 환급 − 보정, 무효 제외)과
+     * 수령 수량(주문 품목 수량 합, 수령 원장 합 — 정정 역거래 포함, 남은 수량)을 함께 돌려준다. 기본은 종결되지 않은 주문만.
+     * `unpaid=true`는 잔액이 남은 주문만, `undelivered=true`는 남은 수량이 있는 주문만, `includeClosed=true`는 종결 주문도 포함한다.
+     */
+    listOrderSettlements: (actor: Actor, request: ListOrderSettlementsRequest): Promise<{ items: OrderSettlement[]; nextCursor?: string }> =>
+      asMember(actor, request.tenantId, async (client) => {
+        const limit = pageSize(request.limit);
+        for (const flag of ["unpaid", "undelivered", "includeClosed"] as const) {
+          if (request[flag] !== undefined && typeof request[flag] !== "boolean") throw validation(`${flag} must be a boolean`);
+        }
+        const after = request.cursor === undefined ? undefined : decodeCursor(request.cursor, 2);
+        if (after && (Number.isNaN(Date.parse(after[0]!)) || !isUuid(after[1]!))) throw validation("invalid cursor");
+        const rows = (
+          await client.query(
+            `select * from (
+               select o.id, o.display_number, o.created_at, o.created_at::text as created_at_text, coalesce(o.total_krw, 0) as total, x.confirmed, x.pending,
+                      (select coalesce(sum(l.quantity), 0)::int from public.ordering_order_lines l where l.tenant_id = o.tenant_id and l.order_id = o.id) as ordered,
+                      (select coalesce(sum(f.quantity), 0)::int from public.ordering_fulfillments f where f.tenant_id = o.tenant_id and f.order_id = o.id) as delivered
+                 from public.ordering_orders o
+                 cross join lateral (
+                   select coalesce((select sum(p.amount_krw) from public.ordering_payments p
+                                     where p.tenant_id = o.tenant_id and p.order_id = o.id
+                                       and exists (select 1 from public.ordering_payment_confirmations c where c.tenant_id = p.tenant_id and c.payment_id = p.id)
+                                       and not exists (select 1 from public.ordering_payment_voids v where v.tenant_id = p.tenant_id and v.payment_id = p.id)), 0)
+                          - coalesce((select sum(r.amount_krw) from public.ordering_refund_confirmations r where r.tenant_id = o.tenant_id and r.order_id = o.id), 0)
+                          - coalesce((select sum(k.reduced_krw) from public.ordering_payment_corrections k where k.tenant_id = o.tenant_id and k.order_id = o.id), 0) as confirmed,
+                          coalesce((select sum(p.amount_krw) from public.ordering_payments p
+                                     where p.tenant_id = o.tenant_id and p.order_id = o.id
+                                       and not exists (select 1 from public.ordering_payment_confirmations c where c.tenant_id = p.tenant_id and c.payment_id = p.id)
+                                       and not exists (select 1 from public.ordering_payment_voids v where v.tenant_id = p.tenant_id and v.payment_id = p.id)), 0) as pending
+                 ) x
+                where o.tenant_id = $1 and o.status = 'CONFIRMED' and ($2::boolean is true or o.closed_at is null)) s
+              where ($3::boolean is not true or s.total > s.confirmed)
+                and ($4::boolean is not true or s.ordered > s.delivered)
+                and ($5::text is null or (s.created_at, s.id) < ($5::timestamptz, $6::uuid))
+              order by s.created_at desc, s.id desc
+              limit $7`,
+            [request.tenantId, request.includeClosed === true ? true : null, request.unpaid === true ? true : null, request.undelivered === true ? true : null, after?.[0] ?? null, after?.[1] ?? null, limit + 1],
+          )
+        ).rows;
+        const page = rows.slice(0, limit);
+        const last = page[page.length - 1];
+        const big = (v: unknown) => BigInt(String(v));
+        const items = page.map((r): OrderSettlement => {
+          const total = big(r.total);
+          const confirmed = big(r.confirmed);
+          return {
+            orderId: r.id,
+            ...(r.display_number === null ? {} : { displayNumber: Number(r.display_number) }),
+            totalKrw: total.toString(),
+            confirmedKrw: confirmed.toString(),
+            pendingKrw: big(r.pending).toString(),
+            balanceKrw: (total > confirmed ? total - confirmed : 0n).toString(),
+            refundRequiredKrw: (confirmed > total ? confirmed - total : 0n).toString(),
+            orderedQuantity: r.ordered,
+            deliveredQuantity: r.delivered,
+            remainingQuantity: Math.max(r.ordered - r.delivered, 0),
+          };
+        });
+        return { items, ...(rows.length > limit && last ? { nextCursor: encodeCursor([last.created_at_text, last.id]) } : {}) };
+      }),
+
+    /**
+     * 안내 대기 큐(O-08): 서점의 모든 안내 대상을 최신 생성 순으로. 재안내로 대체된 원 대상은 빼고(새 대상이 이어받는다),
+     * 상태는 시도·결과 기록에서 파생한다(`notificationState`와 같은 규칙: 시도 없음 PENDING, 시도만 ATTEMPTED, 마지막 결과가 상태).
+     * `status`로 거를 수 있다. 메시지 문구·결과 메모는 싣지 않는다.
+     */
+    listNotificationQueue: (actor: Actor, request: ListNotificationQueueRequest): Promise<{ items: NotificationQueueItem[]; nextCursor?: string }> =>
+      asMember(actor, request.tenantId, async (client) => {
+        const limit = pageSize(request.limit);
+        if (request.status !== undefined && !NOTIFICATION_STATUSES.includes(request.status)) throw validation("invalid status");
+        const after = request.cursor === undefined ? undefined : decodeCursor(request.cursor, 2);
+        if (after && (Number.isNaN(Date.parse(after[0]!)) || !isUuid(after[1]!))) throw validation("invalid cursor");
+        const rows = (
+          await client.query(
+            `select * from (
+               select t.id, t.order_id, o.display_number, t.mode, t.secured_total, t.created_at, t.created_at::text as created_at_text, t.renotice_of_target_id,
+                      a.attempted_at, a.channel, r.result_at, r.outcome,
+                      case when a.id is null then 'PENDING' when r.outcome is null then 'ATTEMPTED' else r.outcome end as status
+                 from public.ordering_notification_targets t
+                 join public.ordering_orders o on o.tenant_id = t.tenant_id and o.id = t.order_id
+                 left join public.ordering_notification_attempts a on a.tenant_id = t.tenant_id and a.target_id = t.id
+                 left join lateral (select x.outcome, x.result_at from public.ordering_notification_results x where x.tenant_id = t.tenant_id and x.target_id = t.id order by x.recorded_at desc, x.id desc limit 1) r on true
+                where t.tenant_id = $1
+                  and not exists (select 1 from public.ordering_notification_targets n where n.tenant_id = t.tenant_id and n.renotice_of_target_id = t.id)) s
+              where ($2::text is null or s.status = $2)
+                and ($3::text is null or (s.created_at, s.id) < ($3::timestamptz, $4::uuid))
+              order by s.created_at desc, s.id desc
+              limit $5`,
+            [request.tenantId, request.status ?? null, after?.[0] ?? null, after?.[1] ?? null, limit + 1],
+          )
+        ).rows;
+        const page = rows.slice(0, limit);
+        const last = page[page.length - 1];
+        const items = page.map((r): NotificationQueueItem => ({
+          id: r.id,
+          orderId: r.order_id,
+          ...(r.display_number === null ? {} : { orderDisplayNumber: Number(r.display_number) }),
+          mode: r.mode,
+          securedTotal: r.secured_total,
+          status: r.status,
+          createdAt: (r.created_at as Date).toISOString(),
+          ...(r.renotice_of_target_id === null ? {} : { renoticeOfTargetId: r.renotice_of_target_id }),
+          ...(r.attempted_at === null ? {} : { attemptedAt: (r.attempted_at as Date).toISOString(), channel: r.channel }),
+          ...(r.outcome === null ? {} : { resultAt: (r.result_at as Date).toISOString(), resultOutcome: r.outcome }),
+        }));
+        return { items, ...(rows.length > limit && last ? { nextCursor: encodeCursor([last.created_at_text, last.id]) } : {}) };
       }),
 
     /**

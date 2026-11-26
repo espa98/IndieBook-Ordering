@@ -404,6 +404,20 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       success: 200,
       run: (c) => reads.listNotificationTargets(actor(c), { tenantId: t(c), orderId: c.params.orderId! }),
     }),
+    route("GET", "/order-settlements", {
+      success: 200,
+      queryFields: ["limit", "cursor", "unpaid", "undelivered", "includeClosed"],
+      run: (c) => {
+        // "true"/"false"만 불리언으로 바꾼다. 그 밖의 값은 문자열 그대로 두어 어댑터가 400으로 거부한다
+        const flag = (name: string) => (c.query.has(name) ? { [name]: ({ true: true, false: false } as Record<string, boolean>)[c.query.get(name) as string] ?? (c.query.get(name) as never) } : {});
+        return reads.listOrderSettlements(actor(c), { tenantId: t(c), ...int(c, "limit"), ...text(c, "cursor"), ...flag("unpaid"), ...flag("undelivered"), ...flag("includeClosed") });
+      },
+    }),
+    route("GET", "/notification-targets", {
+      success: 200,
+      queryFields: ["limit", "cursor", "status"],
+      run: (c) => reads.listNotificationQueue(actor(c), { tenantId: t(c), ...int(c, "limit"), ...text(c, "cursor"), ...(c.query.has("status") ? { status: c.query.get("status") as never } : {}) }),
+    }),
     route("GET", "/receipts", {
       success: 200,
       queryFields: ["limit", "cursor", "unallocated", "purchaseOrderId"],
