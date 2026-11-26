@@ -655,3 +655,16 @@ describe("응답 계약(읽기): 예외 업무 큐", () => {
     expect(items.filter((i) => i.type === "FAILED_NOTIFICATION").length).toBe(d.notifications.failed);
   });
 });
+
+describe("응답 계약(읽기): 공급처별 현황", () => {
+  it("앞선 시험이 만든 공급처·발주의 공급처별 현황이 선언한 스키마를 만족하고 대시보드 발주 건수를 넘지 않는다", async () => {
+    const overview = await call("GET", "/supplier-overview");
+    expect(overview.status).toBe(200);
+    expect(overview.body.data.items.length).toBeGreaterThan(0);
+    expect(declared("/supplier-overview", "get"), "공급처 현황 data 스키마").toBe(true);
+    expect(conforms("/supplier-overview", overview.body)).toMatchObject({ ok: true });
+    const dashboard = (await call("GET", "/dashboard")).body.data;
+    const sent = (overview.body.data.items as { purchaseOrders: { sent: number } }[]).reduce((n, i) => n + i.purchaseOrders.sent, 0);
+    expect(sent).toBeLessThanOrEqual(dashboard.purchaseOrders.sent); // 등록된 공급처의 발주만 센다
+  });
+});

@@ -1277,6 +1277,47 @@ paths:
           $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/supplier-overview:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+    get:
+      tags: [reads]
+      operationId: listSupplierOverview
+      summary: 공급처별 발주·입고 현황 (DASH-006)
+      description: |
+        활성 멤버(Owner·직원)가 서점의 공급처(비활성 포함)를 코드순으로, 발주 상태별 건수(`purchaseOrders`)와 전달된(SENT·ACKNOWLEDGED) 발주 품목의
+        잔량(`openRemainingQuantity` = 유효 수량 − 순입고)·지연(`delayedLines`·`delayedQuantity`, 전달한 지 `delayDays`일이 지나도 잔량이 남은 품목)·마지막 전달 시각을 읽는다.
+        잔량·지연은 `GET /dashboard`의 같은 카드와 같은 규칙이다(전달 후 경과일 기준, 공급처 회신 ETA는 반영하지 않는다). 공급처 수가 많지 않다고 보고 페이지네이션하지 않는다.
+      parameters:
+        - name: delayDays
+          in: query
+          required: false
+          description: 지연 기준일(1~365, 기본 7)
+          schema: { type: string }
+      responses:
+        "200":
+          description: 성공(`data.items`는 공급처 배열)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/SupplierOverviewItem" } }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/exceptions:
     parameters:
       - $ref: "ordering.yaml#/components/parameters/TenantId"
@@ -4994,6 +5035,30 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    SupplierOverviewItem:
+      type: object
+      additionalProperties: false
+      required: [code, active, purchaseOrders, openRemainingQuantity, delayedLines, delayedQuantity]
+      properties:
+        code: { type: string }
+        name: { type: string }
+        active: { type: boolean }
+        orderChannel: { type: string }
+        purchaseOrders:
+          type: object
+          additionalProperties: false
+          required: [draft, ready, sent, acknowledged, cancelled, closed]
+          properties:
+            draft: { type: integer, minimum: 0 }
+            ready: { type: integer, minimum: 0 }
+            sent: { type: integer, minimum: 0 }
+            acknowledged: { type: integer, minimum: 0 }
+            cancelled: { type: integer, minimum: 0 }
+            closed: { type: integer, minimum: 0 }
+        openRemainingQuantity: { type: integer, minimum: 0 }
+        delayedLines: { type: integer, minimum: 0 }
+        delayedQuantity: { type: integer, minimum: 0 }
+        lastDeliveredAt: { type: string, format: date-time, description: 이 공급처에 마지막으로 발주를 전달한 시각. 전달한 적이 없으면 없다 }
     StoreInfo:
       type: object
       additionalProperties: false

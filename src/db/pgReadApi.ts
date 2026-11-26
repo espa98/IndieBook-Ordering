@@ -261,6 +261,23 @@ export type ListRefundTasksRequest = { tenantId: string; limit?: number; cursor?
 const REFUND_TASK_STATUSES: readonly RefundTaskItem["status"][] = ["REFUND_REQUIRED", "PARTIAL", "REFUNDED"];
 
 /**
+ * 전달된(SENT·ACKNOWLEDGED) 발주의 품목별 상태 SELECT. 서점은 $1이다. 대시보드의 부분입고·지연 카드와 공급처별 현황이 같이 쓴다.
+ * remaining = max(0, 유효 수량 − 순입고), 유효 수량 = 발주 − 품절 회신 − 수락된 취소, 순입고 = 검수 정상 − 검수 정정(입고 가드 007과 같은 규칙).
+ */
+const PO_OPEN_LINE_SQL = `
+               select l.id as po_line_id, p.supplier_code, greatest(l.quantity
+                                     - coalesce((select sum(y.quantity) from public.ordering_po_replies y where y.tenant_id = l.tenant_id and y.po_line_id = l.id and y.kind = 'OUT_OF_STOCK'), 0)
+                                     - coalesce((select sum(s.accepted_quantity) from public.ordering_po_cancellation_responses s where s.tenant_id = l.tenant_id and s.po_line_id = l.id), 0)
+                                     - (coalesce((select sum(g.normal_quantity) from public.ordering_goods_receipts g where g.tenant_id = l.tenant_id and g.po_line_id = l.id), 0)
+                                        - coalesce((select sum(c.quantity) from public.ordering_receipt_corrections c join public.ordering_goods_receipts g on g.tenant_id = c.tenant_id and g.id = c.receipt_id where g.tenant_id = l.tenant_id and g.po_line_id = l.id), 0)), 0) as remaining,
+                            coalesce((select sum(g.normal_quantity) from public.ordering_goods_receipts g where g.tenant_id = l.tenant_id and g.po_line_id = l.id), 0)
+                            - coalesce((select sum(c.quantity) from public.ordering_receipt_corrections c join public.ordering_goods_receipts g on g.tenant_id = c.tenant_id and g.id = c.receipt_id where g.tenant_id = l.tenant_id and g.po_line_id = l.id), 0) as net_received,
+                            (p.delivery->>'deliveredAt')::timestamptz as delivered_at
+                       from public.ordering_po_lines l
+                       join public.ordering_purchase_orders p on p.tenant_id = l.tenant_id and p.id = l.purchase_order_id
+                      where l.tenant_id = $1 and p.status in ('SENT', 'ACKNOWLEDGED')`;
+
+/**
  * 취소 물량(배분 취소)별 처분 상태 SELECT(서점 조건은 호출부가 where로 붙인다). 처분 현황 목록과 대시보드 카드가 같이 쓴다.
  * pending = 취소 − 편입 − 반품 요청 + 거절 + 회수, held = 요청 − 거절 − 출고, dispatched = 출고 − 완료 − 예외 해소, final = 완료 + 최종 반송
  */
@@ -318,6 +335,23 @@ export type ExceptionItem = {
   amountKrw?: string;
 };
 export type ListExceptionsRequest = { tenantId: string; limit?: number; cursor?: string; type?: ExceptionType };
+
+/** 공급처별 발주·입고 현황(DASH-006)의 한 줄 */
+export type SupplierOverviewItem = {
+  code: string;
+  name?: string;
+  active: boolean;
+  orderChannel?: string;
+  /** 발주 상태별 건수 */
+  purchaseOrders: { draft: number; ready: number; sent: number; acknowledged: number; cancelled: number; closed: number };
+  /** 전달된(SENT·ACKNOWLEDGED) 발주 품목의 잔량 합계(권): 유효 수량 − 순입고 */
+  openRemainingQuantity: number;
+  /** 전달한 지 delayDays일이 지나도 잔량이 남은 품목 수와 그 잔량 합계 */
+  delayedLines: number;
+  delayedQuantity: number;
+  /** 이 공급처에 마지막으로 발주를 전달한 시각. 전달한 적이 없으면 없다 */
+  lastDeliveredAt?: string;
+};
 
 /** 대시보드(O-01) 서버 집계 */
 export type Dashboard = {
@@ -504,6 +538,54 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
         const page = rows.slice(0, limit);
         const last = page[page.length - 1];
         return { items: page.map(toStockLevel), ...(rows.length > limit && last ? { nextCursor: encodeCursor([last.book_key]) } : {}) };
+      }),
+
+    /**
+     * 공급처별 발주·입고 현황(DASH-006): 서점의 공급처(비활성 포함)를 코드순으로, 발주 상태별 건수와 전달된 발주 품목의 잔량·지연·마지막 전달 시각을 돌려준다.
+     * 잔량·지연은 대시보드와 같은 규칙이다(`delayDays` 기본 7일, 전달 후 경과일 기준). 공급처 수는 많지 않다고 보고 페이지네이션하지 않는다.
+     */
+    listSupplierOverview: (actor: Actor, request: { tenantId: string; delayDays?: number }): Promise<{ items: SupplierOverviewItem[] }> =>
+      asMember(actor, request.tenantId, async (client) => {
+        const now = (deps.now ?? (() => new Date()))();
+        const delayDays = request.delayDays ?? 7;
+        if (!Number.isInteger(delayDays) || delayDays < 1 || delayDays > 365) throw validation("delayDays must be an integer 1..365");
+        const cutoff = new Date(now.getTime() - delayDays * 86_400_000).toISOString();
+        const suppliers = (await client.query("select code, name, active, order_channel from public.ordering_suppliers where tenant_id = $1 order by code", [request.tenantId])).rows;
+        const counts = (
+          await client.query(
+            `select supplier_code, status, count(*)::int as n, max((delivery->>'deliveredAt')::timestamptz) as last_delivered
+               from public.ordering_purchase_orders where tenant_id = $1 group by supplier_code, status`,
+            [request.tenantId],
+          )
+        ).rows;
+        const open = (
+          await client.query(
+            `select supplier_code,
+                    coalesce(sum(remaining) filter (where remaining > 0), 0)::int as remaining,
+                    count(*) filter (where remaining > 0 and delivered_at <= $2::timestamptz)::int as delayed,
+                    coalesce(sum(remaining) filter (where remaining > 0 and delivered_at <= $2::timestamptz), 0)::int as delayed_quantity
+               from (${PO_OPEN_LINE_SQL}) x group by supplier_code`,
+            [request.tenantId, cutoff],
+          )
+        ).rows;
+        const items = suppliers.map((s): SupplierOverviewItem => {
+          const mine = counts.filter((c) => c.supplier_code === s.code);
+          const n = (status: string) => mine.find((c) => c.status === status)?.n ?? 0;
+          const lastDelivered = mine.reduce<Date | undefined>((latest, c) => (c.last_delivered && (!latest || c.last_delivered > latest) ? (c.last_delivered as Date) : latest), undefined);
+          const o = open.find((r) => r.supplier_code === s.code);
+          return {
+            code: s.code,
+            ...(s.name === null ? {} : { name: s.name }),
+            active: s.active,
+            ...(s.order_channel === null ? {} : { orderChannel: s.order_channel }),
+            purchaseOrders: { draft: n("DRAFT"), ready: n("READY"), sent: n("SENT"), acknowledged: n("ACKNOWLEDGED"), cancelled: n("CANCELLED"), closed: n("CLOSED") },
+            openRemainingQuantity: o?.remaining ?? 0,
+            delayedLines: o?.delayed ?? 0,
+            delayedQuantity: o?.delayed_quantity ?? 0,
+            ...(lastDelivered ? { lastDeliveredAt: lastDelivered.toISOString() } : {}),
+          };
+        });
+        return { items };
       }),
 
     /**
@@ -883,17 +965,7 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
                     coalesce(sum(remaining) filter (where remaining > 0), 0)::int as quantity,
                     count(*) filter (where remaining > 0 and delivered_at <= $2::timestamptz)::int as delayed,
                     coalesce(sum(remaining) filter (where remaining > 0 and delivered_at <= $2::timestamptz), 0)::int as delayed_quantity
-               from (select greatest(l.quantity
-                                     - coalesce((select sum(y.quantity) from public.ordering_po_replies y where y.tenant_id = l.tenant_id and y.po_line_id = l.id and y.kind = 'OUT_OF_STOCK'), 0)
-                                     - coalesce((select sum(s.accepted_quantity) from public.ordering_po_cancellation_responses s where s.tenant_id = l.tenant_id and s.po_line_id = l.id), 0)
-                                     - (coalesce((select sum(g.normal_quantity) from public.ordering_goods_receipts g where g.tenant_id = l.tenant_id and g.po_line_id = l.id), 0)
-                                        - coalesce((select sum(c.quantity) from public.ordering_receipt_corrections c join public.ordering_goods_receipts g on g.tenant_id = c.tenant_id and g.id = c.receipt_id where g.tenant_id = l.tenant_id and g.po_line_id = l.id), 0)), 0) as remaining,
-                            coalesce((select sum(g.normal_quantity) from public.ordering_goods_receipts g where g.tenant_id = l.tenant_id and g.po_line_id = l.id), 0)
-                            - coalesce((select sum(c.quantity) from public.ordering_receipt_corrections c join public.ordering_goods_receipts g on g.tenant_id = c.tenant_id and g.id = c.receipt_id where g.tenant_id = l.tenant_id and g.po_line_id = l.id), 0) as net_received,
-                            (p.delivery->>'deliveredAt')::timestamptz as delivered_at
-                       from public.ordering_po_lines l
-                       join public.ordering_purchase_orders p on p.tenant_id = l.tenant_id and p.id = l.purchase_order_id
-                      where l.tenant_id = $1 and p.status in ('SENT', 'ACKNOWLEDGED')) x`,
+               from (${PO_OPEN_LINE_SQL}) x`,
             [t, new Date(now.getTime() - delayDays * 86_400_000).toISOString()],
           )
         ).rows[0];
