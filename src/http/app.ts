@@ -14,6 +14,7 @@ import { assertWithinLimits } from "./inputLimits";
 import { createPgAccountApi } from "../db/pgAccountApi";
 import { createPgCatalogApi } from "../db/pgCatalogApi";
 import { createPgStaffApi } from "../db/pgStaffApi";
+import { createPgStoreApi } from "../db/pgStoreApi";
 import { createPgStockApi } from "../db/pgStockApi";
 import { createPgSupplierApi } from "../db/pgSupplierApi";
 import type { PoolLike } from "../db/pgSupport";
@@ -95,6 +96,7 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
   const procurement = createPgProcurementApi({ pool: deps.pool });
   const suppliers = createPgSupplierApi({ pool: deps.pool });
   const staffAdmin = createPgStaffApi({ pool: deps.pool });
+  const storeApi = createPgStoreApi({ pool: deps.pool });
   const accounts = createPgAccountApi({ pool: deps.pool });
   const catalog = createPgCatalogApi({ pool: deps.pool });
   const notifications = createPgNotificationApi({ pool: deps.pool });
@@ -485,6 +487,15 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       success: 200,
       fields: ["expectedVersion", "changes", "reason", "acknowledgeDuplicateOf", "changedAt"],
       run: (c) => catalog.updateBook(actor(c), merge(c, { tenantId: t(c), bookId: c.params.bookId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("GET", "/store", {
+      success: 200,
+      run: (c) => storeApi.getStore(actor(c), { tenantId: t(c) }),
+    }),
+    route("POST", "/store/settings", {
+      success: 200,
+      fields: ["name", "longUnreceivedWarningDays"],
+      run: (c) => storeApi.updateStoreSettings(actor(c), merge(c, { tenantId: t(c), idempotencyKey: c.idempotencyKey })),
     }),
     route("GET", "/members", {
       success: 200,

@@ -189,6 +189,19 @@ describe("고객 안내 조회·미수령 경고 (읽기 API)", () => {
     expect((await read().getDashboard(staff, { tenantId: T_A, thresholdDays: 30 })).longUnreceivedWarnings).toBe((await read().longUnreceivedWarnings(staff, { tenantId: T_A, thresholdDays: 30 })).length);
     expect((await read().longUnreceivedWarnings(staff, { tenantId: T_A, thresholdDays: 30 })).map((w) => w.orderId)).not.toContain(old.orderId);
     expect((await read().longUnreceivedWarnings(staff, { tenantId: T_A, thresholdDays: 1 })).map((w) => w.orderId)).toContain(fresh.orderId);
+
+    // 서점별 경고일 설정(S-07, DEC-07): 기준일을 따로 보내지 않으면 서점의 설정값을 쓴다. 명시한 값이 우선한다
+    await rows("update public.ordering_tenants set long_unreceived_warning_days = 30 where id = $1", [T_A]);
+    try {
+      expect((await read().longUnreceivedWarnings(staff, { tenantId: T_A })).map((w) => w.orderId)).not.toContain(old.orderId); // 10일 < 30일
+      expect((await read().getDashboard(staff, { tenantId: T_A })).longUnreceivedWarnings).toBe(0);
+      expect((await read().longUnreceivedWarnings(staff, { tenantId: T_A, thresholdDays: 7 })).map((w) => w.orderId)).toContain(old.orderId); // 명시한 값이 우선
+      await rows("update public.ordering_tenants set long_unreceived_warning_days = 3 where id = $1", [T_A]);
+      expect((await read().longUnreceivedWarnings(staff, { tenantId: T_A })).map((w) => w.orderId)).toContain(old.orderId); // 10일 ≥ 3일
+      expect((await read().getDashboard(staff, { tenantId: T_A })).longUnreceivedWarnings).toBeGreaterThan(0);
+    } finally {
+      await rows("update public.ordering_tenants set long_unreceived_warning_days = 7 where id = $1", [T_A]);
+    }
     expect(await codeOf(() => read().longUnreceivedWarnings(staff, { tenantId: T_A, thresholdDays: 0 }))).toBe("VALIDATION_ERROR");
     expect(await codeOf(() => read().longUnreceivedWarnings({ userId: EX_STAFF }, { tenantId: T_A }))).toBe("FORBIDDEN");
   });

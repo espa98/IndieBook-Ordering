@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, readdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -38,7 +38,9 @@ describe("migrate 번들: node만으로 실행된다", () => {
     const dry = exec({ DATABASE_URL: url, MIGRATIONS_DIR: migrations });
     expect(dry.status).toBe(0);
     expect(dry.stdout).toMatch(/드라이런/);
-    expect(dry.stdout).toMatch(/대기 2\d개/);
+    // 새 DB에서는 마이그레이션 파일 전부가 대기 중이다(개수를 고정하지 않고 디렉터리의 .sql 개수와 맞춘다)
+    const files = readdirSync(migrations).filter((f) => f.endsWith(".sql")).length;
+    expect(dry.stdout).toMatch(new RegExp(`대기 ${files}개`));
     expect(dry.stdout + dry.stderr).not.toContain("isolated-test-only");
   });
 });

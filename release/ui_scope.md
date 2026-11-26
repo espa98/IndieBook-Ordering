@@ -12,7 +12,7 @@
 
 ## 2. UI 1차 범위: 실제 API에 연결할 수 있는 화면
 
-서버 근거는 `tests/db`·`tests/openapi`(격리 Postgres, 실제 서명 JWT, 전 경로 계약·권한·롤백 검증, 전체 191개 파일 1561개 테스트 통과)다. 계약은 `openapi/ordering.yaml`(주문 4)과 `openapi/ordering-http.yaml`(나머지, 총 83개 연산)이며 **미검증 엔드포인트는 호출하지 않는다**.
+서버 근거는 `tests/db`·`tests/openapi`(격리 Postgres, 실제 서명 JWT, 전 경로 계약·권한·롤백 검증, 전체 194개 파일 1573개 테스트 통과)다. 계약은 `openapi/ordering.yaml`(주문 4)과 `openapi/ordering-http.yaml`(나머지, 총 83개 연산)이며 **미검증 엔드포인트는 호출하지 않는다**.
 
 | Bolt 단계 | 화면 | 실제 API 연결 | 비고 |
 |---|---|---|---|
@@ -23,7 +23,7 @@
 | 07 입고·재고 | O-07 입고 현황, O-07-01 입고, O-07-02 배분, I-01 재고 | `POST /purchase-orders/{id}/receipts`, `/receipts/{id}/allocations`·`/defect-resolutions`·`/excess-decisions`·`/corrections`, `/allocations/{id}/cancellations`·`/reallocations`·`/releases`, `GET /receipts`, `GET /receipts/{id}`, `GET /stock`, `GET /stock/{bookId}`, 초기 재고·조정 | 입고 현황·상세 조회 있음 |
 | 08 안내·수령·결제 | O-08-01 안내, O-09-01 수령, O-09-02 결제 | `/orders/{id}/notification-targets`(GET/POST), `/notification-targets/{id}/copies`·`/attempts`·`/renotices`, `/notification-attempts/{id}/result`, `GET /message-templates`, `/orders/{id}/fulfillments`(+정정), `/orders/{id}/payments`(GET/POST), `/payments/{id}/confirmation`·`/void`·`/corrections` | 복사·공유는 발송 완료가 아니다(서버도 결과 기록을 분리) |
 | 09 취소·반품·환급·정정 | O-04-01 취소, R-01 처분, R-03 반품, R-04 재고 편입, O-09-04 환급, R-05 정정 | `/orders/{id}/cancellation-requests`, `/order-cancellation-requests/{id}/decision`·`/application`, `/allocation-cancellations/{id}/return-requests`·`/stock-intakes`, `/return-requests/{id}/*`, `/return-exceptions/{id}/resolutions`, `/orders/{id}/refund-tasks`, `/refund-tasks/{id}/*`, `/refund-requests/{id}/decision`, `/refund-attempts/{id}/resolution`, `/orders/{id}/closure-requests` | 종결 실행·재개는 서버 내부(스위퍼), UI 경로 없음 |
-| 10 설정 | S-02 직원 목록·초대·비활성, 안내 템플릿 버전, 감사 이력 | `GET /members`, `POST /members/{id}/delegations`, `GET /delegations`, `GET/POST /staff-invitations`, `POST /staff-invitations/{id}/revocation`, `POST /members/{id}/status`, `GET/POST /message-templates`, `GET /audit-log` | 위임 부여는 서버 없음(§4). 직원은 이름·이메일 없이 사용자 ID로 식별된다 |
+| 10 설정 | S-01 서점 기본정보, S-07 미수령 경고일, S-02 직원 목록·초대·비활성, 안내 템플릿 버전, 감사 이력 | `GET /store`, `POST /store/settings`, `GET /members`, `POST /members/{id}/delegations`, `GET /delegations`, `GET/POST /staff-invitations`, `POST /staff-invitations/{id}/revocation`, `POST /members/{id}/status`, `GET/POST /message-templates`, `GET /audit-log` | 위임 부여는 서버 없음(§4). 직원은 이름·이메일 없이 사용자 ID로 식별된다 |
 | 03 대시보드 | O-01 숫자 카드, O-01-01 예외 큐, O-01-02 장기 미수령 경고 | `GET /dashboard`, `GET /exceptions`, `GET /long-unreceived-warnings` | 발주 지연·공급처별 현황·기간 통계 카드는 서버 없음 → 데모 값. 예외 큐에 장기 미수령은 포함되지 않는다(별도 목록) |
 
 **공통 규칙(UI가 지킬 서버 계약):** Bearer JWT; 모든 POST에 `Idempotency-Key`; 낡은 `expectedVersion`은 409 `VERSION_CONFLICT`; 같은 키·다른 본문은 409 `IDEMPOTENCY_CONFLICT`; 업무 규칙 위반 422 `BUSINESS_INVARIANT`; 본문 413(기본 1 MiB); 쿼리 시간 초과·내부 오류는 500(재시도 구분 없음); 금액은 정수 문자열; 시각은 RFC3339 UTC(미래 불가); 행위자·역할은 토큰에서만(본문으로 보낼 수 없음); 다른 서점·없는 대상은 같은 404.
@@ -34,7 +34,7 @@
 - **YES24 도서 검색(B-01)**: 외부 연동 없음.
 - **ST-O04 확정 후 가격/품목 변경, 고객 동의(DEC-08)**: 정책 미승인.
 - **공개 고객 주문(P1), 택배(D23), PG/VAN(P2), 모바일 M1~M3**: 범위 밖.
-- S-01 서점 기본정보 수정·S-08 YES24 상태·S-09 내보내기: 서버 없음.
+- S-08 YES24 상태·S-09 내보내기: 서버 없음. (S-01 서점 기본정보와 S-07 미수령 경고일은 `GET /store`·`POST /store/settings`로 구현됨 — 보고서 §108. 서점 중지·해지·소유자 이전은 없다.)
 
 ## 4. 백엔드 보강 목록 (UI 막힘 순)
 
@@ -65,7 +65,7 @@ UI 단계 순서에 맞춰 서버가 먼저 만들 조회 API다. 모두 같은 
 
 **(이 저장소) §4의 1~8번은 모두 완료됐다(2026-11-26).** 남은 백엔드 일은 다음과 같다. 모두 정책 결정이나 정의가 먼저 필요하다.
 1. **대시보드 나머지:** 발주 지연(예상 입고일 정책 없음), 공급처별 현황·기간별 통계(P1). 예외 큐의 담당자 지정·처리 근거(담당 지정 명령 없음)와 유형 추가(정의 필요).
-2. **서점 설정(S-01)·내보내기(S-09)·YES24 상태(S-08):** 서버 없음. PRD 정책 확인 필요.
+2. **내보내기(S-09)·YES24 상태(S-08):** 서버 없음. PRD 정책 확인 필요. (S-01·S-07은 완료)
 3. **고객 모듈(C-01~04)·YES24 검색(B-01):** PRD 결정 필요.
 4. **직원 역할 변경(직원→Owner):** 서버 명령 없음.
 

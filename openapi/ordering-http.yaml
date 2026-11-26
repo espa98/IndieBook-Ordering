@@ -2801,6 +2801,93 @@ paths:
           $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/store:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+    get:
+      tags: [staffAdmin]
+      operationId: getStore
+      summary: 서점 기본정보 (S-01)
+      description: |
+        활성 멤버(Owner·직원)가 서점의 이름·상태·개설일과 **장기 미수령 경고일**(S-07, DEC-07: 서점별 기본 7일, 자동 취소 없음), 자기 역할을 읽는다.
+        비멤버·비활성은 403.
+      responses:
+        "200":
+          description: 성공(`data`는 서점 정보)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/StoreInfo" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/store/settings:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+    post:
+      tags: [staffAdmin]
+      operationId: updateStoreSettings
+      summary: 서점 설정 변경 (S-01·S-07)
+      description: |
+        **Owner만** 서점 이름(1~60자)과 장기 미수령 경고일(1~365일 정수)을 바꾼다(보낸 항목만, 하나 이상). 바뀌는 항목이 없으면 422,
+        같은 소유자의 다른 서점 이름과 겹치면(대소문자 무시) 422다(다른 소유자의 서점 이름과는 겹쳐도 된다). 응답은 바뀐 항목의 전·후 값이며
+        모든 변경은 추가 전용 이력에 남는다. 경고일은 장기 미수령 경고(`GET /long-unreceived-warnings`)와 대시보드가 기준일을 따로 보내지 않을 때 쓰는 기본값이다.
+        담당자는 인증된 사용자로 기록되며 본문으로 보낼 수 없다.
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                name: { type: string, minLength: 1, maxLength: 60 }
+                longUnreceivedWarningDays: { type: integer, minimum: 1, maximum: 365 }
+      responses:
+        "200":
+          description: 성공(`data`는 변경 기록)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/StoreSettingsChange" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "413":
+          $ref: "ordering.yaml#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/members:
     parameters:
       - $ref: "ordering.yaml#/components/parameters/TenantId"
@@ -4902,6 +4989,41 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    StoreInfo:
+      type: object
+      additionalProperties: false
+      required: [id, name, status, createdAt, longUnreceivedWarningDays, myRole]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        status: { type: string, enum: [ACTIVE] }
+        createdAt: { type: string, format: date-time }
+        longUnreceivedWarningDays: { type: integer, minimum: 1, maximum: 365 }
+        myRole: { type: string, enum: [OWNER, STAFF] }
+    StoreSettingsChange:
+      type: object
+      additionalProperties: false
+      required: [id, tenantId, changes, changedBy, changedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        changes:
+          type: object
+          additionalProperties: false
+          minProperties: 1
+          properties:
+            name:
+              type: object
+              additionalProperties: false
+              required: [from, to]
+              properties: { from: { type: string }, to: { type: string } }
+            longUnreceivedWarningDays:
+              type: object
+              additionalProperties: false
+              required: [from, to]
+              properties: { from: { type: integer }, to: { type: integer } }
+        changedBy: { type: string }
+        changedAt: { type: string, format: date-time }
     ExceptionItem:
       type: object
       additionalProperties: false

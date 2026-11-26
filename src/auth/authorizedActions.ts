@@ -72,6 +72,7 @@ import { bindActor } from "./bindActor";
 import { inviteStaff } from "./inviteStaff";
 import { revokeInvitation } from "./revokeInvitation";
 import { setDelegation } from "./setDelegation";
+import { updateStoreSettings } from "./updateStoreSettings";
 import { setMembershipStatus } from "./setMembershipStatus";
 
 const BOTH = ["OWNER", "STAFF"] as const;
@@ -108,6 +109,7 @@ export const authorizedActions = {
   revokeInvitation: bindActor(revokeInvitation, { roleField: "actorRole", nameField: "revokedBy", allow: OWNER }),
   setMembershipStatus: bindActor(setMembershipStatus, { roleField: "actorRole", nameField: "changedBy", allow: OWNER }),
   setDelegation: bindActor(setDelegation, { roleField: "actorRole", nameField: "changedBy", allow: OWNER }),
+  updateStoreSettings: bindActor(updateStoreSettings, { roleField: "actorRole", nameField: "changedBy", allow: OWNER }),
   // Owner·Staff 모두 호출하는 명령: 행위자 이름과 테넌트만 주체에서 주입한다
   postFulfillment: bindActor(postFulfillment, { nameField: "receivedBy", allow: BOTH }),
   allocateReceipt: bindActor(allocateReceipt, { nameField: "allocatedBy", allow: BOTH }),

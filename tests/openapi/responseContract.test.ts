@@ -465,6 +465,18 @@ describe("응답 계약(쓰기): 직원 초대·계정", () => {
     for (const { template } of checked) expect(declared(template, "post"), `${template} data 스키마`).toBe(true);
     for (const { template, body } of checked) expect(conforms(template, body, "post"), template).toMatchObject({ ok: true });
 
+    // 서점 기본정보·설정 변경(S-01·S-07): 직원이 읽고 Owner가 바꾼다
+    const storeInfo = await callAs(ownerId, undefined, "GET", `${base}/store`);
+    expect(storeInfo.status).toBe(200);
+    expect(storeInfo.body.data).toMatchObject({ id: store.tenant.id, name: "계약 서점", longUnreceivedWarningDays: 7, myRole: "OWNER" });
+    const settings = await callAs(ownerId, "owner@shop.test", "POST", `${base}/store/settings`, { name: "계약 서점 개명", longUnreceivedWarningDays: 14 });
+    expect(settings.status).toBe(200);
+    for (const [template, method, body] of [["/store", "get", storeInfo.body], ["/store/settings", "post", settings.body]] as const) {
+      expect(declared(template, method), `${template} data 스키마`).toBe(true);
+      expect(conforms(template, body, method), template).toMatchObject({ ok: true });
+    }
+    expect((await callAs(ownerId, undefined, "GET", `${base}/store`)).body.data).toMatchObject({ name: "계약 서점 개명", longUnreceivedWarningDays: 14 });
+
     // 위임 부여·회수와 현재 위임 목록(S-03): 활성 직원 하나를 새로 만들어 위임을 주고 거둔다
     const delegateId = "55555555-0000-4000-8000-000000000003";
     const delegateInvite = await callAs(ownerId, "owner@shop.test", "POST", `${base}/staff-invitations`, { email: "delegate@shop.test", expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
@@ -495,7 +507,7 @@ describe("응답 계약(쓰기): 직원 초대·계정", () => {
     // 내 서점 목록(A-05): 방금 연 서점이 Owner로 나온다
     const mine = await callAs(ownerId, undefined, "GET", "/v1/me/memberships");
     expect(mine.status).toBe(200);
-    expect(mine.body.data).toEqual([{ tenantId: store.tenant.id, tenantName: "계약 서점", role: "OWNER" }]);
+    expect(mine.body.data).toEqual([{ tenantId: store.tenant.id, tenantName: "계약 서점 개명", role: "OWNER" }]); // 위에서 이름을 바꿨다
     expect(declared("/v1/me/memberships", "get"), "내 서점 목록 data 스키마").toBe(true);
     expect(conforms("/v1/me/memberships", mine.body, "get"), "내 서점 목록").toMatchObject({ ok: true });
   });

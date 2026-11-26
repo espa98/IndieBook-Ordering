@@ -402,7 +402,9 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
     /** 안내를 마친 뒤 기준일(기본 7일)이 지나도 확보분이 남은 주문 목록(DEC-07: 목록만, 자동 조치 없음) */
     longUnreceivedWarnings: (actor: Actor, request: { tenantId: string; thresholdDays?: number }): Promise<LongUnreceivedWarning[]> =>
       asMember(actor, request.tenantId, async (client) => {
-        const thresholdDays = request.thresholdDays ?? 7;
+        // 기준일을 보내지 않으면 서점의 설정값(S-07, 기본 7일)을 쓴다. 명시한 값이 우선한다
+        const thresholdDays =
+          request.thresholdDays ?? Number((await client.query("select long_unreceived_warning_days as d from public.ordering_tenants where id = $1", [request.tenantId])).rows[0]?.d ?? 7);
         if (!Number.isInteger(thresholdDays) || thresholdDays < 1 || thresholdDays > 365) throw validation("thresholdDays must be an integer 1..365");
         const now = (deps.now ?? (() => new Date()))();
         // 안내 완료(MANUAL_RECORDED)가 기준일 이상 지난 주문만 후보로 좁힌 뒤, 그 주문들에 도메인 계산을 그대로 적용한다

@@ -276,6 +276,7 @@ describe("저장 도중 실패 주입: 모든 쓰기 뒤 실패해도 아무것�
     await write("직원 복구", `/members/${STAFF}/status`, { status: "ACTIVE" }, 200);
     await write("위임 부여", `/members/${STAFF}/delegations`, { kind: "MANAGEMENT", delegated: true }, 200);
     await write("위임 회수", `/members/${STAFF}/delegations`, { kind: "MANAGEMENT", delegated: false }, 200);
+    await write("서점 설정 변경", "/store/settings", { name: "롤백 시험 서점", longUnreceivedWarningDays: 9 }, 200);
     expect(faulted.slice(before)).toEqual(expect.arrayContaining(["환급 업무", "환급 요청", "환급 시도 보고", "환급 시도 해소", "환급 요청 결정", "안내 대상", "안내 문구 복사", "안내 발송 시도", "안내 결과", "재안내", "직원 초대", "초대 철회", "직원 비활성화", "직원 복구", "위임 부여", "위임 회수"]));
   });
 
