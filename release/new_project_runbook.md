@@ -48,6 +48,7 @@
 | `SUPABASE_JWT_ISSUER` | 권장 | 발급자(`iss`) 검증 |
 | `PORT` | 아니오 | 기본 8080 |
 | `MAX_BODY_BYTES` | 아니오 | 기본 1 MiB |
+| `DB_STATEMENT_TIMEOUT_MS` | 아니오 | DB 쿼리 하나의 시간 제한(잠금 대기 포함). 기본 10000, 100~120000 |
 | `CLOSURE_SWEEP_INTERVAL_SECONDS` | 아니오 | 종결 스위퍼 간격, 기본 300, 0이면 끔 |
 | `CORS_ALLOWED_ORIGINS` | 아니오 | 허용 오리진(쉼표 구분). **비우면 브라우저 오리진을 허용하지 않는다**(E9: 값 결정 필요) |
 

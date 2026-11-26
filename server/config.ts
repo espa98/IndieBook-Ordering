@@ -5,6 +5,8 @@ export type ServerConfig = {
   databaseUrl: string;
   port: number;
   maxBodyBytes: number;
+  /** DB 쿼리 하나의 시간 제한(ms). 잠금 대기도 포함한다. 무제한은 허용하지 않는다 */
+  statementTimeoutMs: number;
   /** 종결 스위퍼 실행 간격(초). 0이면 끈다 */
   closureSweepIntervalSeconds: number;
   jwt: JwtVerifyOptions;
@@ -79,6 +81,7 @@ export function loadConfig(env: Record<string, string | undefined>): ServerConfi
     databaseUrl,
     port: integer(env, "PORT", 8080, 1, 65535),
     maxBodyBytes: integer(env, "MAX_BODY_BYTES", 1024 * 1024, 1, 64 * 1024 * 1024),
+    statementTimeoutMs: integer(env, "DB_STATEMENT_TIMEOUT_MS", 10_000, 100, 120_000),
     closureSweepIntervalSeconds: integer(env, "CLOSURE_SWEEP_INTERVAL_SECONDS", 300, 0, 86_400),
     allowedOrigins: parseOrigins(env.CORS_ALLOWED_ORIGINS),
     jwt: { keys, audience: "authenticated", ...(env.SUPABASE_JWT_ISSUER ? { issuer: env.SUPABASE_JWT_ISSUER } : {}) },

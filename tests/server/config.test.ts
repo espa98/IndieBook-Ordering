@@ -67,3 +67,13 @@ describe("loadConfig: 종결 스위퍼 주기", () => {
     }
   });
 });
+
+describe("loadConfig: DB 쿼리 시간 제한", () => {
+  it("기본은 10초(요청 제한 15초보다 짧다)이고, 100~120000ms 정수만 받으며 0(무제한)을 포함해 범위 밖은 시작을 거부한다", () => {
+    expect(loadConfig(base).statementTimeoutMs).toBe(10_000);
+    expect(loadConfig({ ...base, DB_STATEMENT_TIMEOUT_MS: "2500" }).statementTimeoutMs).toBe(2500);
+    for (const bad of ["0", "99", "120001", "1.5", "abc", "-1"]) {
+      expect(() => loadConfig({ ...base, DB_STATEMENT_TIMEOUT_MS: bad }), bad).toThrow(/DB_STATEMENT_TIMEOUT_MS/);
+    }
+  });
+});

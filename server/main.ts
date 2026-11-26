@@ -1,7 +1,6 @@
 // 서버 실행 진입점. 환경 변수만 읽고 어떤 비밀도 코드에 두지 않는다.
 // 연결 문자열이 가리키는 DB는 이 서버를 띄우는 사람이 책임진다(이 저장소는 어떤 외부 DB에도 접속 정보를 갖지 않는다).
 // 백엔드는 `service_role`로 `SET LOCAL ROLE` 할 수 있는 DB 사용자로 접속해야 한다.
-import pg from "pg";
 import { createPgCancellationApi } from "../src/db/pgCancellationApi";
 import { createPgProcurementApi } from "../src/db/pgProcurementApi";
 import { createApp } from "../src/http/app";
@@ -9,6 +8,7 @@ import { createHttpServer } from "../src/http/server";
 import { createClosureSweeper } from "../src/jobs/closureSweeper";
 import { startSweepLoop } from "../src/jobs/sweepLoop";
 import { loadConfig } from "./config";
+import { createDatabasePool } from "./pool";
 
 let config: ReturnType<typeof loadConfig>;
 try {
@@ -18,7 +18,7 @@ try {
   console.error(error instanceof Error ? error.message : "invalid server configuration");
   process.exit(1);
 }
-const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 10 });
+const pool = createDatabasePool({ databaseUrl: config.databaseUrl, statementTimeoutMs: config.statementTimeoutMs });
 pool.on("error", (error) => console.error("database pool error:", error.message));
 
 const app = createApp({
