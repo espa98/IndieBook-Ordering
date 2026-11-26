@@ -5152,6 +5152,274 @@ paths:
           $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/customers:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+    get:
+      tags: [customers]
+      operationId: listCustomers
+      summary: listCustomers
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/CustomerListItem" } } } }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+    post:
+      tags: [customers]
+      operationId: registerCustomer
+      summary: registerCustomer
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, phone, registeredAt]
+              properties:
+                name: { type: string, minLength: 1 }
+                phone: { type: string, minLength: 1 }
+                registeredAt: { type: string, format: date-time }
+      responses:
+        "201":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/CustomerRegistration" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "413":
+          $ref: "ordering.yaml#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/customers/{customerId}:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: customerId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [customers]
+      operationId: getCustomer
+      summary: getCustomer
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Customer" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/customers/{customerId}/updates:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: customerId
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [customers]
+      operationId: updateCustomer
+      summary: updateCustomer
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion, changes, changedAt]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+                changes:
+                  type: object
+                  minProperties: 1
+                  properties:
+                    name: { type: string, minLength: 1 }
+                    phone: { type: string, minLength: 1 }
+                changedAt: { type: string, format: date-time }
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Customer" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "413":
+          $ref: "ordering.yaml#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/customers/{customerId}/anonymization:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: customerId
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [customers]
+      operationId: anonymizeCustomer
+      summary: anonymizeCustomer
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion, anonymizedAt]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+                anonymizedAt: { type: string, format: date-time }
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Customer" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "413":
+          $ref: "ordering.yaml#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/customers/{customerId}/changes:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: customerId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [customers]
+      operationId: listCustomerChanges
+      summary: listCustomerChanges
+      responses:
+        "200":
+          description: 성공(`data`는 도메인 객체)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/CustomerChange" } } } }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
 
 components:
   securitySchemes:
@@ -6447,3 +6715,46 @@ components:
         name: { type: string }
         orderChannel: { type: string, enum: [API, EMAIL, FILE, MESSENGER, PHONE, WEB] }
         version: { type: integer }
+    Customer:
+      type: object
+      required: [id, tenantId, name, phone, version]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        name: { type: string }
+        phone: { type: [string, "null"], description: "정규화된 국내 번호. 익명화되면 null" }
+        version: { type: integer }
+        anonymizedAt: { type: string, format: date-time }
+    CustomerListItem:
+      type: object
+      required: [id, name, version, anonymized]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        phoneLast4: { type: string, description: "목록에는 번호 끝 4자리만 보인다. 익명화되면 없다" }
+        version: { type: integer }
+        anonymized: { type: boolean }
+    CustomerRegistration:
+      type: object
+      required: [customer, duplicateCandidates]
+      properties:
+        customer: { $ref: "#/components/schemas/Customer" }
+        duplicateCandidates:
+          type: array
+          description: 같은 서점·같은 정규화 번호의 기존 고객. 자동 병합하지 않는다
+          items:
+            type: object
+            required: [customer, sameName]
+            properties:
+              customer: { $ref: "#/components/schemas/Customer" }
+              sameName: { type: boolean }
+    CustomerChange:
+      type: object
+      required: [id, kind, by, at]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [REGISTERED, UPDATED, ANONYMIZED] }
+        before: { type: object, description: "Owner에게만 보인다" }
+        after: { type: object, description: "Owner에게만 보인다" }
+        by: { type: string }
+        at: { type: string, format: date-time }

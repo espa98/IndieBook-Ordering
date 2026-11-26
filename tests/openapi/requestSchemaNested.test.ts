@@ -129,11 +129,12 @@ describe("요청 스키마와 서버 입력 검증의 일치 (중첩 필드·배
     const summary = [...groups.entries()].sort().map(([k, g]) => `${String(g.count).padStart(3)}건 ${k}  예) ${g.example}`);
     expect({ compared, skipped, routes: leafCount.size, inconclusive, futureTimestamps, disagreements: summary }).toMatchObject({ disagreements: [] });
     // 비교 범위가 조용히 줄어들지 않도록 비교된 경로를 그대로 고정한다(2026-11-26 기준 5개 경로, 69건).
-    // 요청 스키마에 중첩 구조가 있는 경로 7개를 모두 비교한다. 최소 본문이 서버 검증을 통과하지 못하는 `POST /orders`(`lines[]`: 도서가 카탈로그에
+    // 요청 스키마에 중첩 구조가 있는 경로 8개를 모두 비교한다(고객 수정 `changes{}` 포함). 최소 본문이 서버 검증을 통과하지 못하는 `POST /orders`(`lines[]`: 도서가 카탈로그에
     // 있어야 함)와 `POST /books`(`authors[]`: 수기 등록의 조건부 필수 `reason`)는 손으로 만든 기준 본문을 쓴다.
     expect([...leafCount.keys()].sort()).toEqual([
       "/books",
       "/books/{bookId}/updates",
+      "/customers/{customerId}/updates",
       "/orders",
       "/orders/{orderId}/fulfillments",
       "/orders/{orderId}/fulfillments/{fulfillmentId}/corrections",

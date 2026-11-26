@@ -28,6 +28,7 @@ export function sample(schema: Json, name = ""): unknown {
       if (schema.format === "date") return "2026-03-04";
       if (schema.format === "uuid") return MISSING;
       if (/Krw$/.test(name)) return "1000";
+      if (name === "phone") return "010-0000-0000"; // 국내 번호 형식이어야 한다
       return "x";
   }
 }

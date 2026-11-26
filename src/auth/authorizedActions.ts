@@ -64,6 +64,9 @@ import { recordSupplierReply } from "../procurement/recordSupplierReply";
 import { respondToCancellationRequest } from "../procurement/respondToCancellationRequest";
 import { publishTemplateVersion } from "../catalog/publishTemplateVersion";
 import { registerBook } from "../catalog/registerBook";
+import { anonymizeCustomer } from "../customer/anonymizeCustomer";
+import { registerCustomer } from "../customer/registerCustomer";
+import { updateCustomer } from "../customer/updateCustomer";
 import { registerSupplier } from "../catalog/registerSupplier";
 import { setSupplierActive } from "../catalog/setSupplierActive";
 import { updateSupplier } from "../catalog/updateSupplier";
@@ -110,6 +113,8 @@ export const authorizedActions = {
   setMembershipStatus: bindActor(setMembershipStatus, { roleField: "actorRole", nameField: "changedBy", allow: OWNER }),
   setDelegation: bindActor(setDelegation, { roleField: "actorRole", nameField: "changedBy", allow: OWNER }),
   updateStoreSettings: bindActor(updateStoreSettings, { roleField: "actorRole", nameField: "changedBy", allow: OWNER }),
+  // 고객(C-01~04): 등록·수정은 Owner·Staff, 익명화는 Owner만(고객 결정 #10)
+  anonymizeCustomer: bindActor(anonymizeCustomer, { roleField: "actorRole", nameField: "anonymizedBy", allow: OWNER }),
   // Owner·Staff 모두 호출하는 명령: 행위자 이름과 테넌트만 주체에서 주입한다
   postFulfillment: bindActor(postFulfillment, { nameField: "receivedBy", allow: BOTH }),
   allocateReceipt: bindActor(allocateReceipt, { nameField: "allocatedBy", allow: BOTH }),
@@ -146,6 +151,8 @@ export const authorizedActions = {
   registerBook: bindActor(registerBook, { nameField: "registeredBy", allow: BOTH }),
   updateBook: bindActor(updateBook, { nameField: "changedBy", allow: BOTH }),
   // 공급처 관리(ST-B04): Owner 또는 점주가 위임한 직원(도메인 함수가 위임을 검사한다)
+  registerCustomer: bindActor(registerCustomer, { roleField: "actorRole", nameField: "registeredBy", allow: BOTH }),
+  updateCustomer: bindActor(updateCustomer, { roleField: "actorRole", nameField: "changedBy", allow: BOTH }),
   registerSupplier: bindActor(registerSupplier, { roleField: "actorRole", nameField: "registeredBy", allow: BOTH }),
   updateSupplier: bindActor(updateSupplier, { roleField: "actorRole", nameField: "changedBy", allow: BOTH }),
   setSupplierActive: bindActor(setSupplierActive, { roleField: "actorRole", nameField: "changedBy", allow: BOTH }),

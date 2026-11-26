@@ -18,6 +18,7 @@ import { createPgBookSearchApi } from "../db/pgBookSearchApi";
 import { createPgStaffApi } from "../db/pgStaffApi";
 import { createPgStoreApi } from "../db/pgStoreApi";
 import { createPgStockApi } from "../db/pgStockApi";
+import { createPgCustomerApi } from "../db/pgCustomerApi";
 import { createPgSupplierApi } from "../db/pgSupplierApi";
 import type { PoolLike } from "../db/pgSupport";
 import { AppError } from "../errors/AppError";
@@ -99,6 +100,7 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
   const receiving = createPgReceivingApi({ pool: deps.pool });
   const procurement = createPgProcurementApi({ pool: deps.pool });
   const suppliers = createPgSupplierApi({ pool: deps.pool });
+  const customers = createPgCustomerApi({ pool: deps.pool });
   const staffAdmin = createPgStaffApi({ pool: deps.pool });
   const storeApi = createPgStoreApi({ pool: deps.pool });
   const bookSearch = createPgBookSearchApi({ pool: deps.pool, ...(deps.bookSearch ? { provider: deps.bookSearch } : {}) });
@@ -350,6 +352,34 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
         if (typeof c.email !== "string" || c.email === "") throw new AppError("FORBIDDEN");
         return staffAdmin.acceptInvitation({ userId: c.userId, email: c.email }, { token: c.body.token as never, idempotencyKey: c.idempotencyKey });
       },
+    }),
+    route("GET", "/customers", {
+      success: 200,
+      queryFields: ["search", "limit"],
+      run: (c) => customers.listCustomers(actor(c), { tenantId: t(c), ...text(c, "search"), ...int(c, "limit") }),
+    }),
+    route("POST", "/customers", {
+      success: 201,
+      fields: ["name", "phone", "registeredAt"],
+      run: (c) => customers.registerCustomer(actor(c), merge(c, { tenantId: t(c), idempotencyKey: c.idempotencyKey })),
+    }),
+    route("GET", "/customers/(?<customerId>[^/]+)", {
+      success: 200,
+      run: (c) => customers.getCustomer(actor(c), { tenantId: t(c), customerId: c.params.customerId! }),
+    }),
+    route("POST", "/customers/(?<customerId>[^/]+)/updates", {
+      success: 200,
+      fields: ["expectedVersion", "changes", "changedAt"],
+      run: (c) => customers.updateCustomer(actor(c), merge(c, { tenantId: t(c), customerId: c.params.customerId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/customers/(?<customerId>[^/]+)/anonymization", {
+      success: 200,
+      fields: ["expectedVersion", "anonymizedAt"],
+      run: (c) => customers.anonymizeCustomer(actor(c), merge(c, { tenantId: t(c), customerId: c.params.customerId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("GET", "/customers/(?<customerId>[^/]+)/changes", {
+      success: 200,
+      run: (c) => customers.listCustomerChanges(actor(c), { tenantId: t(c), customerId: c.params.customerId! }),
     }),
     route("GET", "/suppliers", {
       success: 200,
