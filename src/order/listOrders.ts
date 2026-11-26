@@ -8,7 +8,7 @@ export const ORDER_STATUSES: readonly Order["status"][] = ["DRAFT", "CONFIRMED"]
 
 export type OrderSummary = Pick<
   Order,
-  "id" | "status" | "version" | "displayNumber" | "totalKrw"
+  "id" | "status" | "version" | "displayNumber" | "totalKrw" | "heldAt" | "discardedAt"
 >;
 
 type SortKey = { createdAt: string; id: string };
@@ -79,6 +79,8 @@ export function listOrders(
     version: o.version,
     displayNumber: o.displayNumber,
     totalKrw: o.totalKrw,
+    ...(o.heldAt === undefined ? {} : { heldAt: o.heldAt }),
+    ...(o.discardedAt === undefined ? {} : { discardedAt: o.discardedAt }),
   }));
   const last = pageOrders[pageOrders.length - 1];
   const hasMore = remaining.length > limit;

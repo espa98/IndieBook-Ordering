@@ -322,6 +322,16 @@ describe("저장 도중 실패 주입: 모든 쓰기 뒤 실패해도 아무것�
     expect(faulted.slice(before)).toEqual(expect.arrayContaining(["공급처 회신", "발주 취소 요청", "발주 취소 응답", "발주 취소 확정", "미전달 발주 취소", "배정 해제", "배정 해제(의무 남음)", "중복 위험 승인"]));
   });
 
+  it("초안 보류·재개·폐기 쓰기 명령", async () => {
+    const before = faulted.length;
+    const book = await write("도서 등록(보류)", "/books", { source: "MANUAL", title: "보류 책", listPriceKrw: "10000", reason: "수기 등록", registeredAt: PAST }, 201);
+    const order = await write("주문 생성(보류)", "/orders", { lines: [{ bookId: book.id, quantity: 1, unitPriceKrw: "10000" }] }, 201);
+    const held = await write("초안 보류", `/orders/${order.id}/hold`, { expectedVersion: 1, reason: "입금 확인 중", heldAt: PAST }, 200);
+    const resumed = await write("보류 재개", `/orders/${order.id}/resume`, { expectedVersion: held.version, resumedAt: PAST }, 200);
+    await write("초안 폐기", `/orders/${order.id}/discard`, { expectedVersion: resumed.version, reason: "고객 철회", discardedAt: PAST }, 200);
+    expect(faulted.slice(before)).toEqual(expect.arrayContaining(["초안 보류", "보류 재개", "초안 폐기"]));
+  });
+
   it("서점 범위 쓰기(POST) 경로 전부가 위 시나리오에서 실패 주입을 거쳤다 (빠진 경로가 있으면 이름이 나온다)", () => {
     const all = app.routes.filter((r) => r.scope === "tenant" && r.method === "POST").map((r) => r.template).sort();
     const missing = all.filter((template) => !coveredTemplates.has(template));

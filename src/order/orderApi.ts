@@ -9,7 +9,10 @@ import type { IdempotencyStore } from "../idempotency/executeIdempotent";
 import type { ConfirmOrderRequest, OrderRepository } from "./confirmOrderService";
 import type { CreateOrderRequest } from "./createOrderService";
 import { toOrderDetail } from "./getOrder";
+import type { DiscardOrderRequest } from "./discardOrder";
+import type { HoldOrderRequest } from "./holdOrder";
 import type { listOrders } from "./listOrders";
+import type { ResumeOrderRequest } from "./resumeOrder";
 
 export type OrderApiDeps = {
   orders: OrderRepository;
@@ -61,6 +64,18 @@ export function createOrderApi(deps: OrderApiDeps) {
           request,
         ),
       ),
+    ),
+
+    holdOrder: guarded((principal, request: Omit<HoldOrderRequest, "tenantId" | "heldBy">) =>
+      toOrderDetail(authorizedActions.holdOrder({ orders: deps.orders, idempotency: deps.idempotency }, principal, request)),
+    ),
+
+    resumeOrder: guarded((principal, request: Omit<ResumeOrderRequest, "tenantId" | "resumedBy">) =>
+      toOrderDetail(authorizedActions.resumeOrder({ orders: deps.orders, idempotency: deps.idempotency }, principal, request)),
+    ),
+
+    discardOrder: guarded((principal, request: Omit<DiscardOrderRequest, "tenantId" | "discardedBy">) =>
+      toOrderDetail(authorizedActions.discardOrder({ orders: deps.orders, idempotency: deps.idempotency }, principal, request)),
     ),
 
     confirmOrder: guarded((principal, request: Omit<ConfirmOrderRequest, "tenantId">) =>

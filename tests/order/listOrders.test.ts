@@ -19,6 +19,19 @@ function orderAt(id: string, createdAt: string) {
 }
 
 describe("listOrders", () => {
+  it("보류·폐기 시각을 요약에 싣는다(목록에서 보류·폐기 초안을 구별할 수 있다). 해당 없으면 필드가 없다", () => {
+    const plain = orderAt("id-a", "2026-01-01T00:00:00.000Z");
+    const held = { ...orderAt("id-b", "2026-01-02T00:00:00.000Z"), heldAt: "2026-01-02T01:00:00.000Z", holdReason: "확인", heldBy: "김직원" };
+    const discarded = { ...orderAt("id-c", "2026-01-03T00:00:00.000Z"), discardedAt: "2026-01-03T01:00:00.000Z", discardReason: "철회", discardedBy: "이직원" };
+    const page = listOrders({ orders: createInMemoryOrderRepository([plain, held, discarded]) }, { tenantId: "tenant-a" });
+
+    const byId = Object.fromEntries(page.items.map((i) => [i.id, i]));
+    expect(byId["id-b"]).toMatchObject({ heldAt: "2026-01-02T01:00:00.000Z" });
+    expect(byId["id-c"]).toMatchObject({ discardedAt: "2026-01-03T01:00:00.000Z" });
+    expect("heldAt" in byId["id-a"]! || "discardedAt" in byId["id-a"]!).toBe(false);
+    expect(JSON.stringify(page)).not.toMatch(/김직원|이직원|holdReason|discardReason/);
+  });
+
   it("(createdAt, id) 기준 최신순으로 정렬하고 createdAt이 같으면 id 내림차순이다", () => {
     const oldest = orderAt("id-a", "2026-01-01T00:00:00.000Z");
     const tieLow = orderAt("id-b", "2026-01-02T00:00:00.000Z");

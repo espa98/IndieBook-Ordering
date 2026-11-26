@@ -163,4 +163,25 @@ describe("createOrderApi (권한이 적용된 진입점)", () => {
       ),
     ).toThrow(/^NOT_FOUND$/);
   });
+
+  it("holdOrder·resumeOrder·discardOrder: 활성 Owner·Staff만 할 수 있고(비멤버·비활성은 FORBIDDEN, 아무것도 바뀌지 않음), 담당자는 요청이 아니라 인증된 사용자로 기록된다", () => {
+    const { api, orderA } = setup();
+    const t = "2026-03-04T00:00:00.000Z";
+    const lines = [{ bookId: "book-1", quantity: 1, unitPriceKrw: "15000" }];
+    const draft = api.createOrder({ userId: "owner-a" }, { tenantId: "tenant-a", idempotencyKey: "k-draft", lines });
+
+    for (const userId of ["stranger", "ex-staff"]) {
+      expect(() => api.holdOrder({ userId }, { tenantId: "tenant-a", orderId: draft.id, expectedVersion: 1, reason: "r", heldAt: t, idempotencyKey: `h-${userId}` } as never)).toThrow(/^FORBIDDEN$/);
+      expect(() => api.discardOrder({ userId }, { tenantId: "tenant-a", orderId: draft.id, expectedVersion: 1, reason: "r", discardedAt: t, idempotencyKey: `d-${userId}` } as never)).toThrow(/^FORBIDDEN$/);
+    }
+    expect(api.getOrder({ userId: "owner-a" }, { tenantId: "tenant-a", orderId: draft.id }).version).toBe(1);
+
+    const held = api.holdOrder({ userId: "staff-a" }, { tenantId: "tenant-a", orderId: draft.id, expectedVersion: 1, reason: "확인", heldAt: t, heldBy: "위조", idempotencyKey: "h-1" } as never);
+    expect(held).toMatchObject({ version: 2, heldAt: t, holdReason: "확인" });
+    const resumed = api.resumeOrder({ userId: "owner-a" }, { tenantId: "tenant-a", orderId: draft.id, expectedVersion: 2, resumedAt: t, idempotencyKey: "r-1" } as never);
+    expect(resumed.version).toBe(3);
+    const discarded = api.discardOrder({ userId: "owner-a" }, { tenantId: "tenant-a", orderId: draft.id, expectedVersion: 3, reason: "철회", discardedAt: t, idempotencyKey: "d-1" } as never);
+    expect(discarded).toMatchObject({ version: 4, discardedAt: t, discardReason: "철회" });
+    expect(orderA.id).toBeDefined();
+  });
 });

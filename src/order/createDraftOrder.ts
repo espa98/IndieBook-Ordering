@@ -29,6 +29,14 @@ export type Order = {
   closedAt?: string;
   /** 전량 취소가 확정된 시각(CANCELLING). 후속 물량·금전 업무가 끝나면 종결(CANCELLED)한다 (ST-O06, BR-O07) */
   cancelledAt?: string;
+  /** 보류 중인 초안의 보류 시각·사유·담당자(ST-O02). 보류는 상태 값이 아니라 이 필드로 표현한다. 재개하면 지워진다 */
+  heldAt?: string;
+  holdReason?: string;
+  heldBy?: string;
+  /** 폐기된 초안의 폐기 시각·사유·담당자(ST-O09). 상태 값이 아니라 필드로 표현하며, 이력은 보존되고 되돌릴 수 없다 */
+  discardedAt?: string;
+  discardReason?: string;
+  discardedBy?: string;
 };
 
 export function createDraftOrder(input: {

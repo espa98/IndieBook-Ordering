@@ -302,6 +302,32 @@ describe("응답 계약(쓰기): 재고·수령·결제 정정", () => {
   });
 });
 
+describe("응답 계약(쓰기): 초안 보류·재개·폐기", () => {
+  it("보류·재개·폐기 응답(보류·폐기 필드 포함)이 선언한 스키마를 만족하고, 상세·목록에도 폐기 필드가 나온다", async () => {
+    const checked: Checked[] = [];
+    const write = async (template: string, path: string, body: unknown) => {
+      const res = await call("POST", path, body);
+      expect(res.status, `${template} 상태 ${JSON.stringify(res.body)}`).toBe(200);
+      checked.push({ template, body: res.body });
+      return res.body.data;
+    };
+    const book = await call("POST", "/books", { source: "MANUAL", title: "보류 책", listPriceKrw: "10000", reason: "수기 등록", registeredAt: "2026-03-04T06:00:00.000Z" });
+    const draft = await call("POST", "/orders", { lines: [{ bookId: book.body.data.id, quantity: 1, unitPriceKrw: "10000" }] });
+    const orderId = draft.body.data.id as string;
+    const held = await write("/orders/{orderId}/hold", `/orders/${orderId}/hold`, { expectedVersion: 1, reason: "입금 확인 중", heldAt: "2026-03-04T06:10:00.000Z" });
+    expect(held).toMatchObject({ heldAt: "2026-03-04T06:10:00.000Z", holdReason: "입금 확인 중" });
+    const resumed = await write("/orders/{orderId}/resume", `/orders/${orderId}/resume`, { expectedVersion: held.version, resumedAt: "2026-03-04T06:20:00.000Z" });
+    await write("/orders/{orderId}/discard", `/orders/${orderId}/discard`, { expectedVersion: resumed.version, reason: "고객 철회", discardedAt: "2026-03-04T06:30:00.000Z" });
+
+    for (const { template } of checked) expect(declared(template, "post"), `${template} data 스키마`).toBe(true);
+    for (const { template, body } of checked) expect(conforms(template, body, "post"), template).toMatchObject({ ok: true });
+    const detail = await call("GET", `/orders/${orderId}`);
+    expect(detail.body.data).toMatchObject({ discardedAt: "2026-03-04T06:30:00.000Z", discardReason: "고객 철회" });
+    const list = await call("GET", "/orders");
+    expect(JSON.stringify(list.body.data.items)).toContain("discardedAt");
+  });
+});
+
 describe("응답 계약(쓰기): 주문 취소·종결·취소 물량 처분·반품", () => {
   it("취소 요청·결정·적용·종결 요청과 재고 편입·반품 요청·회신·출고·예외·해소·재협의·완료 응답이 선언한 스키마를 만족한다", async () => {
     const checked: Checked[] = [];

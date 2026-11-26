@@ -6,6 +6,13 @@ import { AppError } from "../../src/errors/AppError";
 import { thrown } from "../helpers/thrown";
 
 describe("confirmOrder (ST-O03: DRAFT → CONFIRMED)", () => {
+  it("보류 중인 초안은 확정할 수 없다(확정 전 조달 금지, ST-O02) — 재개 뒤에 확정한다", () => {
+    const draft = addOrderLine(createDraftOrder({ tenantId: "tenant-a" }), { bookId: "book-1", quantity: 1, unitPriceKrw: "15000" });
+    const held = { ...draft, version: 2, heldAt: "2026-03-04T06:50:00.000Z", holdReason: "입금 일정 확인", heldBy: "김직원" };
+
+    expect(thrown(() => confirmOrder(held, { expectedVersion: 2, issueDisplayNumber: () => 1 }))).toMatchObject({ code: "BUSINESS_INVARIANT" });
+  });
+
   it("품목이 없는 초안은 확정할 수 없다", () => {
     const draft = createDraftOrder({ tenantId: "tenant-a" });
 

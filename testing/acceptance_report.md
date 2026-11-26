@@ -1889,3 +1889,29 @@ vitest는 타입을 검사하지 않아 §73에서 제가 만든 테스트의 �
 - **더 높은 버전**의 기록(새 서버가 쓴 기록을 옛 서버가 읽는 롤백 배포)은 삭제하지 않고 그대로 재생한다. 형태가 맞는지는 보장하지 않는다.
 - 버전을 올리는 것은 사람이 한다. 결과 타입이 바뀌었는데 상수를 올리지 않으면 감지하지 못한다(자동 검사 없음).
 - 운영 DB에 `026`을 적용해야 한다(`result_version` 열 추가는 기본값이 있어 기존 기록은 버전 1이 된다).
+
+## 97. 초안 보류·재개(ST-O02)와 초안 폐기(ST-O09) (`holdOrder`·`resumeOrder`·`discardOrder`, `027_order_hold_discard.sql`)
+
+테스트 약 30개 추가(`tests/order/holdOrder`·`resumeOrder`·`discardOrder`, `getOrder`·`listOrders`·`orderApi`·`confirmOrder` 보강, `tests/db/pgOrderHoldDiscard` 7개, `atomicRollback` 시나리오 1, `responseContract` 1). 매트릭스에서 NOT_IMPLEMENTED였던 요구사항 중 정책이 승인된 두 건을 구현했다.
+
+**결정(사용자):** ① **상태 값은 늘리지 않는다**(DRAFT·CONFIRMED 유지). 보류·폐기는 필드(`heldAt`·`holdReason`·`heldBy`, `discardedAt`·`discardReason`·`discardedBy`)로 표현한다. PRD 상태표(`HELD`·`CANCELLED`)와 표현이 다르다. ② **ST-O04(확정 후 가격/품목 변경)는 이번 범위에서 제외**한다. PRD·FRD가 DEC-08(고객 동의 방식) 승인 전 활성화를 금지한 항목이다.
+
+**규칙**
+- 보류(`POST /orders/{id}/hold`): `DRAFT`이고 보류·폐기 중이 아닌 초안만. `expectedVersion`·`reason`·`heldAt`(RFC3339 UTC, 미래 불가). 보류 중에는 확정 불가(`confirmOrder`가 422, "확정 전 조달 금지").
+- 재개(`/resume`): 보류 중인 초안만. 보류 필드를 지우고 version+1.
+- 폐기(`/discard`): `DRAFT`(보류 중이어도) 초안만, 보류 필드는 지우고 폐기 필드를 채운다. 품목은 그대로(이력 보존). **되돌릴 수 없다**: 이후 보류·재개·확정·재폐기·모든 갱신 거부.
+- 권한: 활성 Owner·Staff. 담당자는 요청이 아니라 인증된 사용자(`bindActor`의 `heldBy` 등, 위조 값 무시). 비멤버·비활성은 403.
+- 멱등 키·`expectedVersion`(낡으면 409)·행 잠금(같은 초안의 동시 보류는 하나만 성공)·감사 로그·응답 계약은 기존 쓰기 명령과 같다.
+- 상세·목록: 상세에 `heldAt`·`holdReason`·`discardedAt`·`discardReason`, 목록 요약에 `heldAt`·`discardedAt`(담당자 이름은 싣지 않는다). 해당 없으면 필드가 없다(기존 응답 불변).
+
+**DB(027):** 6개 열과 제약 4개 — 보류·폐기 필드는 모두 있거나 모두 없어야 하고(사유 공백 불가), 확정 주문은 가질 수 없으며, 보류와 폐기는 동시에 가질 수 없다. `guard_order_update` 트리거가 폐기한 주문의 모든 갱신을 거부한다(P0001). 검증: 직접 SQL로 각 제약 위반(23514)·폐기 취소 시도(P0001) 확인.
+
+**검증:** 도메인(보류·재개·폐기 각각 정상·거부·검증·멱등), 권한(`orderApi`), Postgres(저장·재시작·동시성·제약), 롤백(`atomicRollback`의 k번째 쓰기 주입 시나리오에 세 경로 추가, 서점 범위 POST 전 경로 대조 통과), 응답 스키마(`ordering-http.yaml`의 `OrderRecord`로 검증).
+
+**한계**
+- **보류 이력은 재개하면 사라진다**(사유 포함). 이력은 감사 로그의 "누가 언제 어떤 작업"까지만 남고 사유 원문은 저장하지 않는다(감사 로그는 해시만 저장). PRD의 "사유 기록"은 보류 중에만 조회된다. 이력이 필요하면 별도 보류 이력 테이블이 필요하다.
+- 폐기한 초안은 상태가 `DRAFT`라 **`status=DRAFT` 목록 필터에 그대로 나온다**(요약의 `discardedAt`으로 구별해야 한다). 폐기 제외 필터는 만들지 않았다.
+- 보류 중·폐기된 초안에 **품목을 추가하는 경로는 없다**(품목 추가 API 자체가 없고 DB 트리거는 `DRAFT`면 허용한다).
+- "외부 거래 없음"(ST-O09)은 초안에 결제·재고 예약이 없다는 전제로 구현했다. 다른 영역(결제·예약)이 초안 주문을 거부하는 기존 검증에 의존하며, 폐기 시점에 별도로 외부 거래를 검사하지 않는다.
+- ST-O04는 구현하지 않았다(DEC-08 승인 필요). `ordering.yaml`의 `Order`·`OrderSummary`에는 새 필드를 선언했고, 새 3개 경로는 `ordering-http.yaml`에 있으며 `OrderRecord` 스키마가 `Order`를 복제한다(파일 사이 참조를 검증기가 풀지 못함).
+- 화면(UI)은 만들지 않았다(API만).

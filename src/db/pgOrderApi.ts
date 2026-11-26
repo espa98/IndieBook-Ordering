@@ -49,9 +49,13 @@ export async function saveOrder(client: PoolClient, order: Order, before: Order 
   // 적재한 version과 같을 때만 갱신한다. 다르면 다른 세션이 먼저 바꾼 것이다
   const updated = await client.query(
     `update public.ordering_orders
-        set status = $3, version = $4, display_number = $5, total_krw = $6, closed_at = $7, cancelled_at = $8
+        set status = $3, version = $4, display_number = $5, total_krw = $6, closed_at = $7, cancelled_at = $8,
+            held_at = $10, hold_reason = $11, held_by = $12, discarded_at = $13, discard_reason = $14, discarded_by = $15
       where tenant_id = $1 and id = $2 and version = $9`,
-    [order.tenantId, order.id, order.status, order.version, order.displayNumber ?? null, order.totalKrw ?? null, order.closedAt ?? null, order.cancelledAt ?? null, before.version],
+    [
+      order.tenantId, order.id, order.status, order.version, order.displayNumber ?? null, order.totalKrw ?? null, order.closedAt ?? null, order.cancelledAt ?? null, before.version,
+      order.heldAt ?? null, order.holdReason ?? null, order.heldBy ?? null, order.discardedAt ?? null, order.discardReason ?? null, order.discardedBy ?? null,
+    ],
   );
   if (updated.rowCount !== 1) {
     throw new AppError("VERSION_CONFLICT");
@@ -98,7 +102,7 @@ export function createPgOrderApi(deps: { pool: PoolLike }) {
   async function write<T>(
     actor: Actor,
     request: { tenantId: string; idempotencyKey?: unknown; orderId?: string; lines?: { bookId?: unknown }[] },
-    options: { confirm: boolean },
+    options: { confirm: boolean; lock?: boolean },
     call: (api: ReturnType<typeof createOrderApi>) => T,
   ): Promise<T> {
     // 같은 멱등 키가 동시에 들어오면 한쪽의 저장이 유일 제약에 걸린다. 한 번 다시 시도하면 먼저 저장된 결과를 본다
@@ -109,7 +113,7 @@ export function createPgOrderApi(deps: { pool: PoolLike }) {
           const idempotency = await loadCommands(client, request.tenantId, request.idempotencyKey);
           const knownCommands = new Set(idempotency.keys());
           // 주문 생성은 기존 주문을 읽지 않는다(새 주문을 저장만 한다). 대상 주문이 있는 명령만 그 주문을 적재한다
-          const loaded = request.orderId === undefined ? [] : await loadOrders(client, request.tenantId, { orderId: request.orderId, lock: options.confirm ? "update" : undefined });
+          const loaded = request.orderId === undefined ? [] : await loadOrders(client, request.tenantId, { orderId: request.orderId, lock: options.confirm || options.lock ? "update" : undefined });
           const bookIds = (Array.isArray(request.lines) ? request.lines : [])
             .map((l) => (l && typeof l === "object" ? l.bookId : undefined))
             .filter((id): id is string => typeof id === "string");
@@ -191,6 +195,12 @@ export function createPgOrderApi(deps: { pool: PoolLike }) {
       write(actor, request, { confirm: true }, (api) => api.confirmOrder(actor, request)),
     getOrder: (actor: Actor, request: { tenantId: string; orderId: string }) =>
       read(actor, request, (api) => api.getOrder(actor, request)),
+    holdOrder: (actor: Actor, request: Parameters<ReturnType<typeof createOrderApi>["holdOrder"]>[1]) =>
+      write(actor, request, { confirm: false, lock: true }, (api) => api.holdOrder(actor, request)),
+    resumeOrder: (actor: Actor, request: Parameters<ReturnType<typeof createOrderApi>["resumeOrder"]>[1]) =>
+      write(actor, request, { confirm: false, lock: true }, (api) => api.resumeOrder(actor, request)),
+    discardOrder: (actor: Actor, request: Parameters<ReturnType<typeof createOrderApi>["discardOrder"]>[1]) =>
+      write(actor, request, { confirm: false, lock: true }, (api) => api.discardOrder(actor, request)),
     listOrders: (actor: Actor, request: Parameters<ReturnType<typeof createOrderApi>["listOrders"]>[1]) =>
       read(actor, request, (api) => api.listOrders(actor, request), pageOf(request)),
   };

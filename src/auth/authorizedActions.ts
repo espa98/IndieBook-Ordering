@@ -52,6 +52,9 @@ import { recordPurchaseOrderDelivery } from "../procurement/recordPurchaseOrderD
 import { releaseSourcing } from "../procurement/releaseSourcing";
 import { confirmOrderService } from "../order/confirmOrderService";
 import { createOrderService } from "../order/createOrderService";
+import { discardOrder } from "../order/discardOrder";
+import { holdOrder } from "../order/holdOrder";
+import { resumeOrder } from "../order/resumeOrder";
 import { allocateSourcing } from "../procurement/allocateSourcing";
 import { confirmPurchaseOrderCancellation } from "../procurement/confirmPurchaseOrderCancellation";
 import { createCancellationRequest } from "../procurement/createCancellationRequest";
@@ -147,6 +150,10 @@ export const authorizedActions = {
   // 행위자 필드가 없는 명령: 테넌트만 주체에서 주입한다
   confirmOrderService: bindActor(confirmOrderService, { allow: BOTH }),
   createOrderService: bindActor(createOrderService, { allow: BOTH }),
+  // 초안 보류·재개·폐기(ST-O02, ST-O09): Owner·Staff
+  holdOrder: bindActor(holdOrder, { nameField: "heldBy", allow: BOTH }),
+  resumeOrder: bindActor(resumeOrder, { nameField: "resumedBy", allow: BOTH }),
+  discardOrder: bindActor(discardOrder, { nameField: "discardedBy", allow: BOTH }),
   allocateSourcing: bindActor(allocateSourcing, { allow: BOTH }),
   confirmPurchaseOrderCancellation: bindActor(confirmPurchaseOrderCancellation, { allow: BOTH }),
   createCancellationRequest: bindActor(createCancellationRequest, { allow: BOTH }),

@@ -135,6 +135,21 @@ export function createApp(deps: AppDeps): ((request: AppRequest) => Promise<AppR
       run: (c) =>
         orders.confirmOrder(actor(c), { tenantId: t(c), orderId: c.params.orderId!, expectedVersion: c.body.expectedVersion as never, idempotencyKey: c.idempotencyKey }),
     }),
+    route("POST", "/orders/(?<orderId>[^/]+)/hold", {
+      success: 200,
+      fields: ["expectedVersion", "reason", "heldAt"],
+      run: (c) => orders.holdOrder(actor(c), merge(c, { tenantId: t(c), orderId: c.params.orderId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/orders/(?<orderId>[^/]+)/resume", {
+      success: 200,
+      fields: ["expectedVersion", "resumedAt"],
+      run: (c) => orders.resumeOrder(actor(c), merge(c, { tenantId: t(c), orderId: c.params.orderId!, idempotencyKey: c.idempotencyKey })),
+    }),
+    route("POST", "/orders/(?<orderId>[^/]+)/discard", {
+      success: 200,
+      fields: ["expectedVersion", "reason", "discardedAt"],
+      run: (c) => orders.discardOrder(actor(c), merge(c, { tenantId: t(c), orderId: c.params.orderId!, idempotencyKey: c.idempotencyKey })),
+    }),
     route("POST", "/orders/(?<orderId>[^/]+)/lines/(?<lineId>[^/]+)/stock-reservations", {
       success: 201,
       fields: ["quantity", "reservedAt"],

@@ -4091,6 +4091,185 @@ paths:
           $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/orders/{orderId}/hold:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: orderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [orders]
+      operationId: holdOrder
+      summary: 초안 보류 (ST-O02)
+      description: |
+        `DRAFT` 초안을 보류한다. 상태는 `DRAFT` 그대로이고 `heldAt`·`holdReason`이 채워진다(`version`+1). 보류 중인 초안은 확정할 수 없다(확정 전 조달 금지).
+        확정된 주문·이미 보류 중인 초안·폐기된 초안은 422 `BUSINESS_INVARIANT`. 담당자는 토큰에서 도출한다.
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion, reason, heldAt]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 1 }
+                heldAt: { type: string, format: date-time }
+      responses:
+        "200":
+          description: 성공(`data`는 주문)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/OrderRecord" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "413":
+          $ref: "ordering.yaml#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/orders/{orderId}/resume:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: orderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [orders]
+      operationId: resumeOrder
+      summary: 보류 재개 (ST-O02)
+      description: |
+        보류 중인 초안을 재개한다. `heldAt`·`holdReason`이 지워지고 `version`+1이 된다. 보류 중이 아닌 주문은 422 `BUSINESS_INVARIANT`.
+        보류·재개 이력은 감사 로그에 남는다.
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion, resumedAt]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+                resumedAt: { type: string, format: date-time }
+      responses:
+        "200":
+          description: 성공(`data`는 주문)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/OrderRecord" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "413":
+          $ref: "ordering.yaml#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/orders/{orderId}/discard:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: orderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [orders]
+      operationId: discardOrder
+      summary: 초안 폐기 (ST-O09)
+      description: |
+        외부 거래가 없는 `DRAFT` 초안(보류 중이어도)을 폐기한다. 상태는 `DRAFT` 그대로이고 `discardedAt`·`discardReason`이 채워지며(`version`+1) 품목 등 이력은 보존된다.
+        폐기는 되돌릴 수 없다: 이후 보류·재개·확정·재폐기는 422 `BUSINESS_INVARIANT`. 확정된 주문은 폐기할 수 없다.
+      parameters:
+        - $ref: "ordering.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion, reason, discardedAt]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 1 }
+                discardedAt: { type: string, format: date-time }
+      responses:
+        "200":
+          description: 성공(`data`는 주문)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/OrderRecord" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "ordering.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "ordering.yaml#/components/responses/BusinessInvariant"
+        "413":
+          $ref: "ordering.yaml#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "ordering.yaml#/components/responses/UnsupportedMediaType"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
 
 components:
   securitySchemes:
@@ -4099,6 +4278,36 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    OrderRecord:
+      type: object
+      description: 보류·재개·폐기 응답의 주문. `ordering.yaml`의 `Order`와 같은 형태다(파일 사이 참조를 검증기가 풀지 못해 여기에 둔다).
+      additionalProperties: false
+      required: [id, status, version, createdAt, lines]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [DRAFT, CONFIRMED] }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        displayNumber: { type: integer }
+        totalKrw: { type: string, pattern: "^(0|[1-9][0-9]*)$" }
+        heldAt: { type: string, format: date-time }
+        holdReason: { type: string }
+        discardedAt: { type: string, format: date-time }
+        discardReason: { type: string }
+        lines:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [lineId, bookId, quantity, unitPriceKrw]
+            properties:
+              lineId: { type: string, format: uuid }
+              bookId: { type: string }
+              quantity: { type: integer, minimum: 1 }
+              unitPriceKrw: { type: string, pattern: "^(0|[1-9][0-9]*)$" }
+              bookTitle: { type: string }
+              bookIsbn: { type: string }
+              listPriceKrw: { type: string, pattern: "^(0|[1-9][0-9]*)$" }
     DuplicateRiskApproval:
       type: object
       required: [id, tenantId, orderId, lineId, purchaseOrderId, poLineId, surplusPlan, planNote, approvedBy, approvedAt, recordedAt]

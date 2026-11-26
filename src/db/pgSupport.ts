@@ -185,6 +185,12 @@ type OrderRow = {
   created_at: Date;
   closed_at: Date | null;
   cancelled_at: Date | null;
+  held_at: Date | null;
+  hold_reason: string | null;
+  held_by: string | null;
+  discarded_at: Date | null;
+  discard_reason: string | null;
+  discarded_by: string | null;
 };
 type LineRow = {
   id: string;
@@ -219,6 +225,8 @@ export function toOrder(row: OrderRow, lines: LineRow[]): Order {
     ...(row.display_number === null ? {} : { displayNumber: Number(row.display_number) }),
     ...(row.closed_at === null ? {} : { closedAt: row.closed_at.toISOString() }),
     ...(row.cancelled_at === null ? {} : { cancelledAt: row.cancelled_at.toISOString() }),
+    ...(row.held_at === null ? {} : { heldAt: row.held_at.toISOString(), holdReason: row.hold_reason ?? "", heldBy: row.held_by ?? "" }),
+    ...(row.discarded_at === null ? {} : { discardedAt: row.discarded_at.toISOString(), discardReason: row.discard_reason ?? "", discardedBy: row.discarded_by ?? "" }),
   };
 }
 

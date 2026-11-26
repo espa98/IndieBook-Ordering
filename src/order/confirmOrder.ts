@@ -35,6 +35,12 @@ export function confirmOrder(
       "only a DRAFT order can be confirmed",
     );
   }
+  if (order.discardedAt !== undefined) {
+    throw new AppError("BUSINESS_INVARIANT", "a discarded order cannot be confirmed");
+  }
+  if (order.heldAt !== undefined) {
+    throw new AppError("BUSINESS_INVARIANT", "a held order must be resumed before it can be confirmed");
+  }
   if (order.lines.length === 0) {
     throw new AppError(
       "BUSINESS_INVARIANT",
