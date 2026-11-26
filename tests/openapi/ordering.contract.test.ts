@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 import SwaggerParser from "@apidevtools/swagger-parser";
@@ -9,6 +9,9 @@ import { createIdempotencyStore } from "../../src/idempotency/executeIdempotent"
 import { createInMemoryOrderRepository } from "../helpers/inMemoryOrderRepository";
 import { createInMemoryMembershipRepository } from "../helpers/inMemoryMembershipRepository";
 import { createApp } from "../../src/http/app";
+import { createHttpServer } from "../../src/http/server";
+import type { AddressInfo } from "node:net";
+import type { Server } from "node:http";
 import { signHs256 } from "../helpers/jwtSign";
 
 const SPEC_PATH = fileURLToPath(new URL("../../openapi/ordering.yaml", import.meta.url));
@@ -127,6 +130,29 @@ async function callHttp(options: { method: string; path: string; query?: string;
   });
   return { status: response.status, body: response.body };
 }
+/**
+ * 413은 서버 계층(`server.ts`)이 본문을 읽는 단계에서 내므로 앱 함수만 호출해서는 만들 수 없다. 작은 상한(4 KiB)의 실제 소켓 서버를 이 파일에서 한 번 띄워 요청한다.
+ * 상한을 넘는 본문은 앱에 닿기 전에 끝나므로 DB가 필요 없다.
+ */
+const OVERSIZED = 4 * 1024;
+let sockServer: Server | undefined;
+let sockBase = "";
+beforeAll(async () => {
+  sockServer = createHttpServer(httpApp, { maxBodyBytes: OVERSIZED });
+  await new Promise<void>((resolve) => sockServer!.listen(0, "127.0.0.1", resolve));
+  sockBase = `http://127.0.0.1:${(sockServer.address() as AddressInfo).port}`;
+});
+afterAll(async () => {
+  await new Promise<void>((resolve) => (sockServer ? sockServer.close(() => resolve()) : resolve()));
+});
+const tooLarge = (path: string) => async () => {
+  const response = await fetch(sockBase + path.replace("{tenantId}", SOME_ID).replace("{orderId}", SOME_ID), {
+    method: "POST",
+    headers: { authorization: httpBearer(), "content-type": "application/json", "idempotency-key": "k-1" },
+    body: JSON.stringify({ pad: "x".repeat(OVERSIZED + 1) }),
+  });
+  return { status: response.status, body: await response.json() };
+};
 const wrongMethod = (path: string) => () => callHttp({ method: "DELETE", path });
 const notJson = (path: string) => () => callHttp({ method: "POST", path, headers: { "idempotency-key": "k-1", "content-type": "text/plain" }, rawBody: "{}" });
 
@@ -160,6 +186,8 @@ const scenarios: Scenario[] = [
   { label: "허용되지 않는 메서드", method: "get", path: O, status: 405, run: wrongMethod(O) },
   { label: "허용되지 않는 메서드", method: "post", path: O, status: 405, run: wrongMethod(O) },
   { label: "Content-Type이 JSON이 아님", method: "post", path: O, status: 415, run: notJson(O) },
+  { label: "본문이 상한을 넘음", method: "post", path: O, status: 413, run: tooLarge(O) },
+  { label: "본문이 상한을 넘음", method: "post", path: CONFIRM, status: 413, run: tooLarge(CONFIRM) },
   { label: "알 수 없는 쿼리", method: "get", path: OID, status: 400, run: () => callHttp({ method: "GET", path: OID, query: "__unknown__=1" }) },
   { label: "허용되지 않는 메서드", method: "get", path: OID, status: 405, run: wrongMethod(OID) },
   { label: "허용되지 않는 메서드", method: "post", path: CONFIRM, status: 405, run: wrongMethod(CONFIRM) },

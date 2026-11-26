@@ -134,6 +134,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "415":
           $ref: "#/components/responses/UnsupportedMediaType"
         "405":
@@ -211,6 +213,8 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/BusinessInvariant"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "415":
           $ref: "#/components/responses/UnsupportedMediaType"
         "405":
@@ -428,6 +432,7 @@ components:
                 - INTERNAL_ERROR
                 - METHOD_NOT_ALLOWED
                 - UNSUPPORTED_MEDIA_TYPE
+                - PAYLOAD_TOO_LARGE
             message:
               type: string
               description: |
@@ -537,6 +542,18 @@ components:
                     properties:
                       code:
                         const: METHOD_NOT_ALLOWED
+    PayloadTooLarge:
+      description: 요청 본문이 서버의 상한(기본 1 MiB, `MAX_BODY_BYTES`)을 넘음. 본문을 읽는 단계에서 나오므로 인증·경로 확인보다 앞서며, 토큰이 없거나 경로가 없어도 같은 응답이다.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ErrorBody"
+              - properties:
+                  error:
+                    properties:
+                      code:
+                        const: PAYLOAD_TOO_LARGE
     UnsupportedMediaType:
       description: 본문의 `Content-Type`이 `application/json`이 아님
       content:
