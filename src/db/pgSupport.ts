@@ -58,6 +58,13 @@ export async function inTransaction<T>(
   run: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
   const client = await pool.connect();
+  // 빌려 간 연결의 소켓 오류(서버가 연결을 끊음 등)는 풀이 아니라 연결이 내보낸다. 받는 쪽이 없으면 프로세스가 죽는다.
+  // 진행 중인 질의는 자체 오류로 실패하므로 여기서는 삼키고, 끊긴 연결은 풀에 돌려주지 않고 폐기한다.
+  let broken: Error | undefined;
+  const onError = (error: Error) => {
+    broken = error;
+  };
+  client.on("error", onError);
   try {
     await client.query("begin");
     try {
@@ -85,7 +92,8 @@ export async function inTransaction<T>(
       throw error;
     }
   } finally {
-    client.release();
+    client.removeListener("error", onError);
+    client.release(broken);
   }
 }
 
