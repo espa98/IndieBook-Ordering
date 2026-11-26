@@ -234,6 +234,8 @@ export type OrderPage = {
   /** 한 페이지 크기. 다음 페이지 유무를 알려고 하나 더 읽는다 */
   limit: number;
   status?: Order["status"];
+  /** 폐기된 초안도 읽는다. 기본은 제외(폐기분이 페이지를 채우지 않게 SQL에서 거른다) */
+  includeDiscarded?: boolean;
   /** 이 키보다 뒤(더 오래된)의 주문만. (createdAt, id) 내림차순 */
   after?: { createdAt: string; id: string };
 };
@@ -261,6 +263,7 @@ export async function loadOrders(
       params.push(page.status);
       where.push(`status = $${params.length}`);
     }
+    if (page.includeDiscarded !== true) where.push("discarded_at is null");
     if (page.after) {
       params.push(page.after.createdAt, page.after.id);
       where.push(`(created_at, id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`);

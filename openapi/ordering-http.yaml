@@ -1277,6 +1277,46 @@ paths:
           $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
         "500":
           $ref: "ordering.yaml#/components/responses/InternalError"
+  /v1/tenants/{tenantId}/orders/{orderId}/history:
+    parameters:
+      - $ref: "ordering.yaml#/components/parameters/TenantId"
+      - name: orderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [reads]
+      operationId: getOrderHistory
+      summary: 주문 보류·재개·폐기 이력
+      description: |
+        초안의 보류(ST-O02)·재개·폐기(ST-O09) 이력을 오래된 순으로 돌려준다. 재개·폐기 뒤에도 보류 사유가 남는다(추가 전용).
+        `by`는 인증된 사용자 ID이고 `at`은 요청이 알린 업무 발생 시각이다. 다른 서점의 주문과 없는 주문은 같은 404.
+      responses:
+        "200":
+          description: 성공(`data`는 이력 배열, 이력이 없으면 빈 배열)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/OrderEvent" }
+        "400":
+          $ref: "ordering.yaml#/components/responses/ValidationError"
+        "401":
+          $ref: "ordering.yaml#/components/responses/Unauthenticated"
+        "403":
+          $ref: "ordering.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "ordering.yaml#/components/responses/NotFound"
+        "405":
+          $ref: "ordering.yaml#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "ordering.yaml#/components/responses/InternalError"
   /v1/tenants/{tenantId}/orders/{orderId}/payments:
     parameters:
       - $ref: "ordering.yaml#/components/parameters/TenantId"
@@ -4278,6 +4318,15 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    OrderEvent:
+      type: object
+      additionalProperties: false
+      required: [kind, by, at]
+      properties:
+        kind: { type: string, enum: [HOLD, RESUME, DISCARD] }
+        reason: { type: string, description: 보류·폐기에만 있다 }
+        by: { type: string }
+        at: { type: string, format: date-time }
     OrderRecord:
       type: object
       description: 보류·재개·폐기 응답의 주문. `ordering.yaml`의 `Order`와 같은 형태다(파일 사이 참조를 검증기가 풀지 못해 여기에 둔다).

@@ -19,11 +19,25 @@ function orderAt(id: string, createdAt: string) {
 }
 
 describe("listOrders", () => {
+  it("폐기된 초안은 기본적으로 목록에서 빠지고, includeDiscarded를 켜면 나온다(페이지네이션도 폐기분을 건너뛴다)", () => {
+    const keep1 = orderAt("id-a", "2026-01-01T00:00:00.000Z");
+    const gone = { ...orderAt("id-b", "2026-01-02T00:00:00.000Z"), discardedAt: "2026-01-02T01:00:00.000Z", discardReason: "철회", discardedBy: "u" };
+    const keep2 = orderAt("id-c", "2026-01-03T00:00:00.000Z");
+    const orders = createInMemoryOrderRepository([keep1, gone, keep2]);
+
+    expect(listOrders({ orders }, { tenantId: "tenant-a" }).items.map((i) => i.id)).toEqual(["id-c", "id-a"]);
+    expect(listOrders({ orders }, { tenantId: "tenant-a", includeDiscarded: true }).items.map((i) => i.id)).toEqual(["id-c", "id-b", "id-a"]);
+    const first = listOrders({ orders }, { tenantId: "tenant-a", limit: 1 });
+    expect(first.items.map((i) => i.id)).toEqual(["id-c"]);
+    expect(listOrders({ orders }, { tenantId: "tenant-a", limit: 1, cursor: first.nextCursor }).items.map((i) => i.id)).toEqual(["id-a"]);
+    expect(() => listOrders({ orders }, { tenantId: "tenant-a", includeDiscarded: "yes" as never })).toThrow(/includeDiscarded/);
+  });
+
   it("보류·폐기 시각을 요약에 싣는다(목록에서 보류·폐기 초안을 구별할 수 있다). 해당 없으면 필드가 없다", () => {
     const plain = orderAt("id-a", "2026-01-01T00:00:00.000Z");
     const held = { ...orderAt("id-b", "2026-01-02T00:00:00.000Z"), heldAt: "2026-01-02T01:00:00.000Z", holdReason: "확인", heldBy: "김직원" };
     const discarded = { ...orderAt("id-c", "2026-01-03T00:00:00.000Z"), discardedAt: "2026-01-03T01:00:00.000Z", discardReason: "철회", discardedBy: "이직원" };
-    const page = listOrders({ orders: createInMemoryOrderRepository([plain, held, discarded]) }, { tenantId: "tenant-a" });
+    const page = listOrders({ orders: createInMemoryOrderRepository([plain, held, discarded]) }, { tenantId: "tenant-a", includeDiscarded: true });
 
     const byId = Object.fromEntries(page.items.map((i) => [i.id, i]));
     expect(byId["id-b"]).toMatchObject({ heldAt: "2026-01-02T01:00:00.000Z" });

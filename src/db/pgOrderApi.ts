@@ -74,10 +74,11 @@ type Actor = { userId: string };
  * 목록 요청을 SQL 페이지로 바꾼다. 형식이 틀린 요청(한도·상태·커서)과 DB에 있을 수 없는 커서는 "none"이다:
  * 도메인이 인증을 확인한 뒤 같은 검증 오류로 거부하므로 순서가 전과 같고, 전체 적재를 강제할 수도 없다.
  */
-function pageOf(request: { limit?: number; cursor?: string; status?: Order["status"] }): OrderPage | "none" {
+function pageOf(request: { limit?: number; cursor?: string; status?: Order["status"]; includeDiscarded?: boolean }): OrderPage | "none" {
   const limit = request.limit ?? DEFAULT_LIMIT;
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) return "none";
   if (request.status !== undefined && !ORDER_STATUSES.includes(request.status)) return "none";
+  if (request.includeDiscarded !== undefined && typeof request.includeDiscarded !== "boolean") return "none";
   let after: OrderPage["after"];
   if (request.cursor !== undefined) {
     try {
@@ -89,7 +90,7 @@ function pageOf(request: { limit?: number; cursor?: string; status?: Order["stat
       return "none";
     }
   }
-  return { limit, ...(request.status !== undefined ? { status: request.status } : {}), ...(after ? { after } : {}) };
+  return { limit, ...(request.status !== undefined ? { status: request.status } : {}), ...(request.includeDiscarded === true ? { includeDiscarded: true } : {}), ...(after ? { after } : {}) };
 }
 
 /**
@@ -102,7 +103,7 @@ export function createPgOrderApi(deps: { pool: PoolLike }) {
   async function write<T>(
     actor: Actor,
     request: { tenantId: string; idempotencyKey?: unknown; orderId?: string; lines?: { bookId?: unknown }[] },
-    options: { confirm: boolean; lock?: boolean },
+    options: { confirm: boolean; lock?: boolean; event?: { kind: "HOLD" | "RESUME" | "DISCARD"; reason?: string; at: string } },
     call: (api: ReturnType<typeof createOrderApi>) => T,
   ): Promise<T> {
     // 같은 멱등 키가 동시에 들어오면 한쪽의 저장이 유일 제약에 걸린다. 한 번 다시 시도하면 먼저 저장된 결과를 본다
@@ -143,6 +144,13 @@ export function createPgOrderApi(deps: { pool: PoolLike }) {
 
           for (const order of saved.values()) {
             await saveOrder(client, order, before.get(order.id));
+          }
+          // 보류·재개·폐기 이력: 이번 요청이 실제로 주문을 바꾼 경우에만(멱등 재시도는 저장하지 않으므로 중복되지 않는다)
+          if (options.event && saved.size > 0 && request.orderId !== undefined) {
+            await client.query(
+              "insert into public.ordering_order_events (tenant_id, order_id, kind, reason, actor_id, occurred_at) values ($1, $2, $3, $4, $5, $6)",
+              [request.tenantId, request.orderId, options.event.kind, options.event.reason ?? null, actor.userId, options.event.at],
+            );
           }
           if (counter !== counterStart && options.confirm) {
             await client.query("update public.ordering_counters set order_number = $2 where tenant_id = $1", [request.tenantId, counter]);
@@ -196,11 +204,11 @@ export function createPgOrderApi(deps: { pool: PoolLike }) {
     getOrder: (actor: Actor, request: { tenantId: string; orderId: string }) =>
       read(actor, request, (api) => api.getOrder(actor, request)),
     holdOrder: (actor: Actor, request: Parameters<ReturnType<typeof createOrderApi>["holdOrder"]>[1]) =>
-      write(actor, request, { confirm: false, lock: true }, (api) => api.holdOrder(actor, request)),
+      write(actor, request, { confirm: false, lock: true, event: { kind: "HOLD", reason: request.reason, at: request.heldAt } }, (api) => api.holdOrder(actor, request)),
     resumeOrder: (actor: Actor, request: Parameters<ReturnType<typeof createOrderApi>["resumeOrder"]>[1]) =>
-      write(actor, request, { confirm: false, lock: true }, (api) => api.resumeOrder(actor, request)),
+      write(actor, request, { confirm: false, lock: true, event: { kind: "RESUME", at: request.resumedAt } }, (api) => api.resumeOrder(actor, request)),
     discardOrder: (actor: Actor, request: Parameters<ReturnType<typeof createOrderApi>["discardOrder"]>[1]) =>
-      write(actor, request, { confirm: false, lock: true }, (api) => api.discardOrder(actor, request)),
+      write(actor, request, { confirm: false, lock: true, event: { kind: "DISCARD", reason: request.reason, at: request.discardedAt } }, (api) => api.discardOrder(actor, request)),
     listOrders: (actor: Actor, request: Parameters<ReturnType<typeof createOrderApi>["listOrders"]>[1]) =>
       read(actor, request, (api) => api.listOrders(actor, request), pageOf(request)),
   };

@@ -155,6 +155,8 @@ export type AuditLogEntry = {
   targets: Record<string, string>;
   recordedAt: string;
 };
+/** 주문 보류·재개·폐기 이력의 한 줄 */
+export type OrderEventView = { kind: "HOLD" | "RESUME" | "DISCARD"; reason?: string; by: string; at: string };
 export type ListAuditLogRequest = { tenantId: string; limit?: number; cursor?: string; actorId?: string };
 
 export type ListBooksRequest = { tenantId: string; limit?: number; cursor?: string; isbn?: string };
@@ -317,6 +319,15 @@ export function createPgReadApi(deps: { pool: PoolLike; now?: () => Date }) {
         const page = rows.slice(0, limit);
         const last = page[page.length - 1];
         return { items: page.map(toStockLevel), ...(rows.length > limit && last ? { nextCursor: encodeCursor([last.book_key]) } : {}) };
+      }),
+
+    /** 주문의 보류·재개·폐기 이력(오래된 순). 재개·폐기 뒤에도 사유가 남는다 */
+    getOrderHistory: (actor: Actor, request: { tenantId: string; orderId: string }): Promise<OrderEventView[]> =>
+      asMember(actor, request.tenantId, async (client) => {
+        const [order] = await loadOrders(client, request.tenantId, { orderId: request.orderId });
+        if (!order) throw new AppError("NOT_FOUND");
+        const rows = (await client.query("select kind, reason, actor_id, occurred_at from public.ordering_order_events where tenant_id = $1 and order_id = $2 order by seq", [request.tenantId, order.id])).rows;
+        return rows.map((r): OrderEventView => ({ kind: r.kind, ...(r.reason === null ? {} : { reason: r.reason }), by: r.actor_id, at: (r.occurred_at as Date).toISOString() }));
       }),
 
     /** 주문의 결제·환급 원장과 파생 요약. 결제 증빙은 민감 정보라 활성 멤버만 읽는다(RLS-03) */

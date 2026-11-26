@@ -129,7 +129,7 @@ describe("초안 폐기 (ST-O09, Postgres)", () => {
     await hold(owner, held.id, 1);
     const gone = await draft();
     await discard(owner, gone.id, 1);
-    const page = await api().listOrders(owner, { tenantId: T, limit: 100 });
+    const page = await api().listOrders(owner, { tenantId: T, limit: 100, includeDiscarded: true });
     const byId = Object.fromEntries(page.items.map((i) => [i.id, i as { heldAt?: string; discardedAt?: string }]));
     expect(byId[held.id]?.heldAt).toBe(PAST);
     expect(byId[gone.id]?.discardedAt).toBe(PAST);
@@ -151,5 +151,29 @@ describe("초안 폐기 (ST-O09, Postgres)", () => {
     } finally {
       await c.end();
     }
+  });
+
+  it("폐기된 초안은 목록에서 기본 제외되고(페이지는 폐기분을 건너뛰어 채워진다), includeDiscarded를 켜면 나온다", async () => {
+    const keep = await draft();
+    const gone = await draft();
+    await discard(owner, gone.id, 1);
+    // 가장 최근 주문 여러 건이 모두 폐기여도 페이지가 폐기분에 막히지 않고 다음 페이지로 이어져야 한다
+    for (let i = 0; i < 5; i++) await discard(owner, (await draft()).id, 1);
+    const all = [];
+    let cursor: string | undefined;
+    do {
+      const page = await api().listOrders(owner, { tenantId: T, limit: 3, ...(cursor ? { cursor } : {}) });
+      all.push(...page.items);
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(all.some((i) => i.id === gone.id)).toBe(false);
+    expect(all.some((i) => i.id === keep.id)).toBe(true);
+    expect(all.every((i) => (i as { discardedAt?: string }).discardedAt === undefined)).toBe(true);
+    const nonDiscardedInDb = (await rows("select count(*)::int as n from public.ordering_orders where tenant_id = $1 and discarded_at is null", [T]))[0].n;
+    expect(all.length, "폐기분을 뺀 모든 주문이 페이지를 따라 나와야 한다").toBe(nonDiscardedInDb);
+
+    const withGone = await api().listOrders(owner, { tenantId: T, limit: 100, includeDiscarded: true });
+    expect(withGone.items.some((i) => i.id === gone.id)).toBe(true);
+    expect(await codeOf(() => api().listOrders(owner, { tenantId: T, includeDiscarded: "yes" as never }))).toBe("VALIDATION_ERROR");
   });
 });

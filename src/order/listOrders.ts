@@ -50,6 +50,8 @@ export function listOrders(
     limit?: number;
     cursor?: string;
     status?: Order["status"];
+    /** 폐기된 초안(ST-O09)도 포함한다. 기본은 제외 */
+    includeDiscarded?: boolean;
   },
 ): { items: OrderSummary[]; nextCursor?: string } {
   const limit = request.limit ?? DEFAULT_LIMIT;
@@ -62,8 +64,12 @@ export function listOrders(
   ) {
     throw new AppError("VALIDATION_ERROR", "invalid status");
   }
+  if (request.includeDiscarded !== undefined && typeof request.includeDiscarded !== "boolean") {
+    throw new AppError("VALIDATION_ERROR", "includeDiscarded must be a boolean");
+  }
   const sorted = deps.orders
     .list(request.tenantId)
+    .filter((o) => request.includeDiscarded === true || o.discardedAt === undefined)
     .filter((o) => request.status === undefined || o.status === request.status)
     .sort(compareNewestFirst);
   const after =

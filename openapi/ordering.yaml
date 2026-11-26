@@ -71,6 +71,13 @@ paths:
           required: false
           schema:
             $ref: "#/components/schemas/OrderStatus"
+        - name: includeDiscarded
+          in: query
+          required: false
+          description: 폐기된 초안(ST-O09)도 포함한다. 기본(생략·`false`)은 제외하며, 요약의 `discardedAt`으로 구별한다. `true`·`false` 외의 값은 400.
+          schema:
+            type: boolean
+            default: false
         - name: cursor
           in: query
           required: false

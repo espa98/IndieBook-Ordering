@@ -24,14 +24,14 @@ SEC-SECRET-SCAN,security,저장소 시크릿·프로젝트 ID 정적 점검,stat
 SEC-NETWORK,security,도메인 코드의 외부 호출·환경변수 사용,static,PASS,src에서 process.env·fetch(·http(s):// grep 결과 없음,PG 승인·환불·알림 발송을 호출하지 않음
 SEC-FORBIDDEN-DB,security,testBookshare 접근 금지 준수,process,PASS,이 세션에서 testBookshare·ordering-dev에 접속하지 않음,
 ST-O01,requirement,주문 초안 생성,domain,PASS,tests/order + tests/order/createOrderCatalog·orderApiCatalog,05단계. 주문 API는 카탈로그 도서만 허용하고 제목·ISBN·정가 스냅샷 저장(BOOK-007)
-ST-O02,requirement,주문 보류/재개,domain,PASS,tests/order/holdOrder + resumeOrder + confirmOrder + tests/db/pgOrderHoldDiscard + atomicRollback + responseContract,상태 값(HELD)은 늘리지 않고 heldAt·holdReason 필드로 표현(사용자 결정). 보류 중 확정 거부. 재개하면 필드 삭제(이력은 감사 로그만)
+ST-O02,requirement,주문 보류/재개,domain,PASS,tests/order/holdOrder + resumeOrder + confirmOrder + tests/db/pgOrderHoldDiscard + atomicRollback + responseContract,상태 값(HELD)은 늘리지 않고 heldAt·holdReason 필드로 표현(사용자 결정). 보류 중 확정 거부. 재개하면 보류 필드 삭제, 사유는 ordering_order_events 이력에 보존(GET /orders/{id}/history)
 ST-O03,requirement,주문 확정,domain,PASS,tests/order + tests/http,05단계
-ST-O04,requirement,가격/품목 변경,domain,NOT_IMPLEMENTED,DEC-08 승인 전 비활성,릴리스 차단 조건(미승인 정책). 2026-11-26 사용자 결정: DEC-08 승인 전까지 구현하지 않는다
+ST-O04,requirement,가격/품목 변경,domain,NOT_IMPLEMENTED,DEC-08 승인 전 비활성,릴리스 차단 조건(미승인 정책). 2026-11-26 사용자 결정: DEC-08 승인 전까지 구현하지 않는다. 열려 있지 않음을 tests/db/confirmedOrderChangeBlocked로 고정(서버 경로 없음·DB 거부)
 ST-O05,requirement,부분 취소(요청·승인·적용),domain,PARTIAL,tests/cancellation 5 files / 25 tests passed,공급처 의무는 BR-P05(supplierObligations)로 종결 차단·재조달 승인만 부분 구현. 미응답·거절 발주 판정과 발주 수량 자동 조정은 없음
 ST-O06,requirement,전량 취소 확정(CANCELLING),domain,PARTIAL,tests/cancellation/cancellingOrder·applyOrderCancellation,공급처 의무는 BR-P05(supplierObligations)로 종결 차단·재조달 승인만 부분 구현. 발주 수량 자동 조정은 없음
 ST-O07,requirement,주문 종결(요청+서버 실행),domain,PARTIAL,tests/closure 4 files / 15 tests passed,공급처 외부 의무(EXTERNAL_OBLIGATION_OPEN)는 supplierObligations 의존성을 연결해야 검사됨
 ST-O08,requirement,취소 종결,domain,PARTIAL,tests/cancellation/closeCancelledOrder 2 tests,기존 종결 판정 재사용·outcome=CANCELLED 기록. 공급처 외부 의무 차단은 supplierObligations 의존성을 연결해야 동작
-ST-O09,requirement,초안 폐기,domain,PASS,tests/order/discardOrder + tests/db/pgOrderHoldDiscard + atomicRollback + responseContract,상태 값(CANCELLED)은 늘리지 않고 discardedAt·discardReason 필드로 표현(사용자 결정). 되돌릴 수 없음(DB 트리거). 이력(품목) 보존
+ST-O09,requirement,초안 폐기,domain,PASS,tests/order/discardOrder + tests/db/pgOrderHoldDiscard + atomicRollback + responseContract,상태 값(CANCELLED)은 늘리지 않고 discardedAt·discardReason 필드로 표현(사용자 결정). 되돌릴 수 없음(DB 트리거). 이력(품목) 보존, 목록에서 기본 제외(includeDiscarded)
 ST-O10,requirement,종결 후 정정·재개,domain,PARTIAL,tests/reopening 1 file / 6 tests passed,결제 보정·수령 정정을 근거로 인정
 ST-P01,requirement,조달 배정,domain,PASS,tests/procurement,06단계
 ST-P02,requirement,미이행 배정 해제,domain,PARTIAL,tests/procurement/releaseSourcing 4 tests,발주 미연결·전달된 발주 연결 배정 해제와 유지 의무 기록. 입고 배분·수령 이행분 검사와 공급처 의무는 BR-P05(supplierObligations)로 종결 차단·재조달 승인까지만

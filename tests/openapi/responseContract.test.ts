@@ -321,9 +321,14 @@ describe("응답 계약(쓰기): 초안 보류·재개·폐기", () => {
 
     for (const { template } of checked) expect(declared(template, "post"), `${template} data 스키마`).toBe(true);
     for (const { template, body } of checked) expect(conforms(template, body, "post"), template).toMatchObject({ ok: true });
+    const history = await call("GET", `/orders/${orderId}/history`);
+    expect(history.status).toBe(200);
+    expect(history.body.data.map((e: { kind: string }) => e.kind)).toEqual(["HOLD", "RESUME", "DISCARD"]);
+    expect(declared("/orders/{orderId}/history", "get"), "이력 data 스키마").toBe(true);
+    expect(conforms("/orders/{orderId}/history", history.body, "get"), "이력").toMatchObject({ ok: true });
     const detail = await call("GET", `/orders/${orderId}`);
     expect(detail.body.data).toMatchObject({ discardedAt: "2026-03-04T06:30:00.000Z", discardReason: "고객 철회" });
-    const list = await call("GET", "/orders");
+    const list = await call("GET", "/orders", undefined, "includeDiscarded=true");
     expect(JSON.stringify(list.body.data.items)).toContain("discardedAt");
   });
 });
