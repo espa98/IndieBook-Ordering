@@ -163,3 +163,26 @@ describe("주문 목록 인덱스", () => {
     }
   });
 });
+
+describe("주문 생성은 기존 주문을 읽지 않는다", () => {
+  it("서점에 주문이 120건 있어도 새 주문 생성이 읽은 주문·품목 행은 0이고, 생성·멱등 재시도는 전과 같이 동작한다", async () => {
+    const BOOK = "b0000000-0000-4000-8000-000000000006";
+    const c = await db.connect();
+    await c.query(
+      `insert into public.ordering_books (id, tenant_id, title, authors, isbn, list_price_krw, source, manual_reason, created_by, created_at) values ($1, $2, '생성 책', '{}', null, 10000, 'MANUAL', '시험', 'seed', now())`,
+      [BOOK, T],
+    );
+    await c.end();
+    const api = createPgOrderApi({ pool: spyPool() });
+    fetched.length = 0;
+    const request = { tenantId: T, idempotencyKey: "create-1", lines: [{ bookId: BOOK, quantity: 1, unitPriceKrw: "10000" }] };
+    const created = await api.createOrder({ userId: OWNER }, request);
+    expect(created).toMatchObject({ status: "DRAFT", version: 1 });
+    const orderRows = fetched.filter((f) => /from public\.ordering_orders/.test(f.sql)).reduce((n, f) => n + f.rows, 0);
+    const lineRows = fetched.filter((f) => /from public\.ordering_order_lines/.test(f.sql)).reduce((n, f) => n + f.rows, 0);
+    expect(orderRows, "주문 행").toBe(0);
+    expect(lineRows, "품목 행").toBe(0);
+    expect((await api.createOrder({ userId: OWNER }, request)).id).toBe(created.id); // 같은 멱등 키는 같은 주문
+    expect((await api.getOrder({ userId: OWNER }, { tenantId: T, orderId: created.id })).id).toBe(created.id);
+  });
+});

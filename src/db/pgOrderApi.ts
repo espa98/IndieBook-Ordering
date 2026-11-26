@@ -108,7 +108,8 @@ export function createPgOrderApi(deps: { pool: PoolLike }) {
           const memberships = await loadMembership(client, actor.userId, request.tenantId);
           const idempotency = await loadCommands(client, request.tenantId, request.idempotencyKey);
           const knownCommands = new Set(idempotency.keys());
-          const loaded = await loadOrders(client, request.tenantId, { orderId: request.orderId, lock: options.confirm ? "update" : undefined });
+          // 주문 생성은 기존 주문을 읽지 않는다(새 주문을 저장만 한다). 대상 주문이 있는 명령만 그 주문을 적재한다
+          const loaded = request.orderId === undefined ? [] : await loadOrders(client, request.tenantId, { orderId: request.orderId, lock: options.confirm ? "update" : undefined });
           const bookIds = (Array.isArray(request.lines) ? request.lines : [])
             .map((l) => (l && typeof l === "object" ? l.bookId : undefined))
             .filter((id): id is string => typeof id === "string");
